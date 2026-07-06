@@ -54,6 +54,7 @@ public final class AnthropicPolicy implements AgentPolicy {
     private final int maxTokens;
     private final ToolRegistry tools;
     private final ObjectMapper mapper = new ObjectMapper();
+    private volatile java.util.function.Supplier<String> memoryContext = () -> "";
 
     /** Creates a policy with no tool access. */
     public AnthropicPolicy(LlmTransport transport, String model, int maxTokens) {
@@ -110,6 +111,15 @@ public final class AnthropicPolicy implements AgentPolicy {
         LlmTransport retrying = withRetry(
                 anthropicTransport(apiKey), new long[] {1_000, 2_000, 4_000}, Thread::sleep);
         return new AnthropicPolicy(retrying, model, 1024, tools);
+    }
+
+    /**
+     * Installs a supplier of durable user context (preferences, projects) that is injected into
+     * every system prompt, so JARVIS "remembers" across independent conversations. Returns this.
+     */
+    public AnthropicPolicy withMemoryContext(java.util.function.Supplier<String> memoryContext) {
+        this.memoryContext = Objects.requireNonNull(memoryContext, "memoryContext");
+        return this;
     }
 
     /** Real Messages API transport for {@code apiKey}; reusable by other API callers (vision). */
@@ -189,10 +199,14 @@ public final class AnthropicPolicy implements AgentPolicy {
     }
 
     private String systemPrompt() {
-        if (tools == null || tools.list().isEmpty()) {
-            return BASE_SYSTEM_PROMPT;
-        }
         StringBuilder prompt = new StringBuilder(BASE_SYSTEM_PROMPT);
+        String recalled = memoryContext.get();
+        if (recalled != null && !recalled.isBlank()) {
+            prompt.append("\n\n[What you remember about the user]\n").append(recalled.strip());
+        }
+        if (tools == null || tools.list().isEmpty()) {
+            return prompt.toString();
+        }
         prompt.append("\n\nYou can use tools. To use one, reply with EXACTLY one line and"
                 + " nothing else:\nTOOL: <name> <json-arguments>\n"
                 + "Example: TOOL: clock {\"zone\":\"America/Chicago\"}\n"

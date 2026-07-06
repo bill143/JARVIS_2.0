@@ -66,6 +66,16 @@
     <button class="brief" id="brief" type="button" title="Time, reminders, and top headlines">BRIEFING</button>
     <button class="voice" id="voice" type="button"
             title="Toggle voice mode - say 'Jarvis, ...' to talk; ESC interrupts">🎤 VOICE</button>
+    <button class="voice" id="camera" type="button" title="Let JARVIS look through your webcam">📷 CAMERA</button>
+    <select class="voice" id="lang" title="Voice language">
+      <option value="en-US">English</option>
+      <option value="es-ES">Español</option>
+      <option value="fr-FR">Français</option>
+      <option value="de-DE">Deutsch</option>
+      <option value="tr-TR">Türkçe</option>
+      <option value="it-IT">Italiano</option>
+      <option value="pt-BR">Português</option>
+    </select>
     <button class="interrupt" id="interrupt" type="button" title="Stop JARVIS mid-sentence (or press ESC)">✋ INTERRUPT</button>
     <span class="vstate" id="vstate"></span>
   </div>
@@ -101,13 +111,28 @@
     return body;
   }
 
+  let isOnline = false;
   fetch('/status').then(r => r.json()).then(s => {
+    isOnline = s.online;
     document.getElementById('dot').className = 'dot ' + (s.online ? 'on' : 'off');
     document.getElementById('mode').textContent = s.online ? ('ONLINE · ' + s.model.toUpperCase()) : 'OFFLINE ECHO MODE';
     add('jarvis', s.online
       ? 'Online and ready. How can I help?'
       : 'Running in offline echo mode. Set ANTHROPIC_API_KEY and restart to enable AI.');
+    if (s.online) {
+      // Morning briefing on boot (#6)
+      setTimeout(() => document.getElementById('brief').click(), 600);
+      // Hardware alert polling (#7)
+      setInterval(pollAlerts, 20000);
+    }
   }).catch(() => { document.getElementById('mode').textContent = 'UNREACHABLE'; });
+
+  async function pollAlerts() {
+    try {
+      const alerts = await (await fetch('/alerts')).json();
+      alerts.forEach(a => { add('jarvis', '⚠️ ' + a); speak(a); });
+    } catch (e) { /* ignore */ }
+  }
 
   async function ask(prompt, shownAs) {
     add('you', shownAs || prompt);
@@ -155,6 +180,8 @@
   const interruptBtn = document.getElementById('interrupt');
   const vstate = document.getElementById('vstate');
   let voiceOn = false, speaking = false, recog = null;
+  const langSel = document.getElementById('lang');
+  function voiceLang() { return langSel.value; }   // #2 language-aware voice
 
   function setVoiceState(text) { vstate.textContent = text; }
 
@@ -164,9 +191,11 @@
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.05;
+    u.lang = voiceLang();
     const voices = speechSynthesis.getVoices();
-    u.voice = voices.find(v => /en-GB/i.test(v.lang) && /male|george|ryan/i.test(v.name))
-           || voices.find(v => /en-GB/i.test(v.lang)) || null;
+    const langPrefix = voiceLang().slice(0, 2);
+    u.voice = voices.find(v => v.lang === voiceLang())
+           || voices.find(v => v.lang && v.lang.slice(0, 2) === langPrefix) || null;
     speaking = true;
     interruptBtn.classList.add('show');
     setVoiceState('SPEAKING — ESC TO INTERRUPT');
@@ -186,7 +215,7 @@
     if (!SR || recog || !voiceOn || speaking) return;
     recog = new SR();
     recog.continuous = true;
-    recog.lang = 'en-US';
+    recog.lang = voiceLang();
     recog.onresult = (e) => {
       const t = e.results[e.results.length - 1][0].transcript.trim();
       const i = t.toLowerCase().indexOf('jarvis');
@@ -229,6 +258,38 @@
   interruptBtn.addEventListener('click', interrupt);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') interrupt(); });
   if (window.speechSynthesis) speechSynthesis.getVoices();  // warm the voice list
+
+  // ---------- Webcam vision (#4): capture a frame in the browser, send to /vision ----------
+  document.getElementById('camera').addEventListener('click', async () => {
+    if (!isOnline) { add('jarvis', 'Webcam vision needs an API key, sir.'); return; }
+    add('you', '📷 (webcam snapshot)');
+    const pending = add('jarvis', 'Looking through the camera now, sir…');
+    pending.className = 'thinking';
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      await video.play();
+      await new Promise(r => setTimeout(r, 400));           // let exposure settle
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      const b64 = canvas.toDataURL('image/png').split(',')[1];
+      const r = await fetch('/vision', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ image: b64, question: 'What do you see through this webcam? Be brief.' }) });
+      const j = await r.json();
+      pending.className = '';
+      pending.textContent = j.response;
+      speak(j.response);
+    } catch (err) {
+      pending.className = '';
+      pending.textContent = 'Camera error: ' + err.message;
+    } finally {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+    }
+  });
 </script>
 </body>
 </html>

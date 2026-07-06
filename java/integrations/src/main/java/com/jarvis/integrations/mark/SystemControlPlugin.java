@@ -61,13 +61,13 @@ public final class SystemControlPlugin implements Plugin {
 
     @Override
     public PluginDescriptor descriptor() {
-        return new PluginDescriptor("system-control", "0.1.0",
-                "Launch apps, adjust volume, lock the screen (Windows)");
+        return new PluginDescriptor("system-control", "0.2.0",
+                "Launch apps, volume, brightness, WiFi, hotkeys, power, lock (Windows)");
     }
 
     @Override
     public List<Tool> tools() {
-        return List.of(appLaunch(), volume(), lockScreen());
+        return List.of(appLaunch(), volume(), brightness(), wifi(), hotkey(), power(), lockScreen());
     }
 
     private ToolResult run(List<String> command, String successMessage) {
@@ -122,10 +122,112 @@ public final class SystemControlPlugin implements Plugin {
                 });
     }
 
+    private Tool brightness() {
+        return new SimpleTool("brightness",
+                "Set screen brightness. Args: level - a percentage 0 to 100.",
+                call -> {
+                    Integer level = intArg(call.arguments().get("level"));
+                    if (level == null || level < 0 || level > 100) {
+                        return ToolResult.error("level must be a number from 0 to 100");
+                    }
+                    String script = "(Get-WmiObject -Namespace root/WMI"
+                            + " -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1," + level + ")";
+                    return run(List.of("powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                            "-Command", script), "Brightness set to " + level + "%.");
+                });
+    }
+
+    private Tool wifi() {
+        return new SimpleTool("wifi",
+                "Control Wi-Fi. Args: action - status, disconnect, or connect (with 'network' name).",
+                call -> {
+                    String action = String.valueOf(call.arguments().get("action"))
+                            .toLowerCase(Locale.ROOT).strip();
+                    return switch (action) {
+                        case "status" -> run(List.of("netsh", "wlan", "show", "interfaces"),
+                                "Checked Wi-Fi status.");
+                        case "disconnect" -> run(List.of("netsh", "wlan", "disconnect"),
+                                "Wi-Fi disconnected.");
+                        case "connect" -> {
+                            Object network = call.arguments().get("network");
+                            if (network == null || String.valueOf(network).isBlank()) {
+                                yield ToolResult.error("connect needs a 'network' (saved profile) name");
+                            }
+                            yield run(List.of("netsh", "wlan", "connect",
+                                    "name=" + network), "Connecting to " + network + ".");
+                        }
+                        default -> ToolResult.error("action must be status, disconnect, or connect");
+                    };
+                });
+    }
+
+    private Tool hotkey() {
+        return new SimpleTool("hotkey",
+                "Send a desktop shortcut. Args: action - copy, paste, switch_window,"
+                        + " show_desktop, screenshot, minimize_all, or task_view.",
+                call -> {
+                    String action = String.valueOf(call.arguments().get("action"))
+                            .toLowerCase(Locale.ROOT).strip();
+                    String keys = switch (action) {
+                        case "copy" -> "^c";
+                        case "paste" -> "^v";
+                        case "switch_window" -> "%{TAB}";
+                        case "show_desktop", "minimize_all" -> "^{ESC}";
+                        case "screenshot" -> "+#s";
+                        case "task_view" -> "#{TAB}";
+                        default -> null;
+                    };
+                    if (keys == null) {
+                        return ToolResult.error("unknown shortcut '" + action + "'");
+                    }
+                    String script = "$w=New-Object -ComObject WScript.Shell;"
+                            + " $w.SendKeys('" + keys + "')";
+                    return run(List.of("powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                            "-Command", script), "Sent shortcut: " + action + ".");
+                });
+    }
+
+    private Tool power() {
+        return new SimpleTool("power",
+                "Power actions. Args: action - sleep, lock, sign_out, restart, or shutdown."
+                        + " restart and shutdown are delayed 15s so they can be cancelled.",
+                call -> {
+                    String action = String.valueOf(call.arguments().get("action"))
+                            .toLowerCase(Locale.ROOT).strip();
+                    return switch (action) {
+                        case "sleep" -> run(List.of("rundll32.exe",
+                                "powrprof.dll,SetSuspendState", "0,1,0"), "Going to sleep.");
+                        case "lock" -> run(List.of("rundll32.exe", "user32.dll,LockWorkStation"),
+                                "Screen locked.");
+                        case "sign_out" -> run(List.of("shutdown", "/l"), "Signing out.");
+                        case "restart" -> run(List.of("shutdown", "/r", "/t", "15", "/c",
+                                "JARVIS restart - run 'shutdown /a' to cancel"),
+                                "Restarting in 15 seconds, sir. Say cancel to abort.");
+                        case "shutdown" -> run(List.of("shutdown", "/s", "/t", "15", "/c",
+                                "JARVIS shutdown - run 'shutdown /a' to cancel"),
+                                "Shutting down in 15 seconds, sir. Say cancel to abort.");
+                        case "cancel" -> run(List.of("shutdown", "/a"), "Power action cancelled.");
+                        default -> ToolResult.error(
+                                "action must be sleep, lock, sign_out, restart, shutdown, or cancel");
+                    };
+                });
+    }
+
     private Tool lockScreen() {
         return new SimpleTool("lock_screen", "Lock the Windows session immediately. No args.",
                 call -> run(List.of("rundll32.exe", "user32.dll,LockWorkStation"),
                         "Screen locked."));
+    }
+
+    private static Integer intArg(Object value) {
+        if (value instanceof Number n) {
+            return n.intValue();
+        }
+        try {
+            return value == null ? null : Integer.parseInt(String.valueOf(value).strip());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** Small named-lambda tool holder. */

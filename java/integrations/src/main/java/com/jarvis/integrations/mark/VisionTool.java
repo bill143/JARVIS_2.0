@@ -71,14 +71,21 @@ public final class VisionTool implements Tool {
                 ? "Describe what is on this screen, briefly."
                 : String.valueOf(rawQuestion);
         try {
-            String response = transport.complete(buildRequest(png, question));
-            return ToolResult.ok(extractText(response));
+            return ToolResult.ok(analyze(png, question));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return ToolResult.error("vision request interrupted");
         } catch (Exception e) {
             return ToolResult.error("vision request failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Analyzes an externally-supplied PNG (e.g. a webcam frame captured by the browser) against
+     * {@code question}. Used by the dashboard's webcam endpoint.
+     */
+    public String analyze(byte[] png, String question) throws Exception {
+        return extractText(transport.complete(buildRequest(png, question)));
     }
 
     /** Builds the vision request body; exposed for tests. */

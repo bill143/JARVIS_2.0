@@ -29,8 +29,9 @@ public final class Main {
     public static void main(String[] args) throws Exception {
         String apiKey = System.getenv("ANTHROPIC_API_KEY");
         String model = System.getenv().getOrDefault("JARVIS_MODEL", DEFAULT_MODEL);
-        boolean online = AppWiring.isOnline(apiKey);
-        JarvisApi api = AppWiring.buildApi(apiKey, model);
+        AppWiring.Runtime runtime = AppWiring.build(apiKey, model);
+        JarvisApi api = runtime.api();
+        boolean online = runtime.online();
 
         if (Arrays.asList(args).contains("--console")) {
             runConsole(api, online, model);
@@ -38,7 +39,11 @@ public final class Main {
         }
 
         int port = Integer.parseInt(System.getenv().getOrDefault("JARVIS_PORT", "8080"));
-        WebServer server = WebServer.start(api, online, model, port);
+        if (online) {
+            runtime.monitor().start(30);   // hardware telemetry every 30s
+        }
+        WebServer server = WebServer.start(api, online, model, port,
+                runtime.monitor(), runtime.vision());
         String url = "http://localhost:" + server.port();
         System.out.println();
         System.out.println("  J.A.R.V.I.S. is running.");

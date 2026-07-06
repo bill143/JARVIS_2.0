@@ -36,15 +36,34 @@ public final class MarkToolsPlugin implements Plugin {
         this.memory = Objects.requireNonNull(memory, "memory");
     }
 
+    private static final String PREFS_SCOPE = "preferences";
+
     @Override
     public PluginDescriptor descriptor() {
-        return new PluginDescriptor("mark-tools", "0.2.0",
-                "Clock, system info, reminders, news search, and URL opening - inspired by Mark-XLVIII");
+        return new PluginDescriptor("mark-tools", "0.3.0",
+                "Clock, system info, reminders, news, weather, web search, files, hardware, memory");
     }
 
     @Override
     public List<Tool> tools() {
-        return List.of(clock(), systemInfo(), reminderSet(), reminderList(), openUrl(), new NewsTool());
+        return List.of(clock(), systemInfo(), reminderSet(), reminderList(), openUrl(),
+                rememberPreference(), new NewsTool(), new WeatherTool(), new WebSearchTool(),
+                new FileTool(), new HardwareTool());
+    }
+
+    private Tool rememberPreference() {
+        return tool("remember",
+                "Save something to remember about the user long-term (a preference, project, or"
+                        + " personal fact) so it is recalled in future conversations. Args: fact.",
+                call -> {
+                    Object fact = call.arguments().get("fact");
+                    if (fact == null || String.valueOf(fact).isBlank()) {
+                        return ToolResult.error("remember needs a 'fact' argument");
+                    }
+                    String key = "pref-" + memory.query(PREFS_SCOPE).size();
+                    memory.put(PREFS_SCOPE, key, String.valueOf(fact).strip());
+                    return ToolResult.ok("Noted, sir. I'll remember that.");
+                });
     }
 
     private static Tool tool(String name, String description,

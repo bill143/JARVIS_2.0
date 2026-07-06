@@ -146,6 +146,15 @@ class AnthropicPolicyTest {
     }
 
     @Test
+    void recalledMemoryIsInjectedIntoTheSystemPrompt() {
+        AnthropicPolicy policy = new AnthropicPolicy(request -> OK_RESPONSE, "m", 100)
+                .withMemoryContext(() -> "- prefers metric units\n- working on the go-kart project");
+        String request = policy.buildRequest(AgentContext.initial("hi"));
+        assertTrue(request.contains("What you remember about the user"));
+        assertTrue(request.contains("go-kart project"));
+    }
+
+    @Test
     void personaAddressesTheUserAsSir() {
         AnthropicPolicy policy = new AnthropicPolicy(request -> OK_RESPONSE, "m", 100);
         String request = policy.buildRequest(AgentContext.initial("hello"));

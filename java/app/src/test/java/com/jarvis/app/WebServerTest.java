@@ -84,4 +84,45 @@ class WebServerTest {
         HttpResponse<String> response = post("/chat", "{\"prompt\":\"are you there\"}");
         assertFalse(response.body().contains("Online and ready"));
     }
+
+    @Test
+    void alertsEndpointReturnsJsonArray() throws Exception {
+        HttpResponse<String> response = get("/alerts");
+        assertEquals(200, response.statusCode());
+        assertEquals("[]", response.body());   // no monitor wired in this test
+    }
+
+    @Test
+    void visionEndpointReportsUnavailableWithoutAKey() throws Exception {
+        HttpResponse<String> response = post("/vision", "{\"image\":\"AQID\",\"question\":\"hi\"}");
+        assertEquals(503, response.statusCode());
+        assertTrue(response.body().contains("API key"));
+    }
+
+    @Test
+    void dashboardExposesTheNewControls() throws Exception {
+        String body = get("/").body();
+        assertTrue(body.contains("CAMERA"));
+        assertTrue(body.contains("id=\"lang\""));
+    }
+
+    @Test
+    void visionEndpointAnalyzesAWebcamFrameWhenWired() throws Exception {
+        JarvisApi api = AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>());
+        HardwareMonitor monitor = new HardwareMonitor();
+        WebServer wired = WebServer.start(api, true, "m", 0, monitor,
+                (png, question) -> "I see a keyboard, sir. (" + png.length + " bytes)");
+        try {
+            String url = "http://localhost:" + wired.port() + "/vision";
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(URI.create(url))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"image\":\"AQID\",\"question\":\"what is this\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("keyboard"));
+        } finally {
+            wired.stop();
+        }
+    }
 }

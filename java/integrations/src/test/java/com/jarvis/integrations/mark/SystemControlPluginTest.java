@@ -68,6 +68,43 @@ class SystemControlPluginTest {
     }
 
     @Test
+    void brightnessValidatesRangeAndSetsLevel() {
+        ToolRegistry registry = onWindows();
+        assertTrue(registry.execute(new ToolCall("brightness", Map.of("level", 40))).success());
+        assertTrue(String.join(" ", ran.get(0)).contains("WmiSetBrightness(1,40)"));
+        assertFalse(registry.execute(new ToolCall("brightness", Map.of("level", 250))).success());
+    }
+
+    @Test
+    void wifiStatusAndDisconnect() {
+        ToolRegistry registry = onWindows();
+        assertTrue(registry.execute(new ToolCall("wifi", Map.of("action", "status"))).success());
+        assertEquals(List.of("netsh", "wlan", "show", "interfaces"), ran.get(0));
+        assertTrue(registry.execute(new ToolCall("wifi", Map.of("action", "disconnect"))).success());
+        assertTrue(registry.execute(new ToolCall("wifi", Map.of("action", "connect"))).success()
+                == false);
+    }
+
+    @Test
+    void powerRestartIsDelayedAndCancellable() {
+        ToolRegistry registry = onWindows();
+        assertTrue(registry.execute(new ToolCall("power", Map.of("action", "restart"))).success());
+        assertTrue(ran.get(0).contains("/t"));
+        assertTrue(ran.get(0).contains("15"));
+        assertTrue(registry.execute(new ToolCall("power", Map.of("action", "cancel"))).success());
+        assertEquals(List.of("shutdown", "/a"), ran.get(1));
+        assertFalse(registry.execute(new ToolCall("power", Map.of("action", "explode"))).success());
+    }
+
+    @Test
+    void hotkeyMapsNamedActions() {
+        ToolRegistry registry = onWindows();
+        assertTrue(registry.execute(new ToolCall("hotkey", Map.of("action", "copy"))).success());
+        assertTrue(String.join(" ", ran.get(0)).contains("^c"));
+        assertFalse(registry.execute(new ToolCall("hotkey", Map.of("action", "nope"))).success());
+    }
+
+    @Test
     void everythingRefusesOnNonWindows() {
         ToolRegistry registry = new ToolRegistry();
         new PluginManager(registry).install(new SystemControlPlugin("Linux", ran::add));

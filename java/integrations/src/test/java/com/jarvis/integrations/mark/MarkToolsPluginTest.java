@@ -21,13 +21,28 @@ class MarkToolsPluginTest {
     }
 
     @Test
-    void pluginContributesAllSixTools() {
+    void pluginContributesAllExpectedTools() {
         ToolRegistry registry = installed();
-        assertEquals(6, registry.list().size());
         for (String name : new String[] {"clock", "system_info", "reminder_set", "reminder_list",
-                "open_url", "news_search"}) {
+                "open_url", "remember", "news_search", "weather", "web_search", "file_read",
+                "hardware_status"}) {
             assertTrue(registry.lookup(name).isPresent(), name + " missing");
         }
+        assertEquals(11, registry.list().size());
+    }
+
+    @Test
+    void rememberPersistsToPreferencesScope() {
+        com.jarvis.memory.InMemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        ToolRegistry registry = new ToolRegistry();
+        new PluginManager(registry).install(new MarkToolsPlugin(memory));
+
+        ToolResult saved = registry.execute(new ToolCall("remember",
+                Map.of("fact", "prefers metric units")));
+        assertTrue(saved.success());
+        assertEquals(1, memory.query("preferences").size());
+        assertEquals("prefers metric units",
+                memory.query("preferences").get(0).value());
     }
 
     @Test
