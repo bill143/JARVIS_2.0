@@ -19,6 +19,16 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <groupId>com.jarvis</groupId>
+      <artifactId>memory</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.jarvis</groupId>
+      <artifactId>planning</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
