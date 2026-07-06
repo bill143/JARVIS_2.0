@@ -62,6 +62,89 @@ class AnthropicPolicyTest {
         assertEquals("answer", policy.extractText(mixed));
     }
 
+    private static com.jarvis.tools.ToolRegistry echoRegistry() {
+        com.jarvis.tools.ToolRegistry registry = new com.jarvis.tools.ToolRegistry();
+        registry.register(new com.jarvis.tools.Tool() {
+            @Override
+            public String name() {
+                return "echo";
+            }
+
+            @Override
+            public String description() {
+                return "echoes the 'text' argument";
+            }
+
+            @Override
+            public com.jarvis.tools.ToolResult execute(com.jarvis.tools.ToolCall call) {
+                return com.jarvis.tools.ToolResult.ok(
+                        String.valueOf(call.arguments().get("text")));
+            }
+        });
+        return registry;
+    }
+
+    @Test
+    void toolAwareRequestAdvertisesTheCatalog() {
+        AnthropicPolicy policy =
+                new AnthropicPolicy(request -> OK_RESPONSE, "m", 100, echoRegistry());
+
+        String request = policy.buildRequest(AgentContext.initial("hi"));
+        assertTrue(request.contains("TOOL:"));
+        assertTrue(request.contains("echo: echoes the 'text' argument"));
+    }
+
+    @Test
+    void toolLineBecomesAnInvokeDecision() {
+        String toolReply = """
+                {"content":[{"type":"text","text":"TOOL: echo {\\"text\\":\\"pong\\"}"}]}""";
+        AnthropicPolicy policy =
+                new AnthropicPolicy(request -> toolReply, "m", 100, echoRegistry());
+
+        Decision decision = policy.decide(AgentContext.initial("say pong via the tool"));
+        Decision.Invoke invoke = (Decision.Invoke) decision;
+        assertEquals("echo", invoke.call().toolName());
+        assertEquals("pong", invoke.call().arguments().get("text"));
+    }
+
+    @Test
+    void withoutARegistryToolLinesAreJustText() {
+        String toolReply = """
+                {"content":[{"type":"text","text":"TOOL: echo {\\"text\\":\\"pong\\"}"}]}""";
+        AnthropicPolicy policy = new AnthropicPolicy(request -> toolReply, "m", 100);
+
+        assertTrue(policy.decide(AgentContext.initial("hi")) instanceof Decision.Respond);
+    }
+
+    @Test
+    void malformedToolLineFallsBackToRespond() {
+        String badJson = """
+                {"content":[{"type":"text","text":"TOOL: echo {not json"}]}""";
+        AnthropicPolicy policy =
+                new AnthropicPolicy(request -> badJson, "m", 100, echoRegistry());
+
+        assertTrue(policy.decide(AgentContext.initial("hi")) instanceof Decision.Respond);
+    }
+
+    @Test
+    void fullLoopRoundTripThroughAFakeApi() {
+        // Turn 1: model asks for the tool. Turn 2 (after seeing the result): model answers.
+        AnthropicPolicy.LlmTransport fakeApi = request -> request.contains("[Tool results so far]")
+                ? """
+                  {"content":[{"type":"text","text":"The tool said: pong"}]}"""
+                : """
+                  {"content":[{"type":"text","text":"TOOL: echo {\\"text\\":\\"pong\\"}"}]}""";
+        com.jarvis.tools.ToolRegistry registry = echoRegistry();
+        AnthropicPolicy policy = new AnthropicPolicy(fakeApi, "m", 100, registry);
+
+        com.jarvis.agent.loop.AgentResult result =
+                new com.jarvis.agent.loop.AgentLoop(policy, registry, 4).run("use the tool");
+        assertEquals(com.jarvis.agent.loop.AgentResult.StopReason.RESPONDED, result.stopReason());
+        assertEquals("The tool said: pong", result.response());
+        assertEquals(1, result.steps().size());
+        assertEquals("pong", result.steps().getFirst().result().output());
+    }
+
     @Test
     void constructorValidation() {
         AnthropicPolicy.LlmTransport transport = request -> OK_RESPONSE;

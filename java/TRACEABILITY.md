@@ -88,6 +88,8 @@
 | REQ-STEP-013 | N/A (build tooling) | Maven Wrapper so local builds need no Maven install | `java/` root | `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties` | COMPLETED |
 | REQ-STEP-014 | N/A (Anthropic Messages API, spec LLM seam) | Claude-backed `AgentPolicy` (first real reasoning engine) | `integrations / com.jarvis.integrations.llm` | `AnthropicPolicy.java`, `AnthropicPolicyTest.java` | COMPLETED |
 | REQ-STEP-015 | N/A (runnable entry point) | Console launcher + executable fat jar | `app / com.jarvis.app` | `Main.java`, `AppWiring.java`, `AppWiringTest.java`, `app/pom.xml` | COMPLETED |
+| REQ-STEP-016 | N/A (user-requested dashboard) | Browser dashboard over JDK built-in HTTP server (`GET /`, `GET /status`, `POST /chat`) | `app / com.jarvis.app` | `WebServer.java`, `resources/dashboard.html`, `WebServerTest.java`, `Main.java` (web default, `--console` fallback) | COMPLETED |
+| REQ-STEP-017 | `FatihMakes/Mark-XLVIII` (ideas only — see notes) | Assistant tools (clock, system info, reminders, open URL) as a plugin + tool-aware LLM policy | `integrations / com.jarvis.integrations.mark` + `.llm` | `MarkToolsPlugin.java`, `MarkToolsPluginTest.java`, `AnthropicPolicy.java` (tool protocol), `AnthropicPolicyTest.java` | COMPLETED |
 
 ## REQ-STEP-014/015 notes
 - **Jackson is now in use** — the first (and only) consumer of the whitelisted `jackson-databind`, in `integrations` for Anthropic request/response JSON. Transport is the JDK's built-in `java.net.http.HttpClient`; the external dependency whitelist is still just Jackson + JUnit.
@@ -95,6 +97,12 @@
 - **Internal deps added:** `integrations → core-agent` (for the policy seam) and the new `app` module → `{api, integrations, ui}`. Still no cycles.
 - `app` is the composition root: router (empty, fallback-only) + Claude-or-offline-echo policy + trivial single-step planner + `InMemoryStore` + `ToolRegistry`, exposed as `JarvisApi`, driven by a stdin/stdout console loop rendered through the ui module. Without a key the app runs in offline echo mode, so the pipeline is exercisable before any credentials exist.
 - Packaging: `maven-shade-plugin` (build plugin, not a dependency) produces the self-contained executable `app/target/jarvis.jar` (`Main-Class: com.jarvis.app.Main`).
+
+## REQ-STEP-016/017 notes
+- **Dashboard (016):** built on the JDK's `com.sun.net.httpserver` — the no-web-framework rule holds; the whitelist is still Jackson + JUnit. `dashboard.html` is a single self-contained page (inline CSS/JS, no CDN). Default port 8080, `JARVIS_PORT` overrides; `Main` opens the browser when a desktop is available and always prints the URL; `--console` preserves the terminal mode.
+- **License boundary (017):** `FatihMakes/Mark-XLVIII` is Python under CC BY-NC 4.0 (non-commercial). **No code was read from or copied out of that repository** — only its publicly described capability catalog (clock/system control/reminders/opening things) informed which tools to build. Every line is an original Java implementation on this platform's own `Tool` contract, keeping JARVIS_2.0 unencumbered.
+- **Tool-aware LLM (017):** `AnthropicPolicy` optionally takes the `ToolRegistry`; the system prompt advertises the catalog and a one-line protocol (`TOOL: <name> <json-args>`). Tool replies become `Decision.Invoke`; prior observations are replayed into the next request via the loop's `AgentContext`, so multi-step tool use works without the native tool-use API. Malformed tool lines degrade to plain responses. Backed by a fake-transport round-trip test through the real `AgentLoop`.
+- `reminder` tools persist through the Step 2 `MemoryStore` (scope `reminders`), shared with the orchestrator's session store in `AppWiring`. New internal dep: `integrations → memory`; `app` now declares `jackson-databind` directly. Still no cycles.
 
 ## Build-complete summary (Steps 1–12)
 - All 12 requirements COMPLETED. Module dependency graph (all one-directional, no cycles): `core-agent → {tool-execution, memory, planning}`, `integrations → tool-execution`, `api → core-agent`; `rag`, `speech`, `ui` are dependency-free.
