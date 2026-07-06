@@ -43,7 +43,8 @@ final class AppWiring {
                 : context -> new Decision.Respond(OFFLINE_HINT + context.input());
         PromptRouter<AgentPolicy> router = new PromptRouter<>(List.of());
         Planner planner = goal -> new Plan(goal, List.of(PlanStep.pending("goal", goal)));
-        Orchestrator orchestrator = new Orchestrator(router, policy, tools, planner, memory, 4);
+        // Budget 6: a briefing legitimately chains clock + reminders + news before answering.
+        Orchestrator orchestrator = new Orchestrator(router, policy, tools, planner, memory, 6);
         return new DefaultJarvisApi(orchestrator);
     }
 

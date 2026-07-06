@@ -90,6 +90,7 @@
 | REQ-STEP-015 | N/A (runnable entry point) | Console launcher + executable fat jar | `app / com.jarvis.app` | `Main.java`, `AppWiring.java`, `AppWiringTest.java`, `app/pom.xml` | COMPLETED |
 | REQ-STEP-016 | N/A (user-requested dashboard) | Browser dashboard over JDK built-in HTTP server (`GET /`, `GET /status`, `POST /chat`) | `app / com.jarvis.app` | `WebServer.java`, `resources/dashboard.html`, `WebServerTest.java`, `Main.java` (web default, `--console` fallback) | COMPLETED |
 | REQ-STEP-017 | `FatihMakes/Mark-XLVIII` (ideas only — see notes) | Assistant tools (clock, system info, reminders, open URL) as a plugin + tool-aware LLM policy | `integrations / com.jarvis.integrations.mark` + `.llm` | `MarkToolsPlugin.java`, `MarkToolsPluginTest.java`, `AnthropicPolicy.java` (tool protocol), `AnthropicPolicyTest.java` | COMPLETED |
+| REQ-STEP-018 | `FatihMakes/Mark-XLVIII` changelog (ideas only) | Mark-parity where applicable: parallel first-wins news search, exponential-backoff API retry, "sir" persona, one-click startup briefing | `integrations` + `app` | `NewsTool.java`, `NewsToolTest.java`, `AnthropicPolicy.java` (persona + `withRetry`), `dashboard.html` (BRIEFING), `AppWiring.java` (budget 6) | COMPLETED |
 
 ## REQ-STEP-014/015 notes
 - **Jackson is now in use** — the first (and only) consumer of the whitelisted `jackson-databind`, in `integrations` for Anthropic request/response JSON. Transport is the JDK's built-in `java.net.http.HttpClient`; the external dependency whitelist is still just Jackson + JUnit.
@@ -103,6 +104,14 @@
 - **License boundary (017):** `FatihMakes/Mark-XLVIII` is Python under CC BY-NC 4.0 (non-commercial). **No code was read from or copied out of that repository** — only its publicly described capability catalog (clock/system control/reminders/opening things) informed which tools to build. Every line is an original Java implementation on this platform's own `Tool` contract, keeping JARVIS_2.0 unencumbered.
 - **Tool-aware LLM (017):** `AnthropicPolicy` optionally takes the `ToolRegistry`; the system prompt advertises the catalog and a one-line protocol (`TOOL: <name> <json-args>`). Tool replies become `Decision.Invoke`; prior observations are replayed into the next request via the loop's `AgentContext`, so multi-step tool use works without the native tool-use API. Malformed tool lines degrade to plain responses. Backed by a fake-transport round-trip test through the real `AgentLoop`.
 - `reminder` tools persist through the Step 2 `MemoryStore` (scope `reminders`), shared with the orchestrator's session store in `AppWiring`. New internal dep: `integrations → memory`; `app` now declares `jackson-databind` directly. Still no cycles.
+
+## REQ-STEP-018 notes (Mark-XLVIII changelog parity — where it makes sense)
+- Same license boundary as 017: ideas from the publicly posted changelog only; no code read or copied; all-original Java.
+- **Parallel news, first result wins:** `NewsTool` races Google News RSS and Bing News RSS via `ExecutorService.invokeAny` — first valid feed wins, the loser is discarded, both failing is a graceful tool error. RSS gives real article titles/sources/links (the ddgs.news() point). Stdlib JAXP parsing with doctype disabled; fetcher seam keeps tests offline.
+- **Exponential backoff:** `AnthropicPolicy.withRetry` retries transient `IOException`s at 1s → 2s → 4s before surfacing the failure (which still degrades to a polite reply, never a crash). Sleeper seam keeps tests instant.
+- **Persona:** system prompt now addresses the user as "sir" and forbids mixed-language replies (the language-aware address point, English-only here).
+- **Startup briefing:** dashboard BRIEFING button sends a canned prompt that chains clock + reminder_list + news_search; loop budget raised 4 → 6 to accommodate it. The upstream two-phase audio overlap is voice-specific and deferred with voice.
+- **Not ported (voice/vision-specific):** instant interrupt, vision acknowledgment/cooldown/echo guard. **Already true by design:** session state isolation (immutable contexts, no cross-session flags). **Not applicable:** zero terminal windows (no subprocess spawning).
 
 ## Build-complete summary (Steps 1–12)
 - All 12 requirements COMPLETED. Module dependency graph (all one-directional, no cycles): `core-agent → {tool-execution, memory, planning}`, `integrations → tool-execution`, `api → core-agent`; `rag`, `speech`, `ui` are dependency-free.

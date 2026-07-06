@@ -45,7 +45,9 @@ public final class AnthropicPolicy implements AgentPolicy {
 
     private static final String TOOL_MARKER = "TOOL:";
     private static final String BASE_SYSTEM_PROMPT =
-            "You are JARVIS, a concise and helpful personal assistant. Answer briefly.";
+            "You are JARVIS, a concise and helpful personal assistant in the style of Tony Stark's"
+                    + " AI. Address the user as 'sir'. Answer briefly and never mix languages"
+                    + " within one reply.";
 
     private final LlmTransport transport;
     private final String model;
@@ -74,6 +76,35 @@ public final class AnthropicPolicy implements AgentPolicy {
         return withApiKey(apiKey, model, null);
     }
 
+    /**
+     * Wraps {@code delegate} with Mark-XLVIII-style exponential backoff: transient
+     * {@link IOException}s are retried after the given delays; other failures pass through.
+     * The sleeper is a seam so tests run instantly.
+     */
+    static LlmTransport withRetry(LlmTransport delegate, long[] delaysMillis, Sleeper sleeper) {
+        Objects.requireNonNull(delegate, "delegate");
+        return requestJson -> {
+            IOException last = null;
+            for (int attempt = 0; attempt <= delaysMillis.length; attempt++) {
+                if (attempt > 0) {
+                    sleeper.sleep(delaysMillis[attempt - 1]);
+                }
+                try {
+                    return delegate.complete(requestJson);
+                } catch (IOException e) {
+                    last = e;
+                }
+            }
+            throw last;
+        };
+    }
+
+    /** Sleep seam for {@link #withRetry}. */
+    @FunctionalInterface
+    interface Sleeper {
+        void sleep(long millis) throws InterruptedException;
+    }
+
     /** Creates a tool-aware policy that calls the real Anthropic API with {@code apiKey}. */
     public static AnthropicPolicy withApiKey(String apiKey, String model, ToolRegistry tools) {
         Objects.requireNonNull(apiKey, "apiKey");
@@ -97,7 +128,9 @@ public final class AnthropicPolicy implements AgentPolicy {
             }
             return response.body();
         };
-        return new AnthropicPolicy(transport, model, 1024, tools);
+        LlmTransport retrying =
+                withRetry(transport, new long[] {1_000, 2_000, 4_000}, Thread::sleep);
+        return new AnthropicPolicy(retrying, model, 1024, tools);
     }
 
     @Override

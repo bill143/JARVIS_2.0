@@ -38,13 +38,13 @@ public final class MarkToolsPlugin implements Plugin {
 
     @Override
     public PluginDescriptor descriptor() {
-        return new PluginDescriptor("mark-tools", "0.1.0",
-                "Clock, system info, reminders, and URL opening - inspired by Mark-XLVIII");
+        return new PluginDescriptor("mark-tools", "0.2.0",
+                "Clock, system info, reminders, news search, and URL opening - inspired by Mark-XLVIII");
     }
 
     @Override
     public List<Tool> tools() {
-        return List.of(clock(), systemInfo(), reminderSet(), reminderList(), openUrl());
+        return List.of(clock(), systemInfo(), reminderSet(), reminderList(), openUrl(), new NewsTool());
     }
 
     private static Tool tool(String name, String description,

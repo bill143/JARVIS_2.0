@@ -20,6 +20,9 @@
   .sub { font-size:11px; letter-spacing:2px; color:var(--dim); }
   .status { margin-left:auto; display:flex; align-items:center; gap:8px;
             font-size:12px; letter-spacing:1px; color:var(--dim); }
+  .brief { background:none; border:1px solid var(--line); border-radius:6px; color:var(--cyan);
+           font-size:11px; letter-spacing:2px; padding:7px 14px; cursor:pointer; margin-left:16px; }
+  .brief:hover { border-color:var(--cyan); }
   .dot { width:9px; height:9px; border-radius:50%; background:#5a6b80; }
   .dot.on  { background:#38e28e; box-shadow:0 0 8px #38e28e; }
   .dot.off { background:#ffb84d; box-shadow:0 0 8px #ffb84d; }
@@ -50,7 +53,9 @@
     <h1>J.A.R.V.I.S.</h1>
     <div class="sub">JUST A RATHER VERY INTELLIGENT SYSTEM</div>
   </div>
-  <div class="status"><span class="dot" id="dot"></span><span id="mode">CONNECTING…</span></div>
+  <div class="status"><span class="dot" id="dot"></span><span id="mode">CONNECTING…</span>
+    <button class="brief" id="brief" type="button" title="Time, reminders, and top headlines">BRIEFING</button>
+  </div>
 </header>
 <main id="log"></main>
 <form id="form" autocomplete="off">
@@ -91,12 +96,8 @@
       : 'Running in offline echo mode. Set ANTHROPIC_API_KEY and restart to enable AI.');
   }).catch(() => { document.getElementById('mode').textContent = 'UNREACHABLE'; });
 
-  document.getElementById('form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const prompt = box.value.trim();
-    if (!prompt) return;
-    box.value = '';
-    add('you', prompt);
+  async function ask(prompt, shownAs) {
+    add('you', shownAs || prompt);
     send.disabled = true;
     const pending = add('jarvis', '…');
     pending.className = 'thinking';
@@ -119,6 +120,19 @@
       send.disabled = false;
       box.focus();
     }
+  }
+
+  document.getElementById('form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const prompt = box.value.trim();
+    if (!prompt) return;
+    box.value = '';
+    ask(prompt);
+  });
+
+  document.getElementById('brief').addEventListener('click', () => {
+    ask('Give me a startup briefing: current date and time, my saved reminders, '
+        + 'and the top news headlines. Keep it short and spoken-style.', '⚡ BRIEFING');
   });
 </script>
 </body>

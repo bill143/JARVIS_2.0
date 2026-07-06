@@ -146,6 +146,45 @@ class AnthropicPolicyTest {
     }
 
     @Test
+    void personaAddressesTheUserAsSir() {
+        AnthropicPolicy policy = new AnthropicPolicy(request -> OK_RESPONSE, "m", 100);
+        String request = policy.buildRequest(AgentContext.initial("hello"));
+        assertTrue(request.contains("Address the user as 'sir'"));
+        assertTrue(request.contains("never mix languages"));
+    }
+
+    @Test
+    void retryBacksOffExponentiallyThenSucceeds() throws Exception {
+        java.util.List<Long> sleeps = new java.util.ArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        AnthropicPolicy.LlmTransport flaky = request -> {
+            if (calls.incrementAndGet() < 3) {
+                throw new java.io.IOException("503 overloaded");
+            }
+            return OK_RESPONSE;
+        };
+
+        AnthropicPolicy.LlmTransport retrying =
+                AnthropicPolicy.withRetry(flaky, new long[] {1_000, 2_000, 4_000}, sleeps::add);
+        assertEquals(OK_RESPONSE, retrying.complete("{}"));
+        assertEquals(3, calls.get());
+        assertEquals(java.util.List.of(1_000L, 2_000L), sleeps);
+    }
+
+    @Test
+    void retryGivesUpAfterAllAttemptsAndThrowsTheLastError() {
+        AnthropicPolicy.LlmTransport alwaysDown = request -> {
+            throw new java.io.IOException("still down");
+        };
+        AnthropicPolicy.LlmTransport retrying =
+                AnthropicPolicy.withRetry(alwaysDown, new long[] {10, 20}, millis -> { });
+
+        java.io.IOException e = org.junit.jupiter.api.Assertions.assertThrows(
+                java.io.IOException.class, () -> retrying.complete("{}"));
+        assertEquals("still down", e.getMessage());
+    }
+
+    @Test
     void constructorValidation() {
         AnthropicPolicy.LlmTransport transport = request -> OK_RESPONSE;
         assertThrows(NullPointerException.class, () -> new AnthropicPolicy(null, "m", 10));

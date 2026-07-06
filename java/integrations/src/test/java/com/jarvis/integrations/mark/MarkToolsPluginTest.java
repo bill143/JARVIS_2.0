@@ -21,10 +21,11 @@ class MarkToolsPluginTest {
     }
 
     @Test
-    void pluginContributesAllFiveTools() {
+    void pluginContributesAllSixTools() {
         ToolRegistry registry = installed();
-        assertEquals(5, registry.list().size());
-        for (String name : new String[] {"clock", "system_info", "reminder_set", "reminder_list", "open_url"}) {
+        assertEquals(6, registry.list().size());
+        for (String name : new String[] {"clock", "system_info", "reminder_set", "reminder_list",
+                "open_url", "news_search"}) {
             assertTrue(registry.lookup(name).isPresent(), name + " missing");
         }
     }
