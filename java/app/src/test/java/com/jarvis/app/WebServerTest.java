@@ -21,7 +21,7 @@ class WebServerTest {
 
     @BeforeEach
     void startServer() throws Exception {
-        JarvisApi api = AppWiring.buildApi(null, "test-model");
+        JarvisApi api = AppWiring.buildApi(null, "test-model", new com.jarvis.memory.InMemoryStore<>());
         server = WebServer.start(api, false, "test-model", 0);
         base = "http://localhost:" + server.port();
     }

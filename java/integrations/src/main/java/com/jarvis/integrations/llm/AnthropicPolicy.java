@@ -107,11 +107,18 @@ public final class AnthropicPolicy implements AgentPolicy {
 
     /** Creates a tool-aware policy that calls the real Anthropic API with {@code apiKey}. */
     public static AnthropicPolicy withApiKey(String apiKey, String model, ToolRegistry tools) {
+        LlmTransport retrying = withRetry(
+                anthropicTransport(apiKey), new long[] {1_000, 2_000, 4_000}, Thread::sleep);
+        return new AnthropicPolicy(retrying, model, 1024, tools);
+    }
+
+    /** Real Messages API transport for {@code apiKey}; reusable by other API callers (vision). */
+    public static LlmTransport anthropicTransport(String apiKey) {
         Objects.requireNonNull(apiKey, "apiKey");
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(20))
                 .build();
-        LlmTransport transport = requestJson -> {
+        return requestJson -> {
             HttpRequest request = HttpRequest.newBuilder(
                             URI.create("https://api.anthropic.com/v1/messages"))
                     .header("x-api-key", apiKey)
@@ -128,9 +135,6 @@ public final class AnthropicPolicy implements AgentPolicy {
             }
             return response.body();
         };
-        LlmTransport retrying =
-                withRetry(transport, new long[] {1_000, 2_000, 4_000}, Thread::sleep);
-        return new AnthropicPolicy(retrying, model, 1024, tools);
     }
 
     @Override

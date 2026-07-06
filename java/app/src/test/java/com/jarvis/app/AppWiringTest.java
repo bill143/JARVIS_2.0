@@ -15,7 +15,7 @@ class AppWiringTest {
 
     @Test
     void offlineModeAnswersEveryPromptWithEcho() {
-        JarvisApi api = AppWiring.buildApi(null, "any-model");
+        JarvisApi api = AppWiring.buildApi(null, "any-model", new com.jarvis.memory.InMemoryStore<>());
 
         ChatResponse response = api.chat(new ChatRequest("console", "hello there"));
         assertTrue(response.completed());
@@ -24,7 +24,7 @@ class AppWiringTest {
 
     @Test
     void blankKeyAlsoMeansOffline() {
-        JarvisApi api = AppWiring.buildApi("  ", "any-model");
+        JarvisApi api = AppWiring.buildApi("  ", "any-model", new com.jarvis.memory.InMemoryStore<>());
         assertTrue(api.chat(new ChatRequest("console", "hi")).completed());
         assertFalse(AppWiring.isOnline("  "));
         assertFalse(AppWiring.isOnline(null));
@@ -33,7 +33,7 @@ class AppWiringTest {
 
     @Test
     void planPathWorksEndToEndInOfflineMode() {
-        JarvisApi api = AppWiring.buildApi(null, "any-model");
+        JarvisApi api = AppWiring.buildApi(null, "any-model", new com.jarvis.memory.InMemoryStore<>());
 
         PlanResponse response = api.plan(new PlanRequest("console", "tidy the desk"));
         assertTrue(response.succeeded());
@@ -44,7 +44,7 @@ class AppWiringTest {
 
     @Test
     void sessionsAccumulateAcrossTurns() {
-        JarvisApi api = AppWiring.buildApi(null, "any-model");
+        JarvisApi api = AppWiring.buildApi(null, "any-model", new com.jarvis.memory.InMemoryStore<>());
         api.chat(new ChatRequest("console", "one"));
         ChatResponse second = api.chat(new ChatRequest("console", "two"));
         assertTrue(second.completed());

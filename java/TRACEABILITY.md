@@ -92,6 +92,7 @@
 | REQ-STEP-017 | `FatihMakes/Mark-XLVIII` (ideas only — see notes) | Assistant tools (clock, system info, reminders, open URL) as a plugin + tool-aware LLM policy | `integrations / com.jarvis.integrations.mark` + `.llm` | `MarkToolsPlugin.java`, `MarkToolsPluginTest.java`, `AnthropicPolicy.java` (tool protocol), `AnthropicPolicyTest.java` | COMPLETED |
 | REQ-STEP-018 | `FatihMakes/Mark-XLVIII` changelog (ideas only) | Mark-parity where applicable: parallel first-wins news search, exponential-backoff API retry, "sir" persona, one-click startup briefing | `integrations` + `app` | `NewsTool.java`, `NewsToolTest.java`, `AnthropicPolicy.java` (persona + `withRetry`), `dashboard.html` (BRIEFING), `AppWiring.java` (budget 6) | COMPLETED |
 | REQ-STEP-019 | `FatihMakes/Mark-XLVIII` changelog (ideas only) + `open-jarvis/OpenJarvis` voice pattern | Voice v1: browser-native STT/TTS with wake word "Jarvis", instant interrupt (ESC/button), echo guard | `app / dashboard.html` | `dashboard.html` (voice engine), `WebServerTest.java` (feature pins) | COMPLETED |
+| REQ-STEP-020 | `FatihMakes/Mark-XLVIII` capability catalog (ideas only) | Persistent memory (file-backed store), Windows system control (app launch/volume/lock), screen vision via Anthropic vision API | `memory`, `integrations / .mark`, `app` | `FileBackedStore.java` (+test), `SystemControlPlugin.java` (+test), `VisionTool.java` (+test), `AnthropicPolicy.java` (`anthropicTransport` extract), `AppWiring.java` | COMPLETED |
 
 ## REQ-STEP-014/015 notes
 - **Jackson is now in use** — the first (and only) consumer of the whitelisted `jackson-databind`, in `integrations` for Anthropic request/response JSON. Transport is the JDK's built-in `java.net.http.HttpClient`; the external dependency whitelist is still just Jackson + JUnit.
@@ -120,6 +121,12 @@
 - **Instant interrupt (Mark item ✋):** ESC key or the INTERRUPT button calls `speechSynthesis.cancel()` — cutoff is immediate (no buffer draining), and the `onend` handler resumes listening.
 - **Echo guard (Mark item 🛡️):** recognition is stopped before synthesis starts and restarted only after speech ends, so the microphone never hears JARVIS's own voice; mic-permission denial degrades to a visible status message with voice mode off.
 - Voice responses reuse the exact chat pipeline (`/chat`); voice is a presentation-layer feature, the platform is unchanged.
+
+## REQ-STEP-020 notes
+- **Persistent memory:** `FileBackedStore` implements the Step 2 `MemoryStore` interface (the durable backend deferred in REQ-STEP-002) — tab-separated, URL-encoded lines, atomic rewrite on mutation, stdlib only. Production wiring uses `~/.jarvis/memory.tsv`, so reminders and session history survive restarts; tests inject `InMemoryStore` via the new `buildApi` overload.
+- **System control:** `SystemControlPlugin` (Windows) — `app_launch` accepts a fixed whitelist of app names only (never arbitrary commands), `volume` synthesizes media keys via hidden PowerShell `SendKeys`, `lock_screen` uses `rundll32 user32.dll,LockWorkStation`. Non-Windows returns a graceful error. Command-runner seam keeps tests execution-free.
+- **Vision:** `VisionTool` (`screen_look`) captures the primary display with AWT `Robot`, base64s the PNG into an Anthropic vision request, and returns the model's description. Screenshots are sent to the API only and never written to disk; headless environments fail gracefully. Registered only when an API key exists. `AnthropicPolicy.anthropicTransport` was extracted so policy and vision share one API transport.
+- License boundary unchanged: Mark-XLVIII capability names only; all-original Java. Whitelist unchanged.
 
 ## Build-complete summary (Steps 1–12)
 - All 12 requirements COMPLETED. Module dependency graph (all one-directional, no cycles): `core-agent → {tool-execution, memory, planning}`, `integrations → tool-execution`, `api → core-agent`; `rag`, `speech`, `ui` are dependency-free.

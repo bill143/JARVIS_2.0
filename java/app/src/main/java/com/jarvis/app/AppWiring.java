@@ -9,20 +9,24 @@ import com.jarvis.api.JarvisApi;
 import com.jarvis.integrations.PluginManager;
 import com.jarvis.integrations.llm.AnthropicPolicy;
 import com.jarvis.integrations.mark.MarkToolsPlugin;
-import com.jarvis.memory.InMemoryStore;
+import com.jarvis.integrations.mark.SystemControlPlugin;
+import com.jarvis.integrations.mark.VisionTool;
+import com.jarvis.memory.FileBackedStore;
 import com.jarvis.memory.MemoryStore;
 import com.jarvis.planning.Plan;
 import com.jarvis.planning.PlanStep;
 import com.jarvis.planning.Planner;
 import com.jarvis.tools.ToolRegistry;
+import java.nio.file.Path;
 import java.util.List;
 
 /**
  * Composition root: assembles the platform into a usable {@link JarvisApi}.
  *
- * <p>The Mark-inspired tool plugin is always installed. With an Anthropic API key the fallback
- * policy is a tool-aware Claude; without one the app still runs in an offline echo mode so the
- * pipeline can be exercised end-to-end before any key exists.
+ * <p>Memory is file-backed at {@code ~/.jarvis/memory.tsv} so reminders and session history
+ * survive restarts. The Mark tool plugin and Windows system-control plugin are always installed;
+ * screen vision is added only when an API key exists (it needs the vision API). Without a key the
+ * app runs in offline echo mode.
  */
 final class AppWiring {
 
@@ -33,14 +37,26 @@ final class AppWiring {
     private AppWiring() {
     }
 
+    /** Production wiring with durable memory in the user's home directory. */
     static JarvisApi buildApi(String apiKey, String model) {
-        MemoryStore<String> memory = new InMemoryStore<>();
-        ToolRegistry tools = new ToolRegistry();
-        new PluginManager(tools).install(new MarkToolsPlugin(memory));
+        Path memoryFile = Path.of(System.getProperty("user.home"), ".jarvis", "memory.tsv");
+        return buildApi(apiKey, model, new FileBackedStore(memoryFile));
+    }
 
-        AgentPolicy policy = isOnline(apiKey)
-                ? AnthropicPolicy.withApiKey(apiKey, model, tools)
-                : context -> new Decision.Respond(OFFLINE_HINT + context.input());
+    /** Wiring with an injectable store (tests use an in-memory one). */
+    static JarvisApi buildApi(String apiKey, String model, MemoryStore<String> memory) {
+        ToolRegistry tools = new ToolRegistry();
+        PluginManager plugins = new PluginManager(tools);
+        plugins.install(new MarkToolsPlugin(memory));
+        plugins.install(new SystemControlPlugin());
+
+        AgentPolicy policy;
+        if (isOnline(apiKey)) {
+            tools.register(new VisionTool(AnthropicPolicy.anthropicTransport(apiKey), model));
+            policy = AnthropicPolicy.withApiKey(apiKey, model, tools);
+        } else {
+            policy = context -> new Decision.Respond(OFFLINE_HINT + context.input());
+        }
         PromptRouter<AgentPolicy> router = new PromptRouter<>(List.of());
         Planner planner = goal -> new Plan(goal, List.of(PlanStep.pending("goal", goal)));
         // Budget 6: a briefing legitimately chains clock + reminders + news before answering.
