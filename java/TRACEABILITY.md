@@ -82,6 +82,20 @@
 - Placeholder by mandate (spec UI inspiration only): the module ships the minimal rendering seam a future UI mounts onto — `UiRenderer` + `UiMessage` — and `PlainTextRenderer` writing `role> text` lines to any `Appendable`, purely to prove the seam renders.
 - Deliberately zero dependencies (not even internal): nothing in the platform depends on `ui`, and `ui` depends on nothing, so any real UI (console, desktop, web) can replace this wholesale. External whitelist unchanged (Jackson still unused).
 
+## Phase 7 (post-spec, user-approved)
+| Requirement ID | Source Repo | Capability | Target Module/Package | Files | Status |
+|---|---|---|---|---|---|
+| REQ-STEP-013 | N/A (build tooling) | Maven Wrapper so local builds need no Maven install | `java/` root | `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties` | COMPLETED |
+| REQ-STEP-014 | N/A (Anthropic Messages API, spec LLM seam) | Claude-backed `AgentPolicy` (first real reasoning engine) | `integrations / com.jarvis.integrations.llm` | `AnthropicPolicy.java`, `AnthropicPolicyTest.java` | COMPLETED |
+| REQ-STEP-015 | N/A (runnable entry point) | Console launcher + executable fat jar | `app / com.jarvis.app` | `Main.java`, `AppWiring.java`, `AppWiringTest.java`, `app/pom.xml` | COMPLETED |
+
+## REQ-STEP-014/015 notes
+- **Jackson is now in use** — the first (and only) consumer of the whitelisted `jackson-databind`, in `integrations` for Anthropic request/response JSON. Transport is the JDK's built-in `java.net.http.HttpClient`; the external dependency whitelist is still just Jackson + JUnit.
+- `AnthropicPolicy` sits behind the existing `AgentPolicy` seam; a transport interface makes it fully testable offline. API failures become graceful `Respond` messages, never loop-crashing exceptions. Model defaults to `claude-sonnet-5`, overridable via `JARVIS_MODEL`; key via `ANTHROPIC_API_KEY`.
+- **Internal deps added:** `integrations → core-agent` (for the policy seam) and the new `app` module → `{api, integrations, ui}`. Still no cycles.
+- `app` is the composition root: router (empty, fallback-only) + Claude-or-offline-echo policy + trivial single-step planner + `InMemoryStore` + `ToolRegistry`, exposed as `JarvisApi`, driven by a stdin/stdout console loop rendered through the ui module. Without a key the app runs in offline echo mode, so the pipeline is exercisable before any credentials exist.
+- Packaging: `maven-shade-plugin` (build plugin, not a dependency) produces the self-contained executable `app/target/jarvis.jar` (`Main-Class: com.jarvis.app.Main`).
+
 ## Build-complete summary (Steps 1–12)
 - All 12 requirements COMPLETED. Module dependency graph (all one-directional, no cycles): `core-agent → {tool-execution, memory, planning}`, `integrations → tool-execution`, `api → core-agent`; `rag`, `speech`, `ui` are dependency-free.
 - External dependency whitelist was never expanded: JUnit 5 (test scope) is the only dependency in use; Jackson remains available in `dependencyManagement` and unused.
