@@ -91,6 +91,7 @@
 | REQ-STEP-016 | N/A (user-requested dashboard) | Browser dashboard over JDK built-in HTTP server (`GET /`, `GET /status`, `POST /chat`) | `app / com.jarvis.app` | `WebServer.java`, `resources/dashboard.html`, `WebServerTest.java`, `Main.java` (web default, `--console` fallback) | COMPLETED |
 | REQ-STEP-017 | `FatihMakes/Mark-XLVIII` (ideas only — see notes) | Assistant tools (clock, system info, reminders, open URL) as a plugin + tool-aware LLM policy | `integrations / com.jarvis.integrations.mark` + `.llm` | `MarkToolsPlugin.java`, `MarkToolsPluginTest.java`, `AnthropicPolicy.java` (tool protocol), `AnthropicPolicyTest.java` | COMPLETED |
 | REQ-STEP-018 | `FatihMakes/Mark-XLVIII` changelog (ideas only) | Mark-parity where applicable: parallel first-wins news search, exponential-backoff API retry, "sir" persona, one-click startup briefing | `integrations` + `app` | `NewsTool.java`, `NewsToolTest.java`, `AnthropicPolicy.java` (persona + `withRetry`), `dashboard.html` (BRIEFING), `AppWiring.java` (budget 6) | COMPLETED |
+| REQ-STEP-019 | `FatihMakes/Mark-XLVIII` changelog (ideas only) + `open-jarvis/OpenJarvis` voice pattern | Voice v1: browser-native STT/TTS with wake word "Jarvis", instant interrupt (ESC/button), echo guard | `app / dashboard.html` | `dashboard.html` (voice engine), `WebServerTest.java` (feature pins) | COMPLETED |
 
 ## REQ-STEP-014/015 notes
 - **Jackson is now in use** — the first (and only) consumer of the whitelisted `jackson-databind`, in `integrations` for Anthropic request/response JSON. Transport is the JDK's built-in `java.net.http.HttpClient`; the external dependency whitelist is still just Jackson + JUnit.
@@ -112,6 +113,13 @@
 - **Persona:** system prompt now addresses the user as "sir" and forbids mixed-language replies (the language-aware address point, English-only here).
 - **Startup briefing:** dashboard BRIEFING button sends a canned prompt that chains clock + reminder_list + news_search; loop budget raised 4 → 6 to accommodate it. The upstream two-phase audio overlap is voice-specific and deferred with voice.
 - **Not ported (voice/vision-specific):** instant interrupt, vision acknowledgment/cooldown/echo guard. **Already true by design:** session state isolation (immutable contexts, no cross-session flags). **Not applicable:** zero terminal windows (no subprocess spawning).
+
+## REQ-STEP-019 notes (voice v1)
+- Implementation is **browser-native** (Web Speech API: `SpeechRecognition` + `speechSynthesis` in Chromium browsers) living entirely in `dashboard.html` — no server-side audio, no new dependencies, no API keys. The Step 9 Java speech adapters (`SpeechToText`/`TextToSpeech`/`VoicePipeline`) remain the seam for a future native/server-side engine; this step deliberately does not use them.
+- Wake word: utterances must contain "jarvis" (case-insensitive); the wake word and everything before it are stripped from the prompt — mirroring the Step 9 `VoicePipeline` semantics client-side. Bare "Jarvis" gets a "Yes, sir?" prompt-back.
+- **Instant interrupt (Mark item ✋):** ESC key or the INTERRUPT button calls `speechSynthesis.cancel()` — cutoff is immediate (no buffer draining), and the `onend` handler resumes listening.
+- **Echo guard (Mark item 🛡️):** recognition is stopped before synthesis starts and restarted only after speech ends, so the microphone never hears JARVIS's own voice; mic-permission denial degrades to a visible status message with voice mode off.
+- Voice responses reuse the exact chat pipeline (`/chat`); voice is a presentation-layer feature, the platform is unchanged.
 
 ## Build-complete summary (Steps 1–12)
 - All 12 requirements COMPLETED. Module dependency graph (all one-directional, no cycles): `core-agent → {tool-execution, memory, planning}`, `integrations → tool-execution`, `api → core-agent`; `rag`, `speech`, `ui` are dependency-free.

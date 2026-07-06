@@ -49,6 +49,11 @@ class WebServerTest {
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("J.A.R.V.I.S."));
         assertTrue(response.headers().firstValue("Content-Type").orElse("").contains("text/html"));
+        // Feature pins: briefing + voice controls stay on the page.
+        assertTrue(response.body().contains("BRIEFING"));
+        assertTrue(response.body().contains("VOICE"));
+        assertTrue(response.body().contains("INTERRUPT"));
+        assertTrue(response.body().contains("speechSynthesis"));
     }
 
     @Test

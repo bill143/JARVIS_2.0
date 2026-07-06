@@ -23,6 +23,15 @@
   .brief { background:none; border:1px solid var(--line); border-radius:6px; color:var(--cyan);
            font-size:11px; letter-spacing:2px; padding:7px 14px; cursor:pointer; margin-left:16px; }
   .brief:hover { border-color:var(--cyan); }
+  .voice { background:none; border:1px solid var(--line); border-radius:6px; color:var(--dim);
+           font-size:11px; letter-spacing:2px; padding:7px 14px; cursor:pointer; margin-left:8px; }
+  .voice.on { color:#38e28e; border-color:#1f7a4f; }
+  .voice:hover { border-color:var(--cyan); }
+  .interrupt { display:none; background:#4a1420; border:1px solid #a03040; border-radius:6px;
+               color:#ffb3c0; font-size:11px; letter-spacing:2px; padding:7px 14px;
+               cursor:pointer; margin-left:8px; }
+  .interrupt.show { display:inline-block; }
+  .vstate { font-size:10px; letter-spacing:2px; color:var(--dim); margin-left:8px; }
   .dot { width:9px; height:9px; border-radius:50%; background:#5a6b80; }
   .dot.on  { background:#38e28e; box-shadow:0 0 8px #38e28e; }
   .dot.off { background:#ffb84d; box-shadow:0 0 8px #ffb84d; }
@@ -55,6 +64,10 @@
   </div>
   <div class="status"><span class="dot" id="dot"></span><span id="mode">CONNECTING…</span>
     <button class="brief" id="brief" type="button" title="Time, reminders, and top headlines">BRIEFING</button>
+    <button class="voice" id="voice" type="button"
+            title="Toggle voice mode - say 'Jarvis, ...' to talk; ESC interrupts">🎤 VOICE</button>
+    <button class="interrupt" id="interrupt" type="button" title="Stop JARVIS mid-sentence (or press ESC)">✋ INTERRUPT</button>
+    <span class="vstate" id="vstate"></span>
   </div>
 </header>
 <main id="log"></main>
@@ -113,6 +126,7 @@
         m.textContent = 'used ' + j.toolSteps + ' tool step' + (j.toolSteps > 1 ? 's' : '');
         pending.parentElement.appendChild(m);
       }
+      speak(j.response);
     } catch (err) {
       pending.className = '';
       pending.textContent = 'Connection error: ' + err.message;
@@ -134,6 +148,87 @@
     ask('Give me a startup briefing: current date and time, my saved reminders, '
         + 'and the top news headlines. Keep it short and spoken-style.', '⚡ BRIEFING');
   });
+
+  // ---------- Voice: browser-native STT/TTS with wake word, echo guard, instant interrupt ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const voiceBtn = document.getElementById('voice');
+  const interruptBtn = document.getElementById('interrupt');
+  const vstate = document.getElementById('vstate');
+  let voiceOn = false, speaking = false, recog = null;
+
+  function setVoiceState(text) { vstate.textContent = text; }
+
+  function speak(text) {
+    if (!voiceOn || !window.speechSynthesis) return;
+    stopListening();                       // echo guard: never listen to our own voice
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05;
+    const voices = speechSynthesis.getVoices();
+    u.voice = voices.find(v => /en-GB/i.test(v.lang) && /male|george|ryan/i.test(v.name))
+           || voices.find(v => /en-GB/i.test(v.lang)) || null;
+    speaking = true;
+    interruptBtn.classList.add('show');
+    setVoiceState('SPEAKING — ESC TO INTERRUPT');
+    u.onend = u.onerror = () => {
+      speaking = false;
+      interruptBtn.classList.remove('show');
+      if (voiceOn) startListening();
+    };
+    speechSynthesis.speak(u);
+  }
+
+  function interrupt() {
+    if (speaking && window.speechSynthesis) speechSynthesis.cancel();  // fires onend -> resumes listening
+  }
+
+  function startListening() {
+    if (!SR || recog || !voiceOn || speaking) return;
+    recog = new SR();
+    recog.continuous = true;
+    recog.lang = 'en-US';
+    recog.onresult = (e) => {
+      const t = e.results[e.results.length - 1][0].transcript.trim();
+      const i = t.toLowerCase().indexOf('jarvis');
+      if (i < 0) return;                   // wake word required; everything else ignored
+      const prompt = t.slice(i + 6).replace(/^[,.!?\s]+/, '').trim();
+      if (prompt) ask(prompt, '🎤 ' + prompt);
+      else speak('Yes, sir?');
+    };
+    recog.onend = () => { recog = null; if (voiceOn && !speaking) setTimeout(startListening, 250); };
+    recog.onerror = (e) => {
+      if (e.error === 'not-allowed') {
+        voiceOn = false;
+        voiceBtn.classList.remove('on');
+        setVoiceState('MIC BLOCKED — ALLOW MICROPHONE IN THE BROWSER');
+      }
+    };
+    try { recog.start(); setVoiceState('LISTENING — SAY "JARVIS, …"'); } catch (err) { recog = null; }
+  }
+
+  function stopListening() {
+    if (recog) { const r = recog; recog = null; r.onend = null; try { r.stop(); } catch (err) {} }
+  }
+
+  voiceBtn.addEventListener('click', () => {
+    if (!SR || !window.speechSynthesis) { setVoiceState('VOICE NOT SUPPORTED IN THIS BROWSER'); return; }
+    voiceOn = !voiceOn;
+    voiceBtn.classList.toggle('on', voiceOn);
+    if (voiceOn) {
+      startListening();
+      speak('Voice mode enabled, sir.');
+    } else {
+      speechSynthesis.cancel();
+      stopListening();
+      speaking = false;
+      interruptBtn.classList.remove('show');
+      setVoiceState('');
+    }
+  });
+
+  interruptBtn.addEventListener('click', interrupt);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') interrupt(); });
+  if (window.speechSynthesis) speechSynthesis.getVoices();  // warm the voice list
 </script>
 </body>
 </html>
