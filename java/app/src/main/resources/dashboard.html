@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J.A.R.V.I.S.</title>
+<style>
+  :root { --bg:#060b14; --panel:#0c1524; --line:#12233d; --cyan:#41d9ff; --dim:#7a93b4; --text:#d9e6f5; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:radial-gradient(1200px 600px at 50% -10%, #0d2036 0%, var(--bg) 60%);
+         color:var(--text); font:15px/1.5 "Segoe UI", system-ui, sans-serif;
+         height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; gap:14px; padding:16px 24px;
+           border-bottom:1px solid var(--line); background:rgba(6,11,20,.7); }
+  .core { width:34px; height:34px; border-radius:50%;
+          background:radial-gradient(circle, #bdf3ff 0%, var(--cyan) 35%, rgba(65,217,255,.12) 70%);
+          box-shadow:0 0 18px 4px rgba(65,217,255,.45); animation:pulse 2.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow:0 0 26px 8px rgba(65,217,255,.65); } }
+  h1 { font-size:19px; letter-spacing:6px; font-weight:600; color:#eaf7ff; }
+  .sub { font-size:11px; letter-spacing:2px; color:var(--dim); }
+  .status { margin-left:auto; display:flex; align-items:center; gap:8px;
+            font-size:12px; letter-spacing:1px; color:var(--dim); }
+  .dot { width:9px; height:9px; border-radius:50%; background:#5a6b80; }
+  .dot.on  { background:#38e28e; box-shadow:0 0 8px #38e28e; }
+  .dot.off { background:#ffb84d; box-shadow:0 0 8px #ffb84d; }
+  main { flex:1; overflow-y:auto; padding:24px; display:flex; flex-direction:column; gap:12px; }
+  .msg { max-width:72%; padding:10px 14px; border-radius:12px; white-space:pre-wrap; word-wrap:break-word; }
+  .you    { align-self:flex-end; background:#123252; border:1px solid #1c4a77; border-bottom-right-radius:3px; }
+  .jarvis { align-self:flex-start; background:var(--panel); border:1px solid var(--line);
+            border-left:2px solid var(--cyan); border-bottom-left-radius:3px; }
+  .who { font-size:10px; letter-spacing:2px; color:var(--dim); margin-bottom:3px; text-transform:uppercase; }
+  .meta { font-size:10px; color:var(--dim); margin-top:5px; }
+  .thinking { color:var(--dim); font-style:italic; }
+  form { display:flex; gap:10px; padding:16px 24px; border-top:1px solid var(--line);
+         background:rgba(6,11,20,.7); }
+  input { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:8px;
+          color:var(--text); padding:12px 14px; font:inherit; outline:none; }
+  input:focus { border-color:var(--cyan); box-shadow:0 0 0 2px rgba(65,217,255,.15); }
+  button { background:linear-gradient(180deg, #14406b, #0e2c4b); color:#cfeeff;
+           border:1px solid #1c4a77; border-radius:8px; padding:0 22px; font:inherit;
+           letter-spacing:1px; cursor:pointer; }
+  button:hover { border-color:var(--cyan); }
+  button:disabled { opacity:.4; cursor:default; }
+</style>
+</head>
+<body>
+<header>
+  <div class="core"></div>
+  <div>
+    <h1>J.A.R.V.I.S.</h1>
+    <div class="sub">JUST A RATHER VERY INTELLIGENT SYSTEM</div>
+  </div>
+  <div class="status"><span class="dot" id="dot"></span><span id="mode">CONNECTING…</span></div>
+</header>
+<main id="log"></main>
+<form id="form" autocomplete="off">
+  <input id="box" placeholder="Ask JARVIS anything…" autofocus>
+  <button id="send" type="submit">SEND</button>
+</form>
+<script>
+  const log = document.getElementById('log');
+  const box = document.getElementById('box');
+  const send = document.getElementById('send');
+
+  function add(who, text, meta) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (who === 'you' ? 'you' : 'jarvis');
+    const label = document.createElement('div');
+    label.className = 'who';
+    label.textContent = who;
+    const body = document.createElement('div');
+    body.textContent = text;
+    div.appendChild(label);
+    div.appendChild(body);
+    if (meta) {
+      const m = document.createElement('div');
+      m.className = 'meta';
+      m.textContent = meta;
+      div.appendChild(m);
+    }
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return body;
+  }
+
+  fetch('/status').then(r => r.json()).then(s => {
+    document.getElementById('dot').className = 'dot ' + (s.online ? 'on' : 'off');
+    document.getElementById('mode').textContent = s.online ? ('ONLINE · ' + s.model.toUpperCase()) : 'OFFLINE ECHO MODE';
+    add('jarvis', s.online
+      ? 'Online and ready. How can I help?'
+      : 'Running in offline echo mode. Set ANTHROPIC_API_KEY and restart to enable AI.');
+  }).catch(() => { document.getElementById('mode').textContent = 'UNREACHABLE'; });
+
+  document.getElementById('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const prompt = box.value.trim();
+    if (!prompt) return;
+    box.value = '';
+    add('you', prompt);
+    send.disabled = true;
+    const pending = add('jarvis', '…');
+    pending.className = 'thinking';
+    try {
+      const r = await fetch('/chat', { method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({prompt}) });
+      const j = await r.json();
+      pending.className = '';
+      pending.textContent = j.response;
+      if (j.toolSteps > 0) {
+        const m = document.createElement('div');
+        m.className = 'meta';
+        m.textContent = 'used ' + j.toolSteps + ' tool step' + (j.toolSteps > 1 ? 's' : '');
+        pending.parentElement.appendChild(m);
+      }
+    } catch (err) {
+      pending.className = '';
+      pending.textContent = 'Connection error: ' + err.message;
+    } finally {
+      send.disabled = false;
+      box.focus();
+    }
+  });
+</script>
+</body>
+</html>
