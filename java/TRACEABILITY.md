@@ -13,7 +13,7 @@
 | REQ-STEP-009 | `open-jarvis/OpenJarvis` (upstream authoritative) | Voice interaction pattern: wake-gated audio→transcribe→handle→synthesize turn pipeline over STT/TTS adapter contracts | `speech / com.jarvis.speech` | `speech/src/main/java/com/jarvis/speech/{VoicePipeline,SpeechToText,TextToSpeech,PromptHandler,AudioClip,Transcription,VoiceTurn}.java`, `speech/src/test/java/com/jarvis/speech/VoicePipelineTest.java` | COMPLETED |
 | REQ-STEP-010 | `paperclipai/paperclip` | Plugin/tool adapter pattern (secondary): self-describing plugins contributing tools through validated instance-wide registration | `integrations / com.jarvis.integrations` | `integrations/src/main/java/com/jarvis/integrations/{Plugin,PluginDescriptor,PluginManager}.java`, `integrations/src/test/java/com/jarvis/integrations/PluginManagerTest.java` | COMPLETED |
 | REQ-STEP-011 | N/A (spec public interface requirement) | API surface: transport-free programmatic facade (`JarvisApi`) over the orchestrator with public request/response types | `api / com.jarvis.api` | `api/src/main/java/com/jarvis/api/{JarvisApi,DefaultJarvisApi,ChatRequest,ChatResponse,PlanRequest,PlanResponse}.java`, `api/src/test/java/com/jarvis/api/DefaultJarvisApiTest.java` | COMPLETED |
-| REQ-STEP-012 | N/A (spec UI inspiration only) | UI inspiration placeholder | `ui / com.jarvis.ui` | `ui/src/main/java/com/jarvis/ui/*` | NOT STARTED |
+| REQ-STEP-012 | N/A (spec UI inspiration only) | UI inspiration placeholder: rendering seam (`UiRenderer`) + message type + trivial text renderer | `ui / com.jarvis.ui` | `ui/src/main/java/com/jarvis/ui/{UiRenderer,UiMessage,PlainTextRenderer}.java`, `ui/src/test/java/com/jarvis/ui/PlainTextRendererTest.java` | COMPLETED |
 
 ## Notes
 - Dependency whitelist in effect: `com.fasterxml.jackson:jackson-databind`, `org.junit.jupiter:junit-jupiter` only.
@@ -77,3 +77,11 @@
 - **Transport-free by design:** the dependency whitelist admits no web framework, so no HTTP/websocket binding was implemented. A transport layer would wrap `JarvisApi` in a later phase without changing it.
 - `DefaultJarvisApi` is a thin mapping layer over the Step 8 `Orchestrator` — no logic of its own. Response types follow the platform's "value XOR not-completed" invariant idiom (`ChatResponse`, `PlanResponse.StepOutcome`).
 - **Internal module dependency added:** `api → core-agent` (transitively tool-execution, memory, planning). No cycles; external whitelist unchanged (Jackson still unused).
+
+## REQ-STEP-012 notes
+- Placeholder by mandate (spec UI inspiration only): the module ships the minimal rendering seam a future UI mounts onto — `UiRenderer` + `UiMessage` — and `PlainTextRenderer` writing `role> text` lines to any `Appendable`, purely to prove the seam renders.
+- Deliberately zero dependencies (not even internal): nothing in the platform depends on `ui`, and `ui` depends on nothing, so any real UI (console, desktop, web) can replace this wholesale. External whitelist unchanged (Jackson still unused).
+
+## Build-complete summary (Steps 1–12)
+- All 12 requirements COMPLETED. Module dependency graph (all one-directional, no cycles): `core-agent → {tool-execution, memory, planning}`, `integrations → tool-execution`, `api → core-agent`; `rag`, `speech`, `ui` are dependency-free.
+- External dependency whitelist was never expanded: JUnit 5 (test scope) is the only dependency in use; Jackson remains available in `dependencyManagement` and unused.
