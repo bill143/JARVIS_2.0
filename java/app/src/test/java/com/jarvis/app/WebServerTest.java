@@ -118,6 +118,38 @@ class WebServerTest {
         assertTrue(body.contains("SETTINGS"));
         assertTrue(body.contains("id=\"s_lang\""));   // language now lives in the settings drawer
         assertTrue(body.contains("id=\"drawer\""));
+        assertTrue(body.contains("MAIL"));            // workspace tabs
+        assertTrue(body.contains("CALENDAR"));
+        assertTrue(body.contains("id=\"wsp\""));
+    }
+
+    @Test
+    void mailAndCalendarReturn503WhenGoogleNotWired() throws Exception {
+        assertEquals(503, get("/mail").statusCode());
+        assertEquals(503, get("/calendar").statusCode());
+    }
+
+    @Test
+    void instructionsRoundTripThroughMemory() throws Exception {
+        com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                true, "m", 0, new HardwareMonitor(), null, true, null, memory);
+        try {
+            String base = "http://localhost:" + wired.port() + "/instructions";
+            client.send(HttpRequest.newBuilder(URI.create(base))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            "{\"area\":\"mail\",\"text\":\"flag client emails\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> got = client.send(
+                    HttpRequest.newBuilder(URI.create(base)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(got.body().contains("flag client emails"));
+            assertEquals("flag client emails", memory.get("instructions", "mail").orElseThrow().value());
+        } finally {
+            wired.stop();
+        }
     }
 
     @Test

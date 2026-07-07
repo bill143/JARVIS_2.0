@@ -55,7 +55,8 @@ public final class Main {
             runtime.monitor().start(30);   // hardware telemetry every 30s
         }
         WebServer server = WebServer.start(api, online, model, port,
-                runtime.monitor(), runtime.vision(), runtime.googleConnected());
+                runtime.monitor(), runtime.vision(), runtime.googleConnected(),
+                runtime.googleService(), runtime.memory());
         String url = "http://localhost:" + server.port();
         System.out.println();
         System.out.println("  J.A.R.V.I.S. is running.");

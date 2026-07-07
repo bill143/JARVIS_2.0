@@ -151,6 +151,27 @@
                 border-radius:6px; padding:6px 14px; font:inherit; cursor:pointer; }
   .hint { font-size:11px; color:var(--dim); margin-top:2px; }
   .danger { background:#3a1420 !important; border-color:#a03040 !important; color:#ffb3c0 !important; }
+
+  /* Workspace overlay (MAIL / CALENDAR) */
+  .wsp { position:fixed; z-index:22; top:50%; left:50%;
+         transform:translate(-50%,-50%) scale(.97); width:780px; max-width:94vw; height:84vh;
+         background:#0a1524; border:1px solid var(--line); border-radius:14px; display:flex;
+         flex-direction:column; opacity:0; pointer-events:none; transition:.2s;
+         box-shadow:0 30px 80px rgba(0,0,0,.6); }
+  .wsp.open { opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1); }
+  .wsp-head { display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid var(--line); }
+  .wsp-head h2 { font-size:15px; letter-spacing:4px; color:#eaf7ff; }
+  .wsp-head .spacer { margin-left:auto; }
+  .wsp-body { flex:1; overflow-y:auto; padding:14px 18px; }
+  .wrow { border:1px solid var(--line); border-radius:9px; padding:11px 13px; margin:9px 0;
+          background:rgba(8,18,30,.6); }
+  .wrow .subj { color:#eaf7ff; font-weight:600; font-size:14px; }
+  .wrow .from { font-size:12px; color:var(--dim); margin-top:2px; }
+  .wrow .snip { font-size:12.5px; color:var(--text); margin-top:5px; }
+  .wrow .when { font-size:12px; color:var(--cyan); margin-top:2px; }
+  .wsp-empty { text-align:center; color:var(--dim); padding:40px; }
+  .wsp textarea { width:100%; min-height:80px; background:rgba(8,18,30,.8); color:var(--text);
+         border:1px solid var(--line); border-radius:8px; padding:9px 11px; font:inherit; font-size:13px; }
 </style>
 </head>
 <body>
@@ -160,6 +181,8 @@
     <div><h1>J.A.R.V.I.S.</h1><div class="sub">JUST A RATHER VERY INTELLIGENT SYSTEM</div></div>
     <div class="tools">
       <button class="hbtn" id="brief" type="button" title="Time, reminders, weather, headlines">BRIEFING</button>
+      <button class="hbtn" id="mailTab" type="button" title="Your Gmail">✉ MAIL</button>
+      <button class="hbtn" id="calTab" type="button" title="Your Google Calendar">📅 CALENDAR</button>
       <button class="hbtn" id="voice" type="button" title="Toggle voice; say your wake word, ESC interrupts">🎤 VOICE</button>
       <button class="hbtn" id="camera" type="button" title="Look through the webcam">📷 CAMERA</button>
       <button class="hbtn" id="settings" type="button" title="All settings">⚙ SETTINGS</button>
@@ -295,6 +318,36 @@
   </div>
 </aside>
 
+<div class="scrim" id="scrim2"></div>
+<div class="wsp" id="wsp">
+  <div class="wsp-head">
+    <h2 id="wspTitle">MAIL</h2>
+    <span class="spacer"></span>
+    <button class="hbtn" id="wspRefresh" type="button">↻ Refresh</button>
+    <button class="hbtn" id="wspGear" type="button">⚙ Settings</button>
+    <button class="hbtn" id="wspClose" type="button">CLOSE</button>
+  </div>
+  <div class="wsp-body" id="wspList"></div>
+  <div class="wsp-body" id="wspMailSettings" hidden>
+    <h4 style="color:var(--cyan);letter-spacing:3px;font-size:11px;margin-bottom:12px;">MAIL SETTINGS</h4>
+    <div class="row"><label for="m_query">Filter (Gmail search)</label>
+      <input type="text" id="m_query" placeholder="in:inbox"></div>
+    <div class="hint">Examples: <b>is:unread</b> · <b>from:client@x.com</b> · <b>is:important newer_than:7d</b></div>
+    <div class="row"><label for="m_max">How many to load</label><input type="number" id="m_max" min="1" max="25"></div>
+    <div class="row" style="display:block;"><label for="m_instr">Directions / action items for JARVIS (email)</label>
+      <textarea id="m_instr" placeholder="e.g. Flag anything from a client as urgent. Draft replies in a friendly, brief tone. Never send without asking me."></textarea></div>
+    <div class="hint">JARVIS follows these whenever he handles your email.</div>
+  </div>
+  <div class="wsp-body" id="wspCalSettings" hidden>
+    <h4 style="color:var(--cyan);letter-spacing:3px;font-size:11px;margin-bottom:12px;">CALENDAR SETTINGS</h4>
+    <div class="row"><label for="c_max">How many upcoming events</label><input type="number" id="c_max" min="1" max="50"></div>
+    <div class="row"><label for="c_dur">Default event length (minutes)</label><input type="number" id="c_dur" min="5" max="480"></div>
+    <div class="row" style="display:block;"><label for="c_instr">Directions / action items for JARVIS (calendar)</label>
+      <textarea id="c_instr" placeholder="e.g. Always schedule 30-minute buffers between site visits. Remind me the evening before any client meeting. Default new events to my Central time zone."></textarea></div>
+    <div class="hint">JARVIS follows these whenever he handles your calendar.</div>
+  </div>
+</div>
+
 <script>
   const log = document.getElementById('log');
   const box = document.getElementById('box');
@@ -305,7 +358,8 @@
 
   // ---------- Settings ----------
   const DEFAULTS = { voiceOnStart:false, autoSpeak:true, lang:'en-US', voiceName:'', rate:1.05,
-    wakeWord:'jarvis', autoBrief:true, city:'', showAlerts:true, speakAlerts:true, cpu:90, ram:90 };
+    wakeWord:'jarvis', autoBrief:true, city:'', showAlerts:true, speakAlerts:true, cpu:90, ram:90,
+    mailQuery:'in:inbox', mailMax:12, calMax:15, calDuration:60 };
   let S = Object.assign({}, DEFAULTS);
   try { S = Object.assign(S, JSON.parse(localStorage.getItem('jarvisSettings') || '{}')); } catch (e) {}
   function saveSettings() { localStorage.setItem('jarvisSettings', JSON.stringify(S)); }
@@ -558,6 +612,79 @@
   scrim.addEventListener('click',closeSettings);
   document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeSettings(); });
   pushServerConfig();
+
+  // ---------- MAIL / CALENDAR workspace ----------
+  const wsp=$('wsp'), scrim2=$('scrim2'), wspList=$('wspList');
+  let currentTab=null, showingSettings=false;
+
+  function openWorkspace(tab) {
+    if (!isOnline) { add('jarvis','Set an API key first, sir.'); return; }
+    currentTab=tab; showingSettings=false;
+    $('wspTitle').textContent = tab==='mail' ? '✉  MAIL' : '📅  CALENDAR';
+    viewList();
+    wsp.classList.add('open'); scrim2.classList.add('open');
+    loadWorkspace();
+    loadInstructions();
+  }
+  function closeWorkspace(){ wsp.classList.remove('open'); scrim2.classList.remove('open'); }
+  function viewList(){ showingSettings=false; wspList.hidden=false;
+    $('wspMailSettings').hidden=true; $('wspCalSettings').hidden=true; }
+  function viewSettings(){ showingSettings=true; wspList.hidden=true;
+    $('wspMailSettings').hidden = currentTab!=='mail';
+    $('wspCalSettings').hidden = currentTab!=='calendar';
+    // reflect current values
+    $('m_query').value=S.mailQuery; $('m_max').value=S.mailMax;
+    $('c_max').value=S.calMax; $('c_dur').value=S.calDuration; }
+
+  async function loadWorkspace() {
+    wspList.innerHTML = '<div class="wsp-empty">Loading…</div>';
+    try {
+      if (currentTab==='mail') {
+        const data = await (await fetch('/mail?max='+S.mailMax+'&query='+encodeURIComponent(S.mailQuery))).json();
+        if (data.error) { wspList.innerHTML='<div class="wsp-empty">'+data.error+'</div>'; return; }
+        if (!data.length) { wspList.innerHTML='<div class="wsp-empty">No emails match your filter.</div>'; return; }
+        wspList.innerHTML='';
+        data.forEach(m=>{ const d=document.createElement('div'); d.className='wrow';
+          d.innerHTML='<div class="subj"></div><div class="from"></div><div class="snip"></div>';
+          d.querySelector('.subj').textContent=m.subject||'(no subject)';
+          d.querySelector('.from').textContent=(m.from||'')+'   ·   '+(m.date||'');
+          d.querySelector('.snip').textContent=m.snippet||'';
+          wspList.appendChild(d); });
+      } else {
+        const data = await (await fetch('/calendar?max='+S.calMax)).json();
+        if (data.error) { wspList.innerHTML='<div class="wsp-empty">'+data.error+'</div>'; return; }
+        if (!data.length) { wspList.innerHTML='<div class="wsp-empty">No upcoming events.</div>'; return; }
+        wspList.innerHTML='';
+        data.forEach(ev=>{ const d=document.createElement('div'); d.className='wrow';
+          d.innerHTML='<div class="subj"></div><div class="when"></div><div class="from"></div>';
+          d.querySelector('.subj').textContent=ev.summary||'(untitled)';
+          d.querySelector('.when').textContent=fmtWhen(ev.start)+(ev.end?(' → '+fmtWhen(ev.end)):'');
+          d.querySelector('.from').textContent=ev.location||'';
+          wspList.appendChild(d); });
+      }
+    } catch(e){ wspList.innerHTML='<div class="wsp-empty">Could not load: '+e.message+'</div>'; }
+  }
+  function fmtWhen(s){ if(!s) return ''; try{ const d=new Date(s); return isNaN(d)?s:d.toLocaleString(); }catch(e){ return s; } }
+
+  async function loadInstructions() {
+    try { const j = await (await fetch('/instructions')).json();
+      $('m_instr').value=j.mail||''; $('c_instr').value=j.calendar||''; } catch(e){}
+  }
+  function saveInstruction(area, text){ fetch('/instructions',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({area,text})}).catch(()=>{}); }
+
+  $('mailTab').addEventListener('click',()=>openWorkspace('mail'));
+  $('calTab').addEventListener('click',()=>openWorkspace('calendar'));
+  $('wspClose').addEventListener('click',closeWorkspace);
+  $('wspRefresh').addEventListener('click',()=>{ if(showingSettings) viewList(); loadWorkspace(); });
+  $('wspGear').addEventListener('click',()=>{ showingSettings ? (viewList()) : viewSettings(); });
+  scrim2.addEventListener('click',closeWorkspace);
+  $('m_query').addEventListener('change',e=>{ S.mailQuery=e.target.value.trim()||'in:inbox'; saveSettings(); });
+  $('m_max').addEventListener('change',e=>{ S.mailMax=clampPct(e.target.value,12); saveSettings(); });
+  $('c_max').addEventListener('change',e=>{ S.calMax=clampPct(e.target.value,15); saveSettings(); });
+  $('c_dur').addEventListener('change',e=>{ const n=parseInt(e.target.value,10); S.calDuration=isNaN(n)?60:n; saveSettings(); });
+  $('m_instr').addEventListener('change',e=>saveInstruction('mail',e.target.value));
+  $('c_instr').addEventListener('change',e=>saveInstruction('calendar',e.target.value));
 </script>
 </body>
 </html>

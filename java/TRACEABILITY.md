@@ -154,6 +154,13 @@
 - **Safety:** `email_send`'s description instructs the model to confirm with the user before sending; all API/parse failures degrade to failed `ToolResult`s. Credentials/tokens live only on the user's machine (env + `~/.jarvis/memory.tsv`).
 - **Sequencing:** Google first (this step). Microsoft 365 (Graph) is the planned follow-up (REQ-STEP-028) once Google is confirmed working end-to-end.
 
+## REQ-STEP-028 notes (MAIL + CALENDAR tabs)
+- **Shared data path:** extracted `GoogleWorkspaceService` (structured Jackson nodes) so the agent tools *and* the dashboard panels read the same source; `GoogleWorkspacePlugin` now delegates to it.
+- **New endpoints:** `GET /mail?query&max`, `GET /calendar?max` (503 when Google not connected; API/parse errors returned as `{"error":...}`), and `GET/POST /instructions` (per-area JARVIS directions stored in memory scope `instructions`).
+- **Tabs:** header MAIL + CALENDAR buttons open a workspace overlay listing real messages/events, each with a ⚙ Settings sub-view: filter (Gmail search) + count for mail; count + default duration for calendar; and a free-text "directions/action items for JARVIS" box per area.
+- **Directions actually take effect:** `AppWiring.recall()` now injects the stored mail/calendar directions into JARVIS's system prompt (alongside preferences), so he follows them when handling email/calendar.
+- Whitelist unchanged (Jackson + JUnit); all Google access remains raw REST.
+
 ## REQ-STEP-027a notes (connect-flow truthfulness + visibility fix)
 - **Bug fixed:** `GoogleConnect` previously showed "connected" on the browser page as soon as it caught the auth code, *before* the token exchange — so a failed exchange still looked successful. The exchange now happens inside the redirect handler and the page + console report the real outcome, with a post-exchange `isConnected()` verification.
 - **Visibility added:** `/status` now returns `google` (bool); the HUD shows an "Email & Calendar (Google)" subsystem light (green when connected); the console prints `Google (Gmail/Calendar): CONNECTED / not connected` on startup. This lets the user confirm the integration at a glance and see failures instead of silent no-ops.

@@ -37,7 +37,9 @@ final class AppWiring {
 
     /** Everything the launcher needs to run. */
     record Runtime(JarvisApi api, boolean online, String model,
-            HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected) {
+            HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected,
+            com.jarvis.integrations.google.GoogleWorkspaceService googleService,
+            MemoryStore<String> memory) {
     }
 
     private AppWiring() {
@@ -56,8 +58,11 @@ final class AppWiring {
 
         GoogleAuth google = googleAuth(memory);
         boolean googleConnected = google != null && google.isConnected();
+        com.jarvis.integrations.google.GoogleWorkspaceService googleService = null;
         if (googleConnected) {
-            plugins.install(new GoogleWorkspacePlugin(new AuthorizedGoogleClient(google)));
+            googleService = new com.jarvis.integrations.google.GoogleWorkspaceService(
+                    new AuthorizedGoogleClient(google));
+            plugins.install(new GoogleWorkspacePlugin(googleService));
         }
 
         WebServer.VisionHook visionHook = null;
@@ -75,7 +80,7 @@ final class AppWiring {
 
         JarvisApi api = assemble(policy, tools, memory);
         HardwareMonitor monitor = new HardwareMonitor();
-        return new Runtime(api, online, model, monitor, visionHook, googleConnected);
+        return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService, memory);
     }
 
     /** Lighter wiring with an injectable store (tests). No monitor, no vision. */
@@ -98,12 +103,16 @@ final class AppWiring {
         return new DefaultJarvisApi(orchestrator);
     }
 
-    /** Collapses the durable "preferences" scope into a recall block for the system prompt. */
+    /** Collapses durable preferences + MAIL/CALENDAR directions into a recall block. */
     static String recall(MemoryStore<String> memory) {
-        List<String> facts = memory.query("preferences").stream()
+        List<String> lines = memory.query("preferences").stream()
                 .map(e -> "- " + e.value())
                 .collect(Collectors.toList());
-        return facts.isEmpty() ? "" : String.join("\n", facts);
+        memory.get("instructions", "mail").map(m -> m.value()).filter(s -> !s.isBlank())
+                .ifPresent(s -> lines.add("- Email handling directions: " + s));
+        memory.get("instructions", "calendar").map(m -> m.value()).filter(s -> !s.isBlank())
+                .ifPresent(s -> lines.add("- Calendar handling directions: " + s));
+        return lines.isEmpty() ? "" : String.join("\n", lines);
     }
 
     static boolean isOnline(String apiKey) {

@@ -52,13 +52,22 @@ public final class WebServer {
         return start(api, online, model, port, monitor, vision, false);
     }
 
-    /**
-     * Full wiring: {@code monitor} (nullable) drives {@code GET /alerts}; {@code vision} (nullable)
-     * drives {@code POST /vision} for webcam frames; {@code googleConnected} is reported in
-     * {@code GET /status}.
-     */
+    /** Overload without Google panel data (status flag only). */
     public static WebServer start(JarvisApi api, boolean online, String model, int port,
             HardwareMonitor monitor, VisionHook vision, boolean googleConnected) throws IOException {
+        return start(api, online, model, port, monitor, vision, googleConnected, null, null);
+    }
+
+    /**
+     * Full wiring. {@code monitor} → {@code GET /alerts}; {@code vision} → {@code POST /vision};
+     * {@code googleConnected} → {@code GET /status}; {@code google} (nullable) →
+     * {@code GET /mail} and {@code GET /calendar}; {@code memory} (nullable) →
+     * {@code GET/POST /instructions} (JARVIS directions for the MAIL/CALENDAR tabs).
+     */
+    public static WebServer start(JarvisApi api, boolean online, String model, int port,
+            HardwareMonitor monitor, VisionHook vision, boolean googleConnected,
+            com.jarvis.integrations.google.GoogleWorkspaceService google,
+            com.jarvis.memory.MemoryStore<String> memory) throws IOException {
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -83,6 +92,62 @@ public final class WebServer {
             t.put("ramTotalGb", Math.round(s.ramTotalGb() * 10) / 10.0);
             t.put("cores", s.cores());
             respond(exchange, 200, "application/json", t.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/mail", exchange -> {
+            if (google == null) {
+                respond(exchange, 503, "application/json",
+                        "{\"error\":\"Google not connected\"}".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            try {
+                String query = param(exchange, "query", "in:inbox");
+                int max = parseInt(param(exchange, "max", "12"), 12);
+                byte[] body = google.listEmails(query, max).toString().getBytes(StandardCharsets.UTF_8);
+                respond(exchange, 200, "application/json", body);
+            } catch (Exception e) {
+                respond(exchange, 200, "application/json",
+                        ("{\"error\":" + jsonStr(e.getMessage()) + "}").getBytes(StandardCharsets.UTF_8));
+            }
+        });
+
+        server.createContext("/calendar", exchange -> {
+            if (google == null) {
+                respond(exchange, 503, "application/json",
+                        "{\"error\":\"Google not connected\"}".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            try {
+                int max = parseInt(param(exchange, "max", "15"), 15);
+                byte[] body = google.listEvents(max).toString().getBytes(StandardCharsets.UTF_8);
+                respond(exchange, 200, "application/json", body);
+            } catch (Exception e) {
+                respond(exchange, 200, "application/json",
+                        ("{\"error\":" + jsonStr(e.getMessage()) + "}").getBytes(StandardCharsets.UTF_8));
+            }
+        });
+
+        server.createContext("/instructions", exchange -> {
+            String mailKey = "mail";
+            String calKey = "calendar";
+            String scope = "instructions";
+            if ("POST".equals(exchange.getRequestMethod()) && memory != null) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode json = MAPPER.readTree(body);
+                    String area = json.path("area").asText("");
+                    String text = json.path("text").asText("");
+                    if (mailKey.equals(area) || calKey.equals(area)) {
+                        memory.put(scope, area, text);
+                    }
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode out = MAPPER.createObjectNode();
+            out.put(mailKey, memory == null ? "" : memory.get(scope, mailKey).map(m -> m.value()).orElse(""));
+            out.put(calKey, memory == null ? "" : memory.get(scope, calKey).map(m -> m.value()).orElse(""));
+            respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/config", exchange -> {
@@ -197,6 +262,35 @@ public final class WebServer {
             }
             return in.readAllBytes();
         }
+    }
+
+    private static String param(HttpExchange exchange, String key, String dflt) {
+        String query = exchange.getRequestURI().getRawQuery();
+        if (query == null) {
+            return dflt;
+        }
+        for (String pair : query.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                String k = java.net.URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8);
+                if (k.equals(key)) {
+                    return java.net.URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                }
+            }
+        }
+        return dflt;
+    }
+
+    private static int parseInt(String s, int dflt) {
+        try {
+            return Integer.parseInt(s.strip());
+        } catch (NumberFormatException e) {
+            return dflt;
+        }
+    }
+
+    private static String jsonStr(String s) {
+        return MAPPER.getNodeFactory().textNode(s == null ? "" : s).toString();
     }
 
     private static void respond(HttpExchange exchange, int status, String contentType, byte[] body)
