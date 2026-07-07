@@ -154,6 +154,10 @@
 - **Safety:** `email_send`'s description instructs the model to confirm with the user before sending; all API/parse failures degrade to failed `ToolResult`s. Credentials/tokens live only on the user's machine (env + `~/.jarvis/memory.tsv`).
 - **Sequencing:** Google first (this step). Microsoft 365 (Graph) is the planned follow-up (REQ-STEP-028) once Google is confirmed working end-to-end.
 
+## REQ-STEP-032 notes (conversation mode — wake word once)
+- Voice now supports **conversation mode** (default on): the wake word activates an active session, after which utterances go straight to JARVIS with no wake word needed. It ends on a quiet timeout (default 45s, adjustable 10–600) or an end phrase ("that's all", "never mind", "stand down", "goodbye", "dismissed", …), returning to wake-word listening.
+- Echo guard preserved (mic pauses while he speaks); the quiet-timeout resets from the end of his reply. Status/orb show "IN CONVERSATION" vs "LISTENING". Turning voice off clears the session. Two new Voice settings: toggle + timeout seconds. Pure front-end (dashboard.html); no server change.
+
 ## REQ-STEP-031 notes (plain-text replies + People full page with contacts)
 - **No more literal `**`:** system prompt now forbids markdown; the dashboard also strips `** * `` #` from JARVIS's text before display AND speech (belt-and-suspenders), so nothing shows or is read aloud as asterisks.
 - **People is now a full page**, not a settings side-panel: header `👥 PEOPLE` button opens a dedicated page with an About-Me editor, a rich add-person form (name, relationship, email, phone, company, notes, photo), and a directory with thumbnails + contacts. Removed the old People section from Settings.

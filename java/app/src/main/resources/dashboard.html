@@ -330,6 +330,9 @@
     <div class="row"><label for="s_rate">Speech speed</label><input type="range" id="s_rate" min="0.6" max="1.6" step="0.05"></div>
     <div class="row"><label for="s_wake">Wake word</label><input type="text" id="s_wake" placeholder="jarvis"></div>
     <div class="hint">Say the wake word, then your request — e.g. "Jarvis, what's the weather?"</div>
+    <div class="row"><label for="s_convo">Stay in conversation after wake word</label><input type="checkbox" id="s_convo"></div>
+    <div class="row"><label for="s_convoT">End conversation after quiet (seconds)</label><input type="number" id="s_convoT" min="10" max="600"></div>
+    <div class="hint">On: say the wake word once, then keep talking. Say "that's all" or go quiet to end.</div>
   </div>
   <div class="sect">
     <h4>🌅 Briefing &amp; Weather</h4>
@@ -427,7 +430,7 @@
   // ---------- Settings ----------
   const DEFAULTS = { voiceOnStart:false, autoSpeak:true, lang:'en-US', voiceName:'', rate:1.05,
     wakeWord:'jarvis', autoBrief:true, city:'', showAlerts:true, speakAlerts:true, cpu:90, ram:90,
-    mailQuery:'in:inbox', mailMax:12, calMax:15, calDuration:60 };
+    mailQuery:'in:inbox', mailMax:12, calMax:15, calDuration:60, convoMode:true, convoTimeout:45 };
   let S = Object.assign({}, DEFAULTS);
   try { S = Object.assign(S, JSON.parse(localStorage.getItem('jarvisSettings') || '{}')); } catch (e) {}
   function saveSettings() { localStorage.setItem('jarvisSettings', JSON.stringify(S)); }
@@ -593,7 +596,9 @@
     let finished = false;
     const finish = () => { if (finished) return; finished = true;
       clearInterval(keepAlive); clearTimeout(watchdog); speaking = false;
-      interruptBtn.classList.remove('show'); if (voiceOn) startListening(); else setOrb('idle'); };
+      interruptBtn.classList.remove('show');
+      if (conversationActive) resetConvoTimer();      // count the quiet-timeout from his last word
+      if (voiceOn) startListening(); else setOrb('idle'); };
     u.onend = finish; u.onerror = finish;
     const keepAlive = setInterval(() => {
       if (!speechSynthesis.speaking && !speechSynthesis.pending) { finish(); return; }
@@ -604,20 +609,43 @@
   }
   function interrupt() { if (speaking && window.speechSynthesis) speechSynthesis.cancel(); }
 
+  // Conversation mode: after the wake word, keep talking without repeating it until it goes quiet.
+  let conversationActive = false, convoTimer = null;
+  const END_PHRASES = ["that's all","thats all","that will be all","never mind","nevermind",
+    "stand down","go to sleep","goodbye","good bye","stop listening","that is all","dismissed"];
+  function isEndPhrase(lower){ return END_PHRASES.some(p => lower === p || lower.startsWith(p) || lower.endsWith(p)); }
+  function resetConvoTimer(){ clearTimeout(convoTimer); if (!S.convoMode) return;
+    convoTimer = setTimeout(endConversation, (parseInt(S.convoTimeout,10)||45) * 1000); }
+  function endConversation(){ conversationActive = false; clearTimeout(convoTimer);
+    if (voiceOn && !speaking) beginListeningState(); }
+  function beginListeningState(){
+    setOrb('listening');
+    if (conversationActive){ statusText.textContent='IN CONVERSATION';
+      statusHint.textContent='Just speak — say "that\'s all" to end'; sbMic.textContent='IN CONVO'; }
+    else { statusHint.textContent='Say "'+(S.wakeWord||'jarvis')+', …"'; sbMic.textContent='LISTENING'; }
+  }
+
   function startListening() {
     if (!SR || recog || !voiceOn || speaking) return;
     recog = new SR(); recog.continuous = true; recog.lang = voiceLang();
     recog.onresult = (e) => {
       const t = e.results[e.results.length-1][0].transcript.trim();
+      if (!t) return;
+      const lower = t.toLowerCase();
+      if (conversationActive) {
+        if (isEndPhrase(lower)) { endConversation(); speak('Standing by, sir.'); return; }
+        resetConvoTimer(); ask(t, '🎤 ' + t); return;
+      }
       const wake = (S.wakeWord||'jarvis').toLowerCase();
-      const i = t.toLowerCase().indexOf(wake); if (i < 0) return;
+      const i = lower.indexOf(wake); if (i < 0) return;      // wake word required to start
+      if (S.convoMode) { conversationActive = true; resetConvoTimer(); }
       const prompt = t.slice(i + wake.length).replace(/^[,.!?\s]+/, '').trim();
       if (prompt) ask(prompt, '🎤 ' + prompt); else speak('Yes, sir?');
     };
     recog.onend = () => { recog = null; if (voiceOn && !speaking) setTimeout(startListening, 250); };
     recog.onerror = (e) => { if (e.error === 'not-allowed') { voiceOn=false; voiceBtn.classList.remove('on');
       sbMic.textContent='BLOCKED'; setOrb('idle'); } };
-    try { recog.start(); setOrb('listening'); sbMic.textContent='LISTENING'; } catch (err) { recog = null; }
+    try { recog.start(); beginListeningState(); } catch (err) { recog = null; }
   }
   function stopListening() { if (recog) { const r=recog; recog=null; r.onend=null; try{r.stop();}catch(e){} } }
 
@@ -627,6 +655,7 @@
     document.getElementById('ssVoice').className = 'sdot' + (voiceOn ? '' : ' off');
     if (voiceOn) { startListening(); speak('Voice interface online, sir.'); }
     else { try{speechSynthesis.cancel();}catch(e){} stopListening(); speaking=false;
+      conversationActive=false; clearTimeout(convoTimer);
       interruptBtn.classList.remove('show'); sbMic.textContent='OFF'; setOrb('idle'); }
   });
   document.getElementById('ssVoice').className = 'sdot off';
@@ -667,6 +696,7 @@
   function openSettings() {
     $('s_voiceOnStart').checked=S.voiceOnStart; $('s_autoSpeak').checked=S.autoSpeak;
     $('s_lang').value=S.lang; $('s_rate').value=S.rate; $('s_wake').value=S.wakeWord;
+    $('s_convo').checked=S.convoMode; $('s_convoT').value=S.convoTimeout;
     $('s_autoBrief').checked=S.autoBrief; $('s_city').value=S.city;
     $('s_showAlerts').checked=S.showAlerts; $('s_speakAlerts').checked=S.speakAlerts;
     $('s_cpu').value=S.cpu; $('s_ram').value=S.ram; $('s_model').textContent=jarvisModel||'offline';
@@ -691,6 +721,9 @@
   $('s_voiceName').addEventListener('change',e=>{S.voiceName=e.target.value;saveSettings();if(voiceOn)speak('Voice updated, sir.');});
   $('s_rate').addEventListener('input',e=>{S.rate=parseFloat(e.target.value);saveSettings();});
   $('s_wake').addEventListener('change',e=>{S.wakeWord=(e.target.value.trim()||'jarvis');saveSettings();});
+  $('s_convo').addEventListener('change',e=>{S.convoMode=e.target.checked;saveSettings();
+    if(!S.convoMode){conversationActive=false;clearTimeout(convoTimer);}});
+  $('s_convoT').addEventListener('change',e=>{const n=parseInt(e.target.value,10);S.convoTimeout=isNaN(n)?45:Math.max(10,Math.min(600,n));saveSettings();});
   $('s_autoBrief').addEventListener('change',e=>{S.autoBrief=e.target.checked;saveSettings();});
   $('s_city').addEventListener('change',e=>{S.city=e.target.value.trim();saveSettings();});
   $('s_showAlerts').addEventListener('change',e=>{S.showAlerts=e.target.checked;saveSettings();});
