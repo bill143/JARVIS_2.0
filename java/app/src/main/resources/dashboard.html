@@ -185,17 +185,32 @@
 
   function setVoiceState(text) { vstate.textContent = text; }
 
+  // Give JARVIS his voice: for English, prefer a British male (the classic butler timbre);
+  // for any other selected language, prefer that language's best available voice.
+  function pickVoice(voices, lang) {
+    if (!voices || !voices.length) return null;
+    const two = lang.slice(0, 2);
+    if (two === 'en') {
+      return voices.find(v => /en-GB/i.test(v.lang) && /george|ryan|daniel|thomas|male/i.test(v.name))
+          || voices.find(v => /en-GB/i.test(v.lang))
+          || voices.find(v => /^en/i.test(v.lang) && /guy|david|male/i.test(v.name))
+          || voices.find(v => /^en/i.test(v.lang))
+          || voices[0];
+    }
+    return voices.find(v => v.lang === lang)
+        || voices.find(v => v.lang && v.lang.slice(0, 2) === two)
+        || voices[0];
+  }
+
   function speak(text) {
     if (!voiceOn || !window.speechSynthesis || !text) return;
     stopListening();                       // echo guard: never listen to our own voice
     try { speechSynthesis.cancel(); } catch (e) {}
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.05;
-    u.lang = voiceLang();
-    const voices = speechSynthesis.getVoices();
-    const langPrefix = voiceLang().slice(0, 2);
-    u.voice = voices.find(v => v.lang === voiceLang())
-           || voices.find(v => v.lang && v.lang.slice(0, 2) === langPrefix) || null;
+    const chosen = pickVoice(speechSynthesis.getVoices(), voiceLang());
+    u.voice = chosen;
+    u.lang = chosen ? chosen.lang : voiceLang();   // keep utterance lang aligned to the voice
     speaking = true;
     interruptBtn.classList.add('show');
     setVoiceState('SPEAKING — ESC TO INTERRUPT');
