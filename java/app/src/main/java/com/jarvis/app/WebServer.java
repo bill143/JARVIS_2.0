@@ -58,16 +58,25 @@ public final class WebServer {
         return start(api, online, model, port, monitor, vision, googleConnected, null, null);
     }
 
-    /**
-     * Full wiring. {@code monitor} → {@code GET /alerts}; {@code vision} → {@code POST /vision};
-     * {@code googleConnected} → {@code GET /status}; {@code google} (nullable) →
-     * {@code GET /mail} and {@code GET /calendar}; {@code memory} (nullable) →
-     * {@code GET/POST /instructions} (JARVIS directions for the MAIL/CALENDAR tabs).
-     */
+    /** Overload without People features. */
     public static WebServer start(JarvisApi api, boolean online, String model, int port,
             HardwareMonitor monitor, VisionHook vision, boolean googleConnected,
             com.jarvis.integrations.google.GoogleWorkspaceService google,
             com.jarvis.memory.MemoryStore<String> memory) throws IOException {
+        return start(api, online, model, port, monitor, vision, googleConnected, google, memory,
+                null, null);
+    }
+
+    /**
+     * Full wiring. Adds {@code people} → {@code GET/POST /people} and {@code recognizer}
+     * (nullable) → {@code POST /recognize} for on-demand webcam face matching, plus
+     * {@code GET/POST /aboutme}.
+     */
+    public static WebServer start(JarvisApi api, boolean online, String model, int port,
+            HardwareMonitor monitor, VisionHook vision, boolean googleConnected,
+            com.jarvis.integrations.google.GoogleWorkspaceService google,
+            com.jarvis.memory.MemoryStore<String> memory,
+            PeopleStore people, PeopleRecognizer recognizer) throws IOException {
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -147,6 +156,90 @@ public final class WebServer {
             ObjectNode out = MAPPER.createObjectNode();
             out.put(mailKey, memory == null ? "" : memory.get(scope, mailKey).map(m -> m.value()).orElse(""));
             out.put(calKey, memory == null ? "" : memory.get(scope, calKey).map(m -> m.value()).orElse(""));
+            respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/people", exchange -> {
+            if (people == null) {
+                respond(exchange, 200, "application/json", "[]".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    if (j.path("delete").asBoolean(false)) {
+                        people.delete(j.path("id").asText(""));
+                    } else {
+                        String name = j.path("name").asText("").strip();
+                        if (!name.isEmpty()) {
+                            people.add(name, j.path("relationship").asText(""),
+                                    j.path("notes").asText(""), j.path("photo").asText(""));
+                        }
+                    }
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            respond(exchange, 200, "application/json",
+                    people.summaries().toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/people/photo", exchange -> {
+            if (people == null) {
+                respond(exchange, 404, "text/plain", "no".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String id = param(exchange, "id", "");
+            String dataUrl = people.all().stream().filter(p -> p.id().equals(id))
+                    .map(PeopleStore.Person::photo).findFirst().orElse("");
+            if (dataUrl.isBlank() || !dataUrl.startsWith("data:")) {
+                respond(exchange, 404, "text/plain", "no photo".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            int semi = dataUrl.indexOf(';');
+            int comma = dataUrl.indexOf(',');
+            String mediaType = semi > 5 ? dataUrl.substring(5, semi) : "image/png";
+            byte[] img = java.util.Base64.getDecoder().decode(dataUrl.substring(comma + 1));
+            exchange.getResponseHeaders().set("Content-Type", mediaType);
+            exchange.sendResponseHeaders(200, img.length);
+            exchange.getResponseBody().write(img);
+            exchange.close();
+        });
+
+        server.createContext("/recognize", exchange -> {
+            ObjectNode reply = MAPPER.createObjectNode();
+            if (recognizer == null || people == null) {
+                reply.put("response", "Recognition needs an API key and at least one saved person, sir.");
+                respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            try (InputStream body = exchange.getRequestBody()) {
+                String image = MAPPER.readTree(body).path("image").asText("");
+                java.util.List<PeopleStore.Person> known = people.all().stream()
+                        .filter(p -> p.photo() != null && !p.photo().isBlank()).toList();
+                if (known.isEmpty()) {
+                    reply.put("response", "I don't have any saved people to compare against yet, sir.");
+                } else {
+                    reply.put("response", recognizer.recognize(image, known));
+                }
+            } catch (Exception e) {
+                reply.put("response", "I couldn't run recognition, sir: " + e.getMessage());
+            }
+            respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/aboutme", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod()) && memory != null) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    memory.put("about", "me", MAPPER.readTree(body).path("text").asText(""));
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode out = MAPPER.createObjectNode();
+            out.put("text", memory == null ? "" : memory.get("about", "me").map(m -> m.value()).orElse(""));
             respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
         });
 

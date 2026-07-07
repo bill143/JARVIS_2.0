@@ -154,6 +154,13 @@
 - **Safety:** `email_send`'s description instructs the model to confirm with the user before sending; all API/parse failures degrade to failed `ToolResult`s. Credentials/tokens live only on the user's machine (env + `~/.jarvis/memory.tsv`).
 - **Sequencing:** Google first (this step). Microsoft 365 (Graph) is the planned follow-up (REQ-STEP-028) once Google is confirmed working end-to-end.
 
+## REQ-STEP-029 notes (People / on-demand recognition + About Me)
+- **People store:** `PeopleStore` persists name/relationship/notes/photo (data URL) to `~/.jarvis/people.json` — local only. Endpoints: `GET/POST /people` (add/delete + summaries without photo bytes), `GET /people/photo?id` (thumbnail).
+- **Recognition (honest scope):** not biometric face-recognition — `PeopleRecognizer` sends the live webcam frame plus each saved reference photo in one multi-image Anthropic vision request and asks who it is. Works for a small curated set; degrades gracefully. `POST /recognize` drives it; the CAMERA button uses it when ≥1 person is saved, else falls back to scene description.
+- **About Me:** `GET/POST /aboutme` stores a personal blurb in memory scope `about`; injected into JARVIS's system prompt via `recall()` (alongside preferences + mail/calendar directions).
+- **UI:** new "People & About Me" section in the Settings drawer — About-me textarea, add-person form (name/relationship/notes/photo upload), and a list with thumbnails + delete.
+- **Server wiring:** `WebServer.start` gained a People-aware overload (`PeopleStore` + `PeopleRecognizer`, both nullable); older overloads delegate. Whitelist unchanged; photos never leave the machine except when sent to the vision model for a recognition request the user triggered.
+
 ## REQ-STEP-028 notes (MAIL + CALENDAR tabs)
 - **Shared data path:** extracted `GoogleWorkspaceService` (structured Jackson nodes) so the agent tools *and* the dashboard panels read the same source; `GoogleWorkspacePlugin` now delegates to it.
 - **New endpoints:** `GET /mail?query&max`, `GET /calendar?max` (503 when Google not connected; API/parse errors returned as `{"error":...}`), and `GET/POST /instructions` (per-area JARVIS directions stored in memory scope `instructions`).

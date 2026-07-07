@@ -56,7 +56,8 @@ public final class Main {
         }
         WebServer server = WebServer.start(api, online, model, port,
                 runtime.monitor(), runtime.vision(), runtime.googleConnected(),
-                runtime.googleService(), runtime.memory());
+                runtime.googleService(), runtime.memory(),
+                runtime.people(), runtime.recognizer());
         String url = "http://localhost:" + server.port();
         System.out.println();
         System.out.println("  J.A.R.V.I.S. is running.");

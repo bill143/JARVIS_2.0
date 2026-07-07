@@ -39,7 +39,7 @@ final class AppWiring {
     record Runtime(JarvisApi api, boolean online, String model,
             HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected,
             com.jarvis.integrations.google.GoogleWorkspaceService googleService,
-            MemoryStore<String> memory) {
+            MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer) {
     }
 
     private AppWiring() {
@@ -80,7 +80,12 @@ final class AppWiring {
 
         JarvisApi api = assemble(policy, tools, memory);
         HardwareMonitor monitor = new HardwareMonitor();
-        return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService, memory);
+        PeopleStore people = new PeopleStore(
+                Path.of(System.getProperty("user.home"), ".jarvis", "people.json"));
+        PeopleRecognizer recognizer = online
+                ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
+        return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
+                memory, people, recognizer);
     }
 
     /** Lighter wiring with an injectable store (tests). No monitor, no vision. */
@@ -112,6 +117,8 @@ final class AppWiring {
                 .ifPresent(s -> lines.add("- Email handling directions: " + s));
         memory.get("instructions", "calendar").map(m -> m.value()).filter(s -> !s.isBlank())
                 .ifPresent(s -> lines.add("- Calendar handling directions: " + s));
+        memory.get("about", "me").map(m -> m.value()).filter(s -> !s.isBlank())
+                .ifPresent(s -> lines.add("- About the user: " + s));
         return lines.isEmpty() ? "" : String.join("\n", lines);
     }
 

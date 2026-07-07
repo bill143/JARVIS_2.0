@@ -151,6 +151,13 @@
                 border-radius:6px; padding:6px 14px; font:inherit; cursor:pointer; }
   .hint { font-size:11px; color:var(--dim); margin-top:2px; }
   .danger { background:#3a1420 !important; border-color:#a03040 !important; color:#ffb3c0 !important; }
+  .drawer textarea { width:100%; min-height:60px; background:rgba(8,18,30,.8); color:var(--text);
+         border:1px solid var(--line); border-radius:6px; padding:8px 10px; font:inherit; font-size:13px; }
+  .person { display:flex; align-items:center; gap:10px; border:1px solid var(--line); border-radius:8px;
+            padding:8px 10px; margin:7px 0; }
+  .person img { width:38px; height:38px; border-radius:50%; object-fit:cover; background:#0c1a2c; }
+  .person .pn { flex:1; font-size:13px; } .person .pn small { color:var(--dim); }
+  .person button { background:none; border:none; color:#ff8ba0; cursor:pointer; font-size:16px; }
 
   /* Workspace overlay (MAIL / CALENDAR) */
   .wsp { position:fixed; z-index:22; top:50%; left:50%;
@@ -309,6 +316,21 @@
     <div class="row"><label for="s_speakAlerts">Speak hardware alerts</label><input type="checkbox" id="s_speakAlerts"></div>
     <div class="row"><label for="s_cpu">CPU alert threshold (%)</label><input type="number" id="s_cpu" min="1" max="100"></div>
     <div class="row"><label for="s_ram">RAM alert threshold (%)</label><input type="number" id="s_ram" min="1" max="100"></div>
+  </div>
+  <div class="sect">
+    <h4>👤 People &amp; About Me</h4>
+    <div class="row" style="display:block;"><label for="a_me">About me — JARVIS remembers this</label>
+      <textarea id="a_me" placeholder="e.g. I'm Bill, owner of O'Neill Contractors. I go by Bill. My wife is Jennifer. I prefer brief, direct answers."></textarea></div>
+    <div class="hint" style="margin:10px 0 6px;">Known people (used to recognise faces on camera):</div>
+    <div id="peopleList"></div>
+    <div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px;">
+      <div class="row"><label for="p_name">Name</label><input type="text" id="p_name"></div>
+      <div class="row"><label for="p_rel">Relationship</label><input type="text" id="p_rel" placeholder="daughter, coworker…"></div>
+      <div class="row"><label for="p_notes">Notes</label><input type="text" id="p_notes" placeholder="optional"></div>
+      <div class="row"><label for="p_photo">Photo</label><input type="file" id="p_photo" accept="image/*"></div>
+      <div class="row"><label></label><button id="p_add" type="button">Add person</button></div>
+    </div>
+    <div class="hint">Photos stay on your PC; they're only sent to the AI when you use recognition.</div>
   </div>
   <div class="sect">
     <h4>🧠 Session</h4>
@@ -562,10 +584,17 @@
       await new Promise(r=>setTimeout(r,400));
       const c=document.createElement('canvas'); c.width=video.videoWidth||640; c.height=video.videoHeight||480;
       c.getContext('2d').drawImage(video,0,0,c.width,c.height);
-      const b64=c.toDataURL('image/png').split(',')[1];
-      const r=await fetch('/vision',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({image:b64,question:'What do you see through this webcam? Be brief.'})});
-      const j=await r.json(); pending.className=''; pending.textContent=j.response; speak(j.response);
+      const dataUrl=c.toDataURL('image/png');
+      let j;
+      if (peopleCount > 0) {
+        // Recognise against saved people first.
+        j = await (await fetch('/recognize',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({image:dataUrl})})).json();
+      } else {
+        j = await (await fetch('/vision',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({image:dataUrl.split(',')[1],question:'What do you see through this webcam? Be brief.'})})).json();
+      }
+      pending.className=''; pending.textContent=j.response; speak(j.response);
     } catch (err){ pending.className=''; pending.textContent='Camera error: '+err.message; setOrb(restState()); }
     finally { if (stream) stream.getTracks().forEach(t=>t.stop()); }
   });
@@ -579,7 +608,8 @@
     $('s_autoBrief').checked=S.autoBrief; $('s_city').value=S.city;
     $('s_showAlerts').checked=S.showAlerts; $('s_speakAlerts').checked=S.speakAlerts;
     $('s_cpu').value=S.cpu; $('s_ram').value=S.ram; $('s_model').textContent=jarvisModel||'offline';
-    populateVoiceList(); drawer.classList.add('open'); scrim.classList.add('open');
+    populateVoiceList(); loadAboutMe(); loadPeople();
+    drawer.classList.add('open'); scrim.classList.add('open');
   }
   function closeSettings(){ drawer.classList.remove('open'); scrim.classList.remove('open'); }
   function populateVoiceList(){
@@ -685,6 +715,40 @@
   $('c_dur').addEventListener('change',e=>{ const n=parseInt(e.target.value,10); S.calDuration=isNaN(n)?60:n; saveSettings(); });
   $('m_instr').addEventListener('change',e=>saveInstruction('mail',e.target.value));
   $('c_instr').addEventListener('change',e=>saveInstruction('calendar',e.target.value));
+
+  // ---------- People & About Me ----------
+  let peopleCount = 0;
+  async function loadAboutMe(){ try{ const j=await (await fetch('/aboutme')).json(); $('a_me').value=j.text||''; }catch(e){} }
+  $('a_me').addEventListener('change',e=>{ fetch('/aboutme',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({text:e.target.value})}).catch(()=>{}); });
+
+  async function loadPeople(){
+    try {
+      const people = await (await fetch('/people')).json();
+      peopleCount = people.length;
+      const box=$('peopleList'); box.innerHTML='';
+      if (!people.length){ box.innerHTML='<div class="hint">No people added yet.</div>'; return; }
+      people.forEach(p=>{ const d=document.createElement('div'); d.className='person';
+        d.innerHTML='<img src="'+(p.hasPhoto?('/people/photo?id='+encodeURIComponent(p.id)):'')+'" alt="">'
+          +'<div class="pn"><b></b><br><small></small></div><button title="Remove">✕</button>';
+        d.querySelector('b').textContent=p.name;
+        d.querySelector('small').textContent=[p.relationship,p.notes].filter(Boolean).join(' · ');
+        d.querySelector('button').addEventListener('click',async()=>{
+          await fetch('/people',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({delete:true,id:p.id})}); loadPeople(); });
+        box.appendChild(d); });
+    } catch(e){}
+  }
+  $('p_add').addEventListener('click',async()=>{
+    const name=$('p_name').value.trim(); if(!name){ alert('Name is required'); return; }
+    const file=$('p_photo').files[0];
+    const photo = file ? await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(file); }) : '';
+    await fetch('/people',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,relationship:$('p_rel').value.trim(),notes:$('p_notes').value.trim(),photo})});
+    $('p_name').value=$('p_rel').value=$('p_notes').value=''; $('p_photo').value='';
+    loadPeople();
+  });
+  fetch('/people').then(r=>r.json()).then(p=>{ peopleCount=p.length; }).catch(()=>{});
 </script>
 </body>
 </html>
