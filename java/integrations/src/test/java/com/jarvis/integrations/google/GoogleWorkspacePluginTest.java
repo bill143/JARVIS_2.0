@@ -66,11 +66,39 @@ class GoogleWorkspacePluginTest {
     }
 
     @Test
-    void contributesTheFourTools() {
+    void contributesAllTools() {
         ToolRegistry registry = installed(new FakeClient());
-        for (String n : new String[] {"email_list", "email_send", "calendar_list", "calendar_create"}) {
+        for (String n : new String[] {"email_list", "email_send", "email_trash", "email_archive",
+                "email_unsubscribe", "calendar_list", "calendar_create"}) {
             assertTrue(registry.lookup(n).isPresent(), n + " missing");
         }
+    }
+
+    @Test
+    void emailListExposesIdsForActions() {
+        ToolResult r = installed(new FakeClient()).execute(ToolCall.of("email_list"));
+        assertTrue(r.output().contains("[id: m1]"));
+    }
+
+    @Test
+    void emailTrashPostsToTrashEndpoint() {
+        FakeClient client = new FakeClient();
+        ToolResult r = installed(client).execute(new ToolCall("email_trash", Map.of("id", "m1")));
+        assertTrue(r.success());
+        assertTrue(client.postUrls.stream().anyMatch(u -> u.contains("/messages/m1/trash")));
+    }
+
+    @Test
+    void emailTrashNeedsAnId() {
+        assertFalse(installed(new FakeClient()).execute(ToolCall.of("email_trash")).success());
+    }
+
+    @Test
+    void unsubscribeReportsWhenNoHeaderIsPresent() {
+        ToolResult r = installed(new FakeClient())
+                .execute(new ToolCall("email_unsubscribe", Map.of("id", "m1")));
+        assertTrue(r.success());
+        assertTrue(r.output().toLowerCase().contains("no unsubscribe"));
     }
 
     @Test

@@ -385,7 +385,7 @@
   let S = Object.assign({}, DEFAULTS);
   try { S = Object.assign(S, JSON.parse(localStorage.getItem('jarvisSettings') || '{}')); } catch (e) {}
   function saveSettings() { localStorage.setItem('jarvisSettings', JSON.stringify(S)); }
-  let jarvisModel = '', isOnline = false;
+  let jarvisModel = '', isOnline = false, didAutoBrief = false;
 
   // ---------- Orb build (radar ticks) ----------
   (function buildTicks(){
@@ -431,7 +431,8 @@
     add('jarvis', s.online ? 'All systems online, sir. How can I help?'
         : 'Running in offline echo mode. Set ANTHROPIC_API_KEY and restart to enable AI.');
     if (s.online) {
-      if (S.autoBrief) setTimeout(() => document.getElementById('brief').click(), 700);
+      if (S.autoBrief && !didAutoBrief) { didAutoBrief = true;
+        setTimeout(() => document.getElementById('brief').click(), 700); }
       setInterval(pollAlerts, 20000);
       if (S.voiceOnStart) setTimeout(() => voiceBtn.click(), 900);
     }
@@ -493,9 +494,15 @@
     e.preventDefault(); const p = box.value.trim(); if (!p) return; box.value=''; ask(p);
   });
   document.getElementById('brief').addEventListener('click', () => {
+    if (send.disabled) return;   // don't double-fire a briefing already in flight
     const cityPart = S.city ? (', and the current weather in ' + S.city) : '';
-    ask('Give me a startup briefing: current date and time, my saved reminders, the top news headlines'
-        + cityPart + '. Keep it short and spoken-style.', '⚡ BRIEFING');
+    ask('Give me a startup briefing, spoken-style and concise:\n'
+        + '1) Current date and time, and my saved reminders.\n'
+        + '2) Check my unread emails (email_list with query is:unread). For EACH one give a single line: '
+        + 'sender — subject — your recommendation (KEEP / REPLY / DELETE), and flag it as SPAM if it looks '
+        + 'like marketing or junk I could unsubscribe from. Do NOT delete, archive, or change anything yet — just advise.\n'
+        + '3) The top news headlines' + cityPart + '.\n'
+        + 'If I have no unread emails, just say the inbox is clear.', '⚡ BRIEFING');
   });
 
   // ---------- Voice ----------

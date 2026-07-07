@@ -35,7 +35,8 @@ public final class GoogleWorkspacePlugin implements Plugin {
 
     @Override
     public List<Tool> tools() {
-        return List.of(emailList(), emailSend(), calendarList(), calendarCreate());
+        return List.of(emailList(), emailSend(), emailTrash(), emailArchive(), emailUnsubscribe(),
+                calendarList(), calendarCreate());
     }
 
     private Tool tool(String name, String desc, ThrowingBody body) {
@@ -83,7 +84,9 @@ public final class GoogleWorkspacePlugin implements Plugin {
                         out.append(++n).append(". ").append(subject.isBlank() ? "(no subject)" : subject)
                                 .append("\n   from ").append(e.path("from").asText())
                                 .append("  ·  ").append(e.path("date").asText())
-                                .append("\n   ").append(trim(e.path("snippet").asText(""), 140)).append('\n');
+                                .append("\n   ").append(trim(e.path("snippet").asText(""), 140))
+                                .append("\n   [id: ").append(e.path("id").asText())
+                                .append("]  (use this id for trash/archive/unsubscribe)\n");
                     }
                     return ToolResult.ok(out.toString().strip());
                 });
@@ -99,6 +102,46 @@ public final class GoogleWorkspacePlugin implements Plugin {
                     }
                     service.sendEmail(to, str(call, "subject", ""), str(call, "body", ""));
                     return ToolResult.ok("Email sent to " + to + ".");
+                });
+    }
+
+    private Tool emailTrash() {
+        return tool("email_trash",
+                "Move an email to Trash (use for deleting or removing spam). Args: id (from "
+                        + "email_list). Confirm with the user before deleting.",
+                call -> {
+                    String id = str(call, "id", "");
+                    if (id.isBlank()) {
+                        return ToolResult.error("email_trash needs the email's 'id'");
+                    }
+                    service.trashEmail(id);
+                    return ToolResult.ok("Moved that email to Trash.");
+                });
+    }
+
+    private Tool emailArchive() {
+        return tool("email_archive",
+                "Archive an email (keep it, remove from inbox). Args: id (from email_list).",
+                call -> {
+                    String id = str(call, "id", "");
+                    if (id.isBlank()) {
+                        return ToolResult.error("email_archive needs the email's 'id'");
+                    }
+                    service.archiveEmail(id);
+                    return ToolResult.ok("Archived that email.");
+                });
+    }
+
+    private Tool emailUnsubscribe() {
+        return tool("email_unsubscribe",
+                "Unsubscribe from a marketing/spam sender using the email's unsubscribe header. "
+                        + "Args: id (from email_list).",
+                call -> {
+                    String id = str(call, "id", "");
+                    if (id.isBlank()) {
+                        return ToolResult.error("email_unsubscribe needs the email's 'id'");
+                    }
+                    return ToolResult.ok(service.unsubscribe(id));
                 });
     }
 

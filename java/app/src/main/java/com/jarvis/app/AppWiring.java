@@ -103,8 +103,8 @@ final class AppWiring {
     private static JarvisApi assemble(AgentPolicy policy, ToolRegistry tools, MemoryStore<String> memory) {
         PromptRouter<AgentPolicy> router = new PromptRouter<>(List.of());
         Planner planner = goal -> new Plan(goal, List.of(PlanStep.pending("goal", goal)));
-        // Budget 6: a briefing legitimately chains clock + reminders + weather + news.
-        Orchestrator orchestrator = new Orchestrator(router, policy, tools, planner, memory, 6);
+        // Budget 8: a full briefing chains clock + reminders + email + news + weather.
+        Orchestrator orchestrator = new Orchestrator(router, policy, tools, planner, memory, 8);
         return new DefaultJarvisApi(orchestrator);
     }
 

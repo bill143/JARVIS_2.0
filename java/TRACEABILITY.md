@@ -154,6 +154,12 @@
 - **Safety:** `email_send`'s description instructs the model to confirm with the user before sending; all API/parse failures degrade to failed `ToolResult`s. Credentials/tokens live only on the user's machine (env + `~/.jarvis/memory.tsv`).
 - **Sequencing:** Google first (this step). Microsoft 365 (Graph) is the planned follow-up (REQ-STEP-028) once Google is confirmed working end-to-end.
 
+## REQ-STEP-030 notes (briefing double-fire fix + email triage in briefing + email actions)
+- **Double-briefing fixed:** auto-briefing is now one-shot per page load (`didAutoBrief` guard) and the BRIEFING handler ignores clicks while a briefing is already in flight (`send.disabled`).
+- **Briefing now triages email:** the briefing prompt asks JARVIS to list unread emails with a per-item recommendation (KEEP / REPLY / DELETE) and a SPAM flag, explicitly advise-only (no destructive action during the briefing). Loop budget raised 6→8 to fit clock + reminders + email + news + weather.
+- **New email action tools:** `email_trash` (delete / remove spam), `email_archive` (keep, out of inbox), `email_unsubscribe` (uses the List-Unsubscribe header; https links are hit with a **plain un-authenticated client** so the Google token never leaks; mailto-only is reported for confirmation). `email_list` now surfaces each message id so the model can target actions. Destructive tools instruct confirm-first.
+- Whitelist unchanged; all raw REST.
+
 ## REQ-STEP-029 notes (People / on-demand recognition + About Me)
 - **People store:** `PeopleStore` persists name/relationship/notes/photo (data URL) to `~/.jarvis/people.json` — local only. Endpoints: `GET/POST /people` (add/delete + summaries without photo bytes), `GET /people/photo?id` (thumbnail).
 - **Recognition (honest scope):** not biometric face-recognition — `PeopleRecognizer` sends the live webcam frame plus each saved reference photo in one multi-image Anthropic vision request and asks who it is. Works for a small curated set; degrades gracefully. `POST /recognize` drives it; the CAMERA button uses it when ≥1 person is saved, else falls back to scene description.

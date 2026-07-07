@@ -5,7 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.net.URI;
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -83,6 +87,62 @@ public final class GoogleWorkspaceService {
         ObjectNode payload = mapper.createObjectNode();
         payload.put("raw", Base64.getUrlEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8)));
         client.postJson(GMAIL + "/messages/send", payload.toString());
+    }
+
+    /** Moves a message to Trash. */
+    public void trashEmail(String id) throws IOException, InterruptedException {
+        client.postJson(GMAIL + "/messages/" + id + "/trash", "{}");
+    }
+
+    /** Removes a message from the inbox (keeps it, filed away). */
+    public void archiveEmail(String id) throws IOException, InterruptedException {
+        client.postJson(GMAIL + "/messages/" + id + "/modify", "{\"removeLabelIds\":[\"INBOX\"]}");
+    }
+
+    /**
+     * Attempts to unsubscribe from a message using its List-Unsubscribe header. An https link is
+     * requested with a plain (un-authenticated) client so the Google token is never sent to a third
+     * party; a mailto-only option is reported back for the user to confirm sending.
+     */
+    public String unsubscribe(String id) throws IOException, InterruptedException {
+        JsonNode msg = mapper.readTree(client.get(GMAIL + "/messages/" + id
+                + "?format=metadata&metadataHeaders=List-Unsubscribe"));
+        String hdr = header(msg, "List-Unsubscribe");
+        if (hdr.isBlank()) {
+            return "That email has no unsubscribe option I can use automatically.";
+        }
+        String http = angleLink(hdr, "http");
+        String mailto = angleLink(hdr, "mailto:");
+        if (http != null) {
+            HttpClient plain = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+            try {
+                HttpResponse<Void> r = plain.send(HttpRequest.newBuilder(URI.create(http))
+                        .timeout(Duration.ofSeconds(15)).GET().build(), HttpResponse.BodyHandlers.discarding());
+                return r.statusCode() / 100 == 2
+                        ? "Unsubscribe request sent successfully."
+                        : "Unsubscribe link returned " + r.statusCode() + ": " + http;
+            } catch (Exception e) {
+                return "Couldn't reach the unsubscribe link automatically: " + http;
+            }
+        }
+        if (mailto != null) {
+            return "To unsubscribe, an email must be sent to " + mailto.substring("mailto:".length())
+                    + " — say the word and I'll send it, sir.";
+        }
+        return "Found an unsubscribe header but no usable link: " + hdr;
+    }
+
+    private static String angleLink(String header, String scheme) {
+        for (String part : header.split(",")) {
+            String p = part.trim();
+            if (p.startsWith("<") && p.endsWith(">")) {
+                p = p.substring(1, p.length() - 1);
+            }
+            if (p.toLowerCase(java.util.Locale.ROOT).startsWith(scheme)) {
+                return p;
+            }
+        }
+        return null;
     }
 
     /** Creates a calendar event; returns the created event's title. */
