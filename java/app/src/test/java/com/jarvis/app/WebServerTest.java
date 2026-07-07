@@ -103,7 +103,31 @@ class WebServerTest {
     void dashboardExposesTheNewControls() throws Exception {
         String body = get("/").body();
         assertTrue(body.contains("CAMERA"));
-        assertTrue(body.contains("id=\"lang\""));
+        assertTrue(body.contains("SETTINGS"));
+        assertTrue(body.contains("id=\"s_lang\""));   // language now lives in the settings drawer
+        assertTrue(body.contains("id=\"drawer\""));
+    }
+
+    @Test
+    void configEndpointRoundTripsThresholds() throws Exception {
+        HardwareMonitor monitor = new HardwareMonitor();
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                true, "m", 0, monitor, null);
+        try {
+            String base = "http://localhost:" + wired.port();
+            HttpResponse<String> post = client.send(HttpRequest.newBuilder(URI.create(base + "/config"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            "{\"cpuThreshold\":75,\"ramThreshold\":80}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, post.statusCode());
+            assertTrue(post.body().contains("75"));
+            assertEquals(75.0, monitor.cpuThreshold());
+            assertEquals(80.0, monitor.ramThreshold());
+        } finally {
+            wired.stop();
+        }
     }
 
     @Test

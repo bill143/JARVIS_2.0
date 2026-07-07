@@ -15,8 +15,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class HardwareMonitor {
 
-    private static final double CPU_THRESHOLD = 90.0;
-    private static final double RAM_THRESHOLD = 90.0;
+    private volatile double cpuThreshold = 90.0;
+    private volatile double ramThreshold = 90.0;
 
     private final ScheduledExecutorService scheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -37,6 +37,20 @@ public final class HardwareMonitor {
         scheduler.shutdownNow();
     }
 
+    /** Adjusts the alert thresholds (percent). Values are clamped to a sane 1–100 range. */
+    public void setThresholds(double cpuPercent, double ramPercent) {
+        this.cpuThreshold = Math.max(1, Math.min(100, cpuPercent));
+        this.ramThreshold = Math.max(1, Math.min(100, ramPercent));
+    }
+
+    public double cpuThreshold() {
+        return cpuThreshold;
+    }
+
+    public double ramThreshold() {
+        return ramThreshold;
+    }
+
     private void tick() {
         try {
             evaluate(HardwareTool.sample());
@@ -47,16 +61,16 @@ public final class HardwareMonitor {
 
     /** Applies threshold + hysteresis logic to a sample; package-visible for tests. */
     synchronized void evaluate(HardwareTool.Sample s) {
-        if (s.cpuPercent() >= CPU_THRESHOLD && !cpuHigh) {
+        if (s.cpuPercent() >= cpuThreshold && !cpuHigh) {
             cpuHigh = true;
             add(String.format("CPU load is high, sir - %.0f%%.", s.cpuPercent()));
-        } else if (s.cpuPercent() < CPU_THRESHOLD - 10) {
+        } else if (s.cpuPercent() < cpuThreshold - 10) {
             cpuHigh = false;
         }
-        if (s.ramPercent() >= RAM_THRESHOLD && !ramHigh) {
+        if (s.ramPercent() >= ramThreshold && !ramHigh) {
             ramHigh = true;
             add(String.format("Memory usage is high, sir - %.0f%%.", s.ramPercent()));
-        } else if (s.ramPercent() < RAM_THRESHOLD - 10) {
+        } else if (s.ramPercent() < ramThreshold - 10) {
             ramHigh = false;
         }
     }

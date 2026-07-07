@@ -53,6 +53,31 @@
            letter-spacing:1px; cursor:pointer; }
   button:hover { border-color:var(--cyan); }
   button:disabled { opacity:.4; cursor:default; }
+
+  /* Settings drawer */
+  .scrim { position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none;
+           transition:opacity .2s; z-index:20; }
+  .scrim.open { opacity:1; pointer-events:auto; }
+  .drawer { position:fixed; top:0; right:0; height:100vh; width:380px; max-width:92vw;
+            background:var(--panel); border-left:1px solid var(--line); z-index:21;
+            transform:translateX(100%); transition:transform .22s ease; overflow-y:auto;
+            box-shadow:-20px 0 40px rgba(0,0,0,.4); }
+  .drawer.open { transform:translateX(0); }
+  .drawer header { position:sticky; top:0; background:var(--panel); }
+  .drawer h2 { font-size:15px; letter-spacing:4px; color:#eaf7ff; font-weight:600; }
+  .drawer .close { margin-left:auto; padding:6px 12px; }
+  .sect { border-top:1px solid var(--line); padding:16px 20px; }
+  .sect h3 { font-size:11px; letter-spacing:3px; color:var(--cyan); text-transform:uppercase;
+             margin-bottom:12px; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:9px 0;
+         font-size:13px; color:var(--text); }
+  .row label { color:var(--dim); flex:1; }
+  .row input[type=text], .row input[type=number], .row select { flex:0 0 150px; padding:7px 9px;
+         font-size:13px; border-radius:6px; }
+  .row input[type=range] { flex:0 0 150px; }
+  .row input[type=checkbox] { width:18px; height:18px; accent-color:var(--cyan); flex:0 0 auto; }
+  .hint { font-size:11px; color:var(--dim); margin-top:2px; }
+  .sect .danger { background:#4a1420; border-color:#a03040; color:#ffb3c0; }
 </style>
 </head>
 <body>
@@ -67,15 +92,7 @@
     <button class="voice" id="voice" type="button"
             title="Toggle voice mode - say 'Jarvis, ...' to talk; ESC interrupts">🎤 VOICE</button>
     <button class="voice" id="camera" type="button" title="Let JARVIS look through your webcam">📷 CAMERA</button>
-    <select class="voice" id="lang" title="Voice language">
-      <option value="en-US">English</option>
-      <option value="es-ES">Español</option>
-      <option value="fr-FR">Français</option>
-      <option value="de-DE">Deutsch</option>
-      <option value="tr-TR">Türkçe</option>
-      <option value="it-IT">Italiano</option>
-      <option value="pt-BR">Português</option>
-    </select>
+    <button class="voice" id="settings" type="button" title="All settings">⚙ SETTINGS</button>
     <button class="interrupt" id="interrupt" type="button" title="Stop JARVIS mid-sentence (or press ESC)">✋ INTERRUPT</button>
     <span class="vstate" id="vstate"></span>
   </div>
@@ -85,10 +102,82 @@
   <input id="box" placeholder="Ask JARVIS anything…" autofocus>
   <button id="send" type="submit">SEND</button>
 </form>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Settings">
+  <header class="sect" style="display:flex;align-items:center;gap:10px;">
+    <h2>SETTINGS</h2>
+    <button class="close" id="closeSettings" type="button">CLOSE</button>
+  </header>
+
+  <div class="sect">
+    <h3>🎙️ Voice</h3>
+    <div class="row"><label for="s_voiceOnStart">Enable voice on startup</label>
+      <input type="checkbox" id="s_voiceOnStart"></div>
+    <div class="row"><label for="s_autoSpeak">Speak JARVIS's replies aloud</label>
+      <input type="checkbox" id="s_autoSpeak"></div>
+    <div class="row"><label for="s_lang">Language</label>
+      <select id="s_lang">
+        <option value="en-US">English</option>
+        <option value="es-ES">Español</option>
+        <option value="fr-FR">Français</option>
+        <option value="de-DE">Deutsch</option>
+        <option value="tr-TR">Türkçe</option>
+        <option value="it-IT">Italiano</option>
+        <option value="pt-BR">Português</option>
+      </select></div>
+    <div class="row"><label for="s_voiceName">Specific voice</label>
+      <select id="s_voiceName"><option value="">Auto (British butler)</option></select></div>
+    <div class="row"><label for="s_rate">Speech speed</label>
+      <input type="range" id="s_rate" min="0.6" max="1.6" step="0.05"></div>
+    <div class="row"><label for="s_wake">Wake word</label>
+      <input type="text" id="s_wake" placeholder="jarvis"></div>
+    <div class="hint">Say the wake word, then your request — e.g. "Jarvis, what's the weather?"</div>
+  </div>
+
+  <div class="sect">
+    <h3>🌅 Briefing &amp; Weather</h3>
+    <div class="row"><label for="s_autoBrief">Auto briefing on startup</label>
+      <input type="checkbox" id="s_autoBrief"></div>
+    <div class="row"><label for="s_city">Default city for weather</label>
+      <input type="text" id="s_city" placeholder="e.g. Dallas"></div>
+    <div class="hint">Used in the morning briefing and when you just ask "what's the weather?"</div>
+  </div>
+
+  <div class="sect">
+    <h3>📊 Hardware Alerts</h3>
+    <div class="row"><label for="s_showAlerts">Show hardware alerts</label>
+      <input type="checkbox" id="s_showAlerts"></div>
+    <div class="row"><label for="s_speakAlerts">Speak hardware alerts</label>
+      <input type="checkbox" id="s_speakAlerts"></div>
+    <div class="row"><label for="s_cpu">CPU alert threshold (%)</label>
+      <input type="number" id="s_cpu" min="1" max="100"></div>
+    <div class="row"><label for="s_ram">RAM alert threshold (%)</label>
+      <input type="number" id="s_ram" min="1" max="100"></div>
+  </div>
+
+  <div class="sect">
+    <h3>🧠 Session</h3>
+    <div class="row"><label>Model</label><span id="s_model" class="hint"></span></div>
+    <div class="row"><label>Conversation</label>
+      <button id="s_clearChat" type="button">Clear</button></div>
+    <div class="row"><label>Reset all settings to defaults</label>
+      <button id="s_reset" class="danger" type="button">Reset</button></div>
+  </div>
+</aside>
+
 <script>
   const log = document.getElementById('log');
   const box = document.getElementById('box');
   const send = document.getElementById('send');
+
+  // ---------- Settings (persisted in the browser) ----------
+  const DEFAULTS = { voiceOnStart:false, autoSpeak:true, lang:'en-US', voiceName:'', rate:1.05,
+    wakeWord:'jarvis', autoBrief:true, city:'', showAlerts:true, speakAlerts:true, cpu:90, ram:90 };
+  let S = Object.assign({}, DEFAULTS);
+  try { S = Object.assign(S, JSON.parse(localStorage.getItem('jarvisSettings') || '{}')); } catch (e) {}
+  function saveSettings() { localStorage.setItem('jarvisSettings', JSON.stringify(S)); }
+  let jarvisModel = '';
 
   function add(who, text, meta) {
     const div = document.createElement('div');
@@ -114,23 +203,23 @@
   let isOnline = false;
   fetch('/status').then(r => r.json()).then(s => {
     isOnline = s.online;
+    jarvisModel = s.model || '';
     document.getElementById('dot').className = 'dot ' + (s.online ? 'on' : 'off');
     document.getElementById('mode').textContent = s.online ? ('ONLINE · ' + s.model.toUpperCase()) : 'OFFLINE ECHO MODE';
     add('jarvis', s.online
       ? 'Online and ready. How can I help?'
       : 'Running in offline echo mode. Set ANTHROPIC_API_KEY and restart to enable AI.');
     if (s.online) {
-      // Morning briefing on boot (#6)
-      setTimeout(() => document.getElementById('brief').click(), 600);
-      // Hardware alert polling (#7)
-      setInterval(pollAlerts, 20000);
+      if (S.autoBrief) setTimeout(() => document.getElementById('brief').click(), 600);   // #6
+      setInterval(pollAlerts, 20000);                                                      // #7
+      if (S.voiceOnStart) setTimeout(() => voiceBtn.click(), 900);
     }
   }).catch(() => { document.getElementById('mode').textContent = 'UNREACHABLE'; });
 
   async function pollAlerts() {
     try {
       const alerts = await (await fetch('/alerts')).json();
-      alerts.forEach(a => { add('jarvis', '⚠️ ' + a); speak(a); });
+      alerts.forEach(a => { if (S.showAlerts) add('jarvis', '⚠️ ' + a); if (S.speakAlerts) speak(a); });
     } catch (e) { /* ignore */ }
   }
 
@@ -151,7 +240,7 @@
         m.textContent = 'used ' + j.toolSteps + ' tool step' + (j.toolSteps > 1 ? 's' : '');
         pending.parentElement.appendChild(m);
       }
-      speak(j.response);
+      if (S.autoSpeak) speak(j.response);
     } catch (err) {
       pending.className = '';
       pending.textContent = 'Connection error: ' + err.message;
@@ -170,8 +259,9 @@
   });
 
   document.getElementById('brief').addEventListener('click', () => {
+    const cityPart = S.city ? (', and the current weather in ' + S.city) : '';
     ask('Give me a startup briefing: current date and time, my saved reminders, '
-        + 'and the top news headlines. Keep it short and spoken-style.', '⚡ BRIEFING');
+        + 'the top news headlines' + cityPart + '. Keep it short and spoken-style.', '⚡ BRIEFING');
   });
 
   // ---------- Voice: browser-native STT/TTS with wake word, echo guard, instant interrupt ----------
@@ -180,15 +270,18 @@
   const interruptBtn = document.getElementById('interrupt');
   const vstate = document.getElementById('vstate');
   let voiceOn = false, speaking = false, recog = null;
-  const langSel = document.getElementById('lang');
-  function voiceLang() { return (langSel && langSel.value) || 'en-US'; }   // #2 language-aware voice
+  function voiceLang() { return S.lang || 'en-US'; }   // #2 language-aware voice
 
   function setVoiceState(text) { vstate.textContent = text; }
 
-  // Give JARVIS his voice: for English, prefer a British male (the classic butler timbre);
-  // for any other selected language, prefer that language's best available voice.
+  // Give JARVIS his voice: an explicit choice wins; otherwise for English prefer a British male
+  // (the classic butler timbre), and for any other language its best available voice.
   function pickVoice(voices, lang) {
     if (!voices || !voices.length) return null;
+    if (S.voiceName) {
+      const byName = voices.find(v => v.name === S.voiceName);
+      if (byName) return byName;
+    }
     const two = lang.slice(0, 2);
     if (two === 'en') {
       return voices.find(v => /en-GB/i.test(v.lang) && /george|ryan|daniel|thomas|male/i.test(v.name))
@@ -207,7 +300,7 @@
     stopListening();                       // echo guard: never listen to our own voice
     try { speechSynthesis.cancel(); } catch (e) {}
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
+    u.rate = S.rate || 1.05;
     const chosen = pickVoice(speechSynthesis.getVoices(), voiceLang());
     u.voice = chosen;
     u.lang = chosen ? chosen.lang : voiceLang();   // keep utterance lang aligned to the voice
@@ -251,9 +344,10 @@
     recog.lang = voiceLang();
     recog.onresult = (e) => {
       const t = e.results[e.results.length - 1][0].transcript.trim();
-      const i = t.toLowerCase().indexOf('jarvis');
+      const wake = (S.wakeWord || 'jarvis').toLowerCase();
+      const i = t.toLowerCase().indexOf(wake);
       if (i < 0) return;                   // wake word required; everything else ignored
-      const prompt = t.slice(i + 6).replace(/^[,.!?\s]+/, '').trim();
+      const prompt = t.slice(i + wake.length).replace(/^[,.!?\s]+/, '').trim();
       if (prompt) ask(prompt, '🎤 ' + prompt);
       else speak('Yes, sir?');
     };
@@ -323,6 +417,78 @@
       if (stream) stream.getTracks().forEach(t => t.stop());
     }
   });
+
+  // ---------- Settings drawer (#detailed settings) ----------
+  const drawer = document.getElementById('drawer');
+  const scrim = document.getElementById('scrim');
+  const $ = id => document.getElementById(id);
+
+  function openSettings() {
+    // Reflect current settings into the controls each time it opens.
+    $('s_voiceOnStart').checked = S.voiceOnStart;
+    $('s_autoSpeak').checked = S.autoSpeak;
+    $('s_lang').value = S.lang;
+    $('s_rate').value = S.rate;
+    $('s_wake').value = S.wakeWord;
+    $('s_autoBrief').checked = S.autoBrief;
+    $('s_city').value = S.city;
+    $('s_showAlerts').checked = S.showAlerts;
+    $('s_speakAlerts').checked = S.speakAlerts;
+    $('s_cpu').value = S.cpu;
+    $('s_ram').value = S.ram;
+    $('s_model').textContent = jarvisModel ? jarvisModel : 'offline';
+    populateVoiceList();
+    drawer.classList.add('open');
+    scrim.classList.add('open');
+  }
+  function closeSettings() { drawer.classList.remove('open'); scrim.classList.remove('open'); }
+
+  function populateVoiceList() {
+    const sel = $('s_voiceName');
+    const voices = (window.speechSynthesis ? speechSynthesis.getVoices() : []) || [];
+    sel.innerHTML = '<option value="">Auto (British butler)</option>';
+    voices.forEach(v => {
+      const o = document.createElement('option');
+      o.value = v.name; o.textContent = v.name + ' (' + v.lang + ')';
+      if (v.name === S.voiceName) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+  if (window.speechSynthesis) speechSynthesis.onvoiceschanged = populateVoiceList;
+
+  function pushServerConfig() {
+    fetch('/config', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ cpuThreshold: S.cpu, ramThreshold: S.ram }) }).catch(() => {});
+  }
+
+  // Bind each control -> setting -> save (+ side effects)
+  $('s_voiceOnStart').addEventListener('change', e => { S.voiceOnStart = e.target.checked; saveSettings(); });
+  $('s_autoSpeak').addEventListener('change', e => { S.autoSpeak = e.target.checked; saveSettings(); });
+  $('s_lang').addEventListener('change', e => { S.lang = e.target.value; saveSettings(); });
+  $('s_voiceName').addEventListener('change', e => { S.voiceName = e.target.value; saveSettings();
+    if (voiceOn) speak('Voice updated, sir.'); });
+  $('s_rate').addEventListener('input', e => { S.rate = parseFloat(e.target.value); saveSettings(); });
+  $('s_wake').addEventListener('change', e => { S.wakeWord = (e.target.value.trim() || 'jarvis'); saveSettings(); });
+  $('s_autoBrief').addEventListener('change', e => { S.autoBrief = e.target.checked; saveSettings(); });
+  $('s_city').addEventListener('change', e => { S.city = e.target.value.trim(); saveSettings(); });
+  $('s_showAlerts').addEventListener('change', e => { S.showAlerts = e.target.checked; saveSettings(); });
+  $('s_speakAlerts').addEventListener('change', e => { S.speakAlerts = e.target.checked; saveSettings(); });
+  $('s_cpu').addEventListener('change', e => { S.cpu = clampPct(e.target.value, 90); saveSettings(); pushServerConfig(); });
+  $('s_ram').addEventListener('change', e => { S.ram = clampPct(e.target.value, 90); saveSettings(); pushServerConfig(); });
+  function clampPct(v, dflt) { const n = parseInt(v, 10); return isNaN(n) ? dflt : Math.max(1, Math.min(100, n)); }
+
+  $('s_clearChat').addEventListener('click', () => { log.innerHTML = ''; closeSettings(); });
+  $('s_reset').addEventListener('click', () => {
+    S = Object.assign({}, DEFAULTS); saveSettings(); pushServerConfig(); openSettings();
+  });
+
+  $('settings').addEventListener('click', openSettings);
+  $('closeSettings').addEventListener('click', closeSettings);
+  scrim.addEventListener('click', closeSettings);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSettings(); });
+
+  // Apply server-side settings once on load so thresholds match the panel.
+  pushServerConfig();
 </script>
 </body>
 </html>

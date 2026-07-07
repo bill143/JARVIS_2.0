@@ -66,6 +66,25 @@ public final class WebServer {
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        server.createContext("/config", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode json = MAPPER.readTree(body);
+                    if (monitor != null && json.has("cpuThreshold") && json.has("ramThreshold")) {
+                        monitor.setThresholds(json.get("cpuThreshold").asDouble(),
+                                json.get("ramThreshold").asDouble());
+                    }
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode cfg = MAPPER.createObjectNode();
+            cfg.put("cpuThreshold", monitor == null ? 90 : monitor.cpuThreshold());
+            cfg.put("ramThreshold", monitor == null ? 90 : monitor.ramThreshold());
+            respond(exchange, 200, "application/json", cfg.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/vision", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod())) {
                 respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
