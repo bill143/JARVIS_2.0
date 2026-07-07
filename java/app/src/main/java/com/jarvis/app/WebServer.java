@@ -43,15 +43,22 @@ public final class WebServer {
     /** Starts the server on {@code port} (0 picks a free port) and returns it running. */
     public static WebServer start(JarvisApi api, boolean online, String model, int port)
             throws IOException {
-        return start(api, online, model, port, null, null);
+        return start(api, online, model, port, null, null, false);
+    }
+
+    /** Backwards-compatible overload (no Google status). */
+    public static WebServer start(JarvisApi api, boolean online, String model, int port,
+            HardwareMonitor monitor, VisionHook vision) throws IOException {
+        return start(api, online, model, port, monitor, vision, false);
     }
 
     /**
      * Full wiring: {@code monitor} (nullable) drives {@code GET /alerts}; {@code vision} (nullable)
-     * drives {@code POST /vision} for webcam frames.
+     * drives {@code POST /vision} for webcam frames; {@code googleConnected} is reported in
+     * {@code GET /status}.
      */
     public static WebServer start(JarvisApi api, boolean online, String model, int port,
-            HardwareMonitor monitor, VisionHook vision) throws IOException {
+            HardwareMonitor monitor, VisionHook vision, boolean googleConnected) throws IOException {
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -139,6 +146,7 @@ public final class WebServer {
             ObjectNode status = MAPPER.createObjectNode();
             status.put("online", online);
             status.put("model", model);
+            status.put("google", googleConnected);
             respond(exchange, 200, "application/json", status.toString().getBytes(StandardCharsets.UTF_8));
         });
 

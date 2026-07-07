@@ -37,7 +37,7 @@ final class AppWiring {
 
     /** Everything the launcher needs to run. */
     record Runtime(JarvisApi api, boolean online, String model,
-            HardwareMonitor monitor, WebServer.VisionHook vision) {
+            HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected) {
     }
 
     private AppWiring() {
@@ -55,7 +55,8 @@ final class AppWiring {
         plugins.install(new SystemControlPlugin());
 
         GoogleAuth google = googleAuth(memory);
-        if (google != null && google.isConnected()) {
+        boolean googleConnected = google != null && google.isConnected();
+        if (googleConnected) {
             plugins.install(new GoogleWorkspacePlugin(new AuthorizedGoogleClient(google)));
         }
 
@@ -74,7 +75,7 @@ final class AppWiring {
 
         JarvisApi api = assemble(policy, tools, memory);
         HardwareMonitor monitor = new HardwareMonitor();
-        return new Runtime(api, online, model, monitor, visionHook);
+        return new Runtime(api, online, model, monitor, visionHook, googleConnected);
     }
 
     /** Lighter wiring with an injectable store (tests). No monitor, no vision. */

@@ -191,6 +191,7 @@
           <div class="item"><span class="sdot" id="ssAi"></span>Cognitive core</div>
           <div class="item"><span class="sdot" id="ssVoice"></span>Voice interface</div>
           <div class="item"><span class="sdot" id="ssVision"></span>Vision (screen/webcam)</div>
+          <div class="item"><span class="sdot" id="ssGoogle"></span>Email &amp; Calendar (Google)</div>
           <div class="item"><span class="sdot"></span>Persistent memory</div>
           <div class="item"><span class="sdot"></span>Tool execution</div>
           <div class="item"><span class="sdot"></span>Hardware monitor</div>
@@ -350,6 +351,7 @@
     document.getElementById('connKv').textContent = s.online ? 'SECURE' : 'LOCAL';
     document.getElementById('ssAi').className = 'sdot' + (s.online ? '' : ' off');
     document.getElementById('ssVision').className = 'sdot' + (s.online ? '' : ' off');
+    document.getElementById('ssGoogle').className = 'sdot' + (s.google ? '' : ' off');
     add('jarvis', s.online ? 'All systems online, sir. How can I help?'
         : 'Running in offline echo mode. Set ANTHROPIC_API_KEY and restart to enable AI.');
     if (s.online) {

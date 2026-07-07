@@ -154,6 +154,10 @@
 - **Safety:** `email_send`'s description instructs the model to confirm with the user before sending; all API/parse failures degrade to failed `ToolResult`s. Credentials/tokens live only on the user's machine (env + `~/.jarvis/memory.tsv`).
 - **Sequencing:** Google first (this step). Microsoft 365 (Graph) is the planned follow-up (REQ-STEP-028) once Google is confirmed working end-to-end.
 
+## REQ-STEP-027a notes (connect-flow truthfulness + visibility fix)
+- **Bug fixed:** `GoogleConnect` previously showed "connected" on the browser page as soon as it caught the auth code, *before* the token exchange — so a failed exchange still looked successful. The exchange now happens inside the redirect handler and the page + console report the real outcome, with a post-exchange `isConnected()` verification.
+- **Visibility added:** `/status` now returns `google` (bool); the HUD shows an "Email & Calendar (Google)" subsystem light (green when connected); the console prints `Google (Gmail/Calendar): CONNECTED / not connected` on startup. This lets the user confirm the integration at a glance and see failures instead of silent no-ops.
+
 ## Build-complete summary (Steps 1–12)
 - All 12 requirements COMPLETED. Module dependency graph (all one-directional, no cycles): `core-agent → {tool-execution, memory, planning}`, `integrations → tool-execution`, `api → core-agent`; `rag`, `speech`, `ui` are dependency-free.
 - External dependency whitelist was never expanded: JUnit 5 (test scope) is the only dependency in use; Jackson remains available in `dependencyManagement` and unused.

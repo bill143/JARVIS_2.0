@@ -55,12 +55,14 @@ public final class Main {
             runtime.monitor().start(30);   // hardware telemetry every 30s
         }
         WebServer server = WebServer.start(api, online, model, port,
-                runtime.monitor(), runtime.vision());
+                runtime.monitor(), runtime.vision(), runtime.googleConnected());
         String url = "http://localhost:" + server.port();
         System.out.println();
         System.out.println("  J.A.R.V.I.S. is running.");
         System.out.println("  Open this in your browser:  " + url);
         System.out.println("  Mode: " + (online ? "ONLINE (" + model + ")" : "offline echo - set ANTHROPIC_API_KEY to enable AI"));
+        System.out.println("  Google (Gmail/Calendar): "
+                + (runtime.googleConnected() ? "CONNECTED" : "not connected (run --connect-google)"));
         System.out.println("  Press Ctrl+C to stop.");
         System.out.println();
         tryOpenBrowser(url);

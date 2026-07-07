@@ -64,6 +64,7 @@ class WebServerTest {
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("\"online\":false"));
         assertTrue(response.body().contains("test-model"));
+        assertTrue(response.body().contains("\"google\":"));   // integration status reported
     }
 
     @Test
