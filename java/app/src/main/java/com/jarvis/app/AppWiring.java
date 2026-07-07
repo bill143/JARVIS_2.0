@@ -7,6 +7,9 @@ import com.jarvis.agent.routing.PromptRouter;
 import com.jarvis.api.DefaultJarvisApi;
 import com.jarvis.api.JarvisApi;
 import com.jarvis.integrations.PluginManager;
+import com.jarvis.integrations.google.AuthorizedGoogleClient;
+import com.jarvis.integrations.google.GoogleAuth;
+import com.jarvis.integrations.google.GoogleWorkspacePlugin;
 import com.jarvis.integrations.llm.AnthropicPolicy;
 import com.jarvis.integrations.llm.AnthropicPolicy.LlmTransport;
 import com.jarvis.integrations.mark.MarkToolsPlugin;
@@ -50,6 +53,11 @@ final class AppWiring {
         PluginManager plugins = new PluginManager(tools);
         plugins.install(new MarkToolsPlugin(memory));
         plugins.install(new SystemControlPlugin());
+
+        GoogleAuth google = googleAuth(memory);
+        if (google != null && google.isConnected()) {
+            plugins.install(new GoogleWorkspacePlugin(new AuthorizedGoogleClient(google)));
+        }
 
         WebServer.VisionHook visionHook = null;
         AgentPolicy policy;
@@ -99,5 +107,20 @@ final class AppWiring {
 
     static boolean isOnline(String apiKey) {
         return apiKey != null && !apiKey.isBlank();
+    }
+
+    /** Builds a {@link GoogleAuth} from env credentials, or null if they are not set. */
+    static GoogleAuth googleAuth(MemoryStore<String> memory) {
+        String id = System.getenv("GOOGLE_CLIENT_ID");
+        String secret = System.getenv("GOOGLE_CLIENT_SECRET");
+        if (id == null || id.isBlank() || secret == null || secret.isBlank()) {
+            return null;
+        }
+        return new GoogleAuth(id, secret, memory);
+    }
+
+    /** Store used by the standalone {@code --connect-google} flow. */
+    static MemoryStore<String> memoryStore() {
+        return new FileBackedStore(Path.of(System.getProperty("user.home"), ".jarvis", "memory.tsv"));
     }
 }

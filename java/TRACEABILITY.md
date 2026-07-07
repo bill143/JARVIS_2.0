@@ -99,6 +99,7 @@
 | REQ-STEP-024 | User voice-change report | Restore British male voice preference for English (regression from #021 language picker) | `app / dashboard.html` | `dashboard.html` (`pickVoice`) | COMPLETED |
 | REQ-STEP-025 | User request (settings) | Full settings drawer: per-feature controls (voice/briefing/weather/hardware alerts/session), persisted in browser localStorage; server-side hardware thresholds via `POST /config` | `app` | `dashboard.html` (drawer + bindings), `WebServer` (`/config`), `HardwareMonitor` (adjustable thresholds) | COMPLETED |
 | REQ-STEP-026 | User request (Iron-Man HUD) | JARVIS HUD: animated arc-reactor orb (concentric rings + radar sweep + reactive core), left live-telemetry rail, right command log, bottom status bar; orb reacts to idle/listening/thinking/speaking | `app` | `dashboard.html` (full HUD rebuild), `WebServer` (`/telemetry`) | COMPLETED |
+| REQ-STEP-027 | User request (email + calendar) | Google Workspace integration: OAuth 2.0 desktop connect flow + Gmail read/send + Calendar list/create, as tools; raw REST (no Google SDK) | `integrations / .google`, `app` | `GoogleAuth`, `GoogleClient`/`AuthorizedGoogleClient`, `GoogleWorkspacePlugin` (+tests), `GoogleConnect`, `Main` (`--connect-google`), `AppWiring` | COMPLETED (activates after user OAuth setup) |
 
 ## REQ-STEP-014/015 notes
 - **Jackson is now in use** — the first (and only) consumer of the whitelisted `jackson-databind`, in `integrations` for Anthropic request/response JSON. Transport is the JDK's built-in `java.net.http.HttpClient`; the external dependency whitelist is still just Jackson + JUnit.
@@ -145,6 +146,13 @@
 - **#2 Voice (now +languages):** dashboard language selector drives both recognition and synthesis (English/Spanish/French/German/Turkish/Italian/Portuguese). **Stack limit remaining:** ultra-low-latency streaming barge-in-by-voice (Gemini-Live-specific) is not achievable here; turn-based voice with ESC interrupt is the ceiling.
 - **#10 Browser control:** open-URL works; deep tab navigation/interaction needs a browser extension or automation driver and remains out of reach on this stack. Marked partial honestly.
 - Whitelist unchanged (Jackson + JUnit); all new networking uses the JDK HttpClient, all OS control uses ProcessBuilder, all vision uses AWT/ImageIO.
+
+## REQ-STEP-027 notes (Google Workspace)
+- **No SDK, whitelist unchanged:** Gmail API, Calendar API, and OAuth token exchange are all reached as raw REST over the JDK `HttpClient` + Jackson. No `google-api-client`/`google-oauth-client` dependency was added.
+- **Auth:** installed-app (desktop) OAuth 2.0. `GoogleConnect` runs a one-time loopback consent flow (`java -jar jarvis.jar --connect-google`), exchanges the code, and persists the **refresh token** in the durable `FileBackedStore` (scope `google`). Access tokens are refreshed on demand and cached until ~60s before expiry. Client id/secret come from `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` env vars.
+- **Scopes:** `gmail.modify` (read + send) and `calendar` (list + create) — matches the approved "read + act" scope. Tools: `email_list`, `email_send`, `calendar_list`, `calendar_create`. Wired into the tool registry only when a refresh token is present.
+- **Safety:** `email_send`'s description instructs the model to confirm with the user before sending; all API/parse failures degrade to failed `ToolResult`s. Credentials/tokens live only on the user's machine (env + `~/.jarvis/memory.tsv`).
+- **Sequencing:** Google first (this step). Microsoft 365 (Graph) is the planned follow-up (REQ-STEP-028) once Google is confirmed working end-to-end.
 
 ## Build-complete summary (Steps 1–12)
 - All 12 requirements COMPLETED. Module dependency graph (all one-directional, no cycles): `core-agent → {tool-execution, memory, planning}`, `integrations → tool-execution`, `api → core-agent`; `rag`, `speech`, `ui` are dependency-free.

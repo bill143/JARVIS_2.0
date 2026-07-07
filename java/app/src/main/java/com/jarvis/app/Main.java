@@ -27,6 +27,18 @@ public final class Main {
     }
 
     public static void main(String[] args) throws Exception {
+        if (Arrays.asList(args).contains("--connect-google")) {
+            com.jarvis.integrations.google.GoogleAuth auth =
+                    AppWiring.googleAuth(AppWiring.memoryStore());
+            if (auth == null) {
+                System.out.println("Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET first "
+                        + "(see the setup steps), then re-run with --connect-google.");
+                return;
+            }
+            GoogleConnect.run(auth);
+            return;
+        }
+
         String apiKey = System.getenv("ANTHROPIC_API_KEY");
         String model = System.getenv().getOrDefault("JARVIS_MODEL", DEFAULT_MODEL);
         AppWiring.Runtime runtime = AppWiring.build(apiKey, model);
