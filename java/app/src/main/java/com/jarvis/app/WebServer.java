@@ -66,6 +66,18 @@ public final class WebServer {
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        server.createContext("/telemetry", exchange -> {
+            com.jarvis.integrations.mark.HardwareTool.Sample s =
+                    com.jarvis.integrations.mark.HardwareTool.sample();
+            ObjectNode t = MAPPER.createObjectNode();
+            t.put("cpu", Math.round(s.cpuPercent()));
+            t.put("ram", Math.round(s.ramPercent()));
+            t.put("ramUsedGb", Math.round(s.ramUsedGb() * 10) / 10.0);
+            t.put("ramTotalGb", Math.round(s.ramTotalGb() * 10) / 10.0);
+            t.put("cores", s.cores());
+            respond(exchange, 200, "application/json", t.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/config", exchange -> {
             if ("POST".equals(exchange.getRequestMethod())) {
                 try (InputStream body = exchange.getRequestBody()) {

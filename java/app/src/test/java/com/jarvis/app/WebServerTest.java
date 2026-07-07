@@ -49,11 +49,13 @@ class WebServerTest {
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("J.A.R.V.I.S."));
         assertTrue(response.headers().firstValue("Content-Type").orElse("").contains("text/html"));
-        // Feature pins: briefing + voice controls stay on the page.
+        // Feature pins: briefing + voice controls + HUD stay on the page.
         assertTrue(response.body().contains("BRIEFING"));
         assertTrue(response.body().contains("VOICE"));
-        assertTrue(response.body().contains("INTERRUPT"));
+        assertTrue(response.body().contains("id=\"interrupt\""));
         assertTrue(response.body().contains("speechSynthesis"));
+        assertTrue(response.body().contains("id=\"orb\""));       // the HUD orb
+        assertTrue(response.body().contains("/telemetry"));       // live metrics wiring
     }
 
     @Test
@@ -83,6 +85,15 @@ class WebServerTest {
     void offlineChatNeverClaimsToBeOnline() throws Exception {
         HttpResponse<String> response = post("/chat", "{\"prompt\":\"are you there\"}");
         assertFalse(response.body().contains("Online and ready"));
+    }
+
+    @Test
+    void telemetryEndpointReturnsLiveMetrics() throws Exception {
+        HttpResponse<String> response = get("/telemetry");
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("cpu"));
+        assertTrue(response.body().contains("ram"));
+        assertTrue(response.body().contains("cores"));
     }
 
     @Test

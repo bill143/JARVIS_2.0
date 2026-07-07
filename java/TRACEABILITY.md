@@ -98,6 +98,7 @@
 | REQ-STEP-023 | User console-error report | Silence XML parser stderr on non-RSS (HTML/DOCTYPE) news feeds via a quiet SAX error handler | `integrations / .mark` | `NewsTool.java` | COMPLETED |
 | REQ-STEP-024 | User voice-change report | Restore British male voice preference for English (regression from #021 language picker) | `app / dashboard.html` | `dashboard.html` (`pickVoice`) | COMPLETED |
 | REQ-STEP-025 | User request (settings) | Full settings drawer: per-feature controls (voice/briefing/weather/hardware alerts/session), persisted in browser localStorage; server-side hardware thresholds via `POST /config` | `app` | `dashboard.html` (drawer + bindings), `WebServer` (`/config`), `HardwareMonitor` (adjustable thresholds) | COMPLETED |
+| REQ-STEP-026 | User request (Iron-Man HUD) | JARVIS HUD: animated arc-reactor orb (concentric rings + radar sweep + reactive core), left live-telemetry rail, right command log, bottom status bar; orb reacts to idle/listening/thinking/speaking | `app` | `dashboard.html` (full HUD rebuild), `WebServer` (`/telemetry`) | COMPLETED |
 
 ## REQ-STEP-014/015 notes
 - **Jackson is now in use** — the first (and only) consumer of the whitelisted `jackson-databind`, in `integrations` for Anthropic request/response JSON. Transport is the JDK's built-in `java.net.http.HttpClient`; the external dependency whitelist is still just Jackson + JUnit.
