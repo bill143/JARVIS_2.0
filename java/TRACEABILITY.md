@@ -154,6 +154,12 @@
 - **Safety:** `email_send`'s description instructs the model to confirm with the user before sending; all API/parse failures degrade to failed `ToolResult`s. Credentials/tokens live only on the user's machine (env + `~/.jarvis/memory.tsv`).
 - **Sequencing:** Google first (this step). Microsoft 365 (Graph) is the planned follow-up (REQ-STEP-028) once Google is confirmed working end-to-end.
 
+## REQ-STEP-031 notes (plain-text replies + People full page with contacts)
+- **No more literal `**`:** system prompt now forbids markdown; the dashboard also strips `** * `` #` from JARVIS's text before display AND speech (belt-and-suspenders), so nothing shows or is read aloud as asterisks.
+- **People is now a full page**, not a settings side-panel: header `👥 PEOPLE` button opens a dedicated page with an About-Me editor, a rich add-person form (name, relationship, email, phone, company, notes, photo), and a directory with thumbnails + contacts. Removed the old People section from Settings.
+- **Contacts reach the assistant:** `PeopleStore` now holds email/phone/company; `PeopleStore.contactsBlock()` is injected into JARVIS's context (`recall(memory, people)`), so "email Jennifer …" resolves her address and JARVIS can act by name. (Phone dialing isn't a capability yet — he knows the number and can tell you or email instead.)
+- Photos/contacts stay local; whitelist unchanged.
+
 ## REQ-STEP-030 notes (briefing double-fire fix + email triage in briefing + email actions)
 - **Double-briefing fixed:** auto-briefing is now one-shot per page load (`didAutoBrief` guard) and the BRIEFING handler ignores clicks while a briefing is already in flight (`send.disabled`).
 - **Briefing now triages email:** the briefing prompt asks JARVIS to list unread emails with a per-item recommendation (KEEP / REPLY / DELETE) and a SPAM flag, explicitly advise-only (no destructive action during the briefing). Loop budget raised 6→8 to fit clock + reminders + email + news + weather.

@@ -65,6 +65,9 @@ final class AppWiring {
             plugins.install(new GoogleWorkspacePlugin(googleService));
         }
 
+        PeopleStore people = new PeopleStore(
+                Path.of(System.getProperty("user.home"), ".jarvis", "people.json"));
+
         WebServer.VisionHook visionHook = null;
         AgentPolicy policy;
         if (online) {
@@ -73,15 +76,13 @@ final class AppWiring {
             tools.register(vision);
             visionHook = vision::analyze;
             policy = AnthropicPolicy.withApiKey(apiKey, model, tools)
-                    .withMemoryContext(() -> recall(memory));
+                    .withMemoryContext(() -> recall(memory, people));
         } else {
             policy = context -> new Decision.Respond(OFFLINE_HINT + context.input());
         }
 
         JarvisApi api = assemble(policy, tools, memory);
         HardwareMonitor monitor = new HardwareMonitor();
-        PeopleStore people = new PeopleStore(
-                Path.of(System.getProperty("user.home"), ".jarvis", "people.json"));
         PeopleRecognizer recognizer = online
                 ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
@@ -108,7 +109,7 @@ final class AppWiring {
         return new DefaultJarvisApi(orchestrator);
     }
 
-    /** Collapses durable preferences + MAIL/CALENDAR directions into a recall block. */
+    /** Collapses durable preferences + directions into a recall block (no people contacts). */
     static String recall(MemoryStore<String> memory) {
         List<String> lines = memory.query("preferences").stream()
                 .map(e -> "- " + e.value())
@@ -120,6 +121,18 @@ final class AppWiring {
         memory.get("about", "me").map(m -> m.value()).filter(s -> !s.isBlank())
                 .ifPresent(s -> lines.add("- About the user: " + s));
         return lines.isEmpty() ? "" : String.join("\n", lines);
+    }
+
+    /** Recall including the People directory, so JARVIS can email/contact people by name. */
+    static String recall(MemoryStore<String> memory, PeopleStore people) {
+        String base = recall(memory);
+        String contacts = people.contactsBlock();
+        if (contacts.isBlank()) {
+            return base;
+        }
+        String directory = "Known people / contacts (use these to email or reach them by name):\n"
+                + contacts;
+        return base.isBlank() ? directory : base + "\n" + directory;
     }
 
     static boolean isOnline(String apiKey) {

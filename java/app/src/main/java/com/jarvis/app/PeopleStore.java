@@ -20,7 +20,8 @@ import java.util.Objects;
 public final class PeopleStore {
 
     /** One known person. {@code photo} is a data URL (e.g. {@code data:image/png;base64,...}). */
-    public record Person(String id, String name, String relationship, String notes, String photo) {
+    public record Person(String id, String name, String relationship, String email, String phone,
+            String company, String notes, String photo) {
     }
 
     private final Path file;
@@ -39,8 +40,9 @@ public final class PeopleStore {
             List<Person> people = new ArrayList<>();
             for (JsonNode n : mapper.readTree(Files.readString(file))) {
                 people.add(new Person(n.path("id").asText(), n.path("name").asText(),
-                        n.path("relationship").asText(""), n.path("notes").asText(""),
-                        n.path("photo").asText("")));
+                        n.path("relationship").asText(""), n.path("email").asText(""),
+                        n.path("phone").asText(""), n.path("company").asText(""),
+                        n.path("notes").asText(""), n.path("photo").asText("")));
             }
             return people;
         } catch (IOException e) {
@@ -56,6 +58,9 @@ public final class PeopleStore {
             o.put("id", p.id());
             o.put("name", p.name());
             o.put("relationship", p.relationship());
+            o.put("email", p.email());
+            o.put("phone", p.phone());
+            o.put("company", p.company());
             o.put("notes", p.notes());
             o.put("hasPhoto", p.photo() != null && !p.photo().isBlank());
         }
@@ -63,13 +68,43 @@ public final class PeopleStore {
     }
 
     /** Adds a person and returns the assigned id. */
-    public synchronized String add(String name, String relationship, String notes, String photo) {
+    public synchronized String add(String name, String relationship, String email, String phone,
+            String company, String notes, String photo) {
         List<Person> people = all();
         String id = "p" + (people.size() + 1) + "-" + Integer.toHexString(name.hashCode() & 0xffff);
-        people.add(new Person(id, name, relationship == null ? "" : relationship,
-                notes == null ? "" : notes, photo == null ? "" : photo));
+        people.add(new Person(id, name, nz(relationship), nz(email), nz(phone), nz(company),
+                nz(notes), nz(photo)));
         persist(people);
         return id;
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s;
+    }
+
+    /** A compact text block of contacts for the assistant's context (no photos). */
+    public synchronized String contactsBlock() {
+        StringBuilder sb = new StringBuilder();
+        for (Person p : all()) {
+            sb.append("- ").append(p.name());
+            if (!p.relationship().isBlank()) {
+                sb.append(" (").append(p.relationship()).append(")");
+            }
+            if (!p.email().isBlank()) {
+                sb.append(", email ").append(p.email());
+            }
+            if (!p.phone().isBlank()) {
+                sb.append(", phone ").append(p.phone());
+            }
+            if (!p.company().isBlank()) {
+                sb.append(", ").append(p.company());
+            }
+            if (!p.notes().isBlank()) {
+                sb.append(". ").append(p.notes());
+            }
+            sb.append('\n');
+        }
+        return sb.toString().strip();
     }
 
     /** Removes a person by id; returns whether one was removed. */
@@ -93,6 +128,9 @@ public final class PeopleStore {
                 o.put("id", p.id());
                 o.put("name", p.name());
                 o.put("relationship", p.relationship());
+                o.put("email", p.email());
+                o.put("phone", p.phone());
+                o.put("company", p.company());
                 o.put("notes", p.notes());
                 o.put("photo", p.photo());
             }

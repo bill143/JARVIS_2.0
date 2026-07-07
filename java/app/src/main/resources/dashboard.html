@@ -159,6 +159,31 @@
   .person .pn { flex:1; font-size:13px; } .person .pn small { color:var(--dim); }
   .person button { background:none; border:none; color:#ff8ba0; cursor:pointer; font-size:16px; }
 
+  /* Full page (People & About Me) */
+  .page { position:fixed; inset:0; z-index:25; background:
+            radial-gradient(1100px 700px at 50% 0%, #0a1d33 0%, #05101d 55%, var(--bg) 100%);
+          display:none; flex-direction:column; }
+  .page.open { display:flex; }
+  .page-head { display:flex; align-items:center; gap:12px; padding:14px 26px; border-bottom:1px solid var(--line); }
+  .page-head h2 { font-size:16px; letter-spacing:5px; color:#eaf7ff; }
+  .page-body { flex:1; overflow-y:auto; padding:22px 26px; max-width:1000px; width:100%; margin:0 auto; }
+  .pcard { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:18px; }
+  .pcard h4 { font-size:12px; letter-spacing:3px; color:var(--cyan); text-transform:uppercase; margin-bottom:12px; }
+  .pcard textarea, .pcard input[type=text] { width:100%; background:rgba(8,18,30,.8); color:var(--text);
+          border:1px solid var(--line); border-radius:7px; padding:9px 11px; font:inherit; font-size:13px; }
+  .pcard label { display:block; font-size:11px; letter-spacing:1px; color:var(--dim); margin-bottom:4px; }
+  .pgrid { display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
+  .pcard input[type=file] { color:var(--dim); font-size:12px; }
+  .pperson { display:flex; gap:14px; align-items:flex-start; border:1px solid var(--line);
+             border-radius:10px; padding:12px 14px; margin:10px 0; }
+  .pperson img { width:56px; height:56px; border-radius:50%; object-fit:cover; background:#0c1a2c; flex:0 0 auto; }
+  .pperson .info { flex:1; font-size:13px; }
+  .pperson .info .nm { color:#eaf7ff; font-weight:600; font-size:15px; }
+  .pperson .info .rel { color:var(--cyan); font-size:12px; }
+  .pperson .info .ct { color:var(--dim); font-size:12px; margin-top:3px; }
+  .pperson .info .nt { color:var(--text); font-size:12px; margin-top:4px; }
+  .pperson .del { background:none; border:none; color:#ff8ba0; cursor:pointer; font-size:18px; }
+
   /* Workspace overlay (MAIL / CALENDAR) */
   .wsp { position:fixed; z-index:22; top:50%; left:50%;
          transform:translate(-50%,-50%) scale(.97); width:780px; max-width:94vw; height:84vh;
@@ -192,6 +217,7 @@
       <button class="hbtn" id="calTab" type="button" title="Your Google Calendar">📅 CALENDAR</button>
       <button class="hbtn" id="voice" type="button" title="Toggle voice; say your wake word, ESC interrupts">🎤 VOICE</button>
       <button class="hbtn" id="camera" type="button" title="Look through the webcam">📷 CAMERA</button>
+      <button class="hbtn" id="peopleTab" type="button" title="People & About Me">👥 PEOPLE</button>
       <button class="hbtn" id="settings" type="button" title="All settings">⚙ SETTINGS</button>
       <button class="hbtn alert" id="interrupt" type="button" title="Stop JARVIS (or press ESC)">✋ STOP</button>
     </div>
@@ -318,27 +344,47 @@
     <div class="row"><label for="s_ram">RAM alert threshold (%)</label><input type="number" id="s_ram" min="1" max="100"></div>
   </div>
   <div class="sect">
-    <h4>👤 People &amp; About Me</h4>
-    <div class="row" style="display:block;"><label for="a_me">About me — JARVIS remembers this</label>
-      <textarea id="a_me" placeholder="e.g. I'm Bill, owner of O'Neill Contractors. I go by Bill. My wife is Jennifer. I prefer brief, direct answers."></textarea></div>
-    <div class="hint" style="margin:10px 0 6px;">Known people (used to recognise faces on camera):</div>
-    <div id="peopleList"></div>
-    <div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px;">
-      <div class="row"><label for="p_name">Name</label><input type="text" id="p_name"></div>
-      <div class="row"><label for="p_rel">Relationship</label><input type="text" id="p_rel" placeholder="daughter, coworker…"></div>
-      <div class="row"><label for="p_notes">Notes</label><input type="text" id="p_notes" placeholder="optional"></div>
-      <div class="row"><label for="p_photo">Photo</label><input type="file" id="p_photo" accept="image/*"></div>
-      <div class="row"><label></label><button id="p_add" type="button">Add person</button></div>
-    </div>
-    <div class="hint">Photos stay on your PC; they're only sent to the AI when you use recognition.</div>
-  </div>
-  <div class="sect">
     <h4>🧠 Session</h4>
     <div class="row"><label>Model</label><span id="s_model" class="hint"></span></div>
     <div class="row"><label>Conversation</label><button id="s_clearChat" type="button">Clear</button></div>
     <div class="row"><label>Reset all settings to defaults</label><button id="s_reset" class="danger" type="button">Reset</button></div>
   </div>
 </aside>
+
+<div class="page" id="peoplePage">
+  <div class="page-head">
+    <h2>👥  PEOPLE &amp; ABOUT ME</h2>
+    <span style="margin-left:auto;"></span>
+    <button class="hbtn" id="peopleClose" type="button">CLOSE</button>
+  </div>
+  <div class="page-body">
+    <div class="pcard">
+      <h4>About Me</h4>
+      <div class="hint" style="margin-bottom:8px;">JARVIS keeps this in mind in every conversation.</div>
+      <textarea id="a_me" style="min-height:120px;" placeholder="e.g. I'm Bill O'Neill, owner of O'Neill Contractors in Chicago. I go by Bill. My wife is Jennifer. I prefer brief, direct answers. My work hours are 7am–5pm."></textarea>
+    </div>
+
+    <div class="pcard">
+      <h4>Add a Person</h4>
+      <div class="pgrid">
+        <div><label>Name *</label><input type="text" id="p_name"></div>
+        <div><label>Relationship</label><input type="text" id="p_rel" placeholder="wife, coworker, client…"></div>
+        <div><label>Email</label><input type="text" id="p_email" placeholder="name@example.com"></div>
+        <div><label>Phone</label><input type="text" id="p_phone" placeholder="(555) 123-4567"></div>
+        <div><label>Company</label><input type="text" id="p_company"></div>
+        <div><label>Photo (for recognition)</label><input type="file" id="p_photo" accept="image/*"></div>
+        <div style="grid-column:1 / -1;"><label>Notes</label><textarea id="p_notes" placeholder="Anything JARVIS should know — how you know them, preferences, context."></textarea></div>
+      </div>
+      <div style="margin-top:10px;"><button class="hbtn" id="p_add" type="button">＋ Add person</button></div>
+      <div class="hint" style="margin-top:6px;">Photos & contacts stay on your PC. JARVIS can use a person's email to write to them by name.</div>
+    </div>
+
+    <div class="pcard">
+      <h4>Directory</h4>
+      <div id="peopleList"></div>
+    </div>
+  </div>
+</div>
 
 <div class="scrim" id="scrim2"></div>
 <div class="wsp" id="wsp">
@@ -408,7 +454,16 @@
   }
   function restState() { return voiceOn ? 'listening' : 'idle'; }
 
+  // Strip markdown so nothing reads or shows literal ** * ` # markers.
+  function clean(t) {
+    if (!t) return t;
+    return t.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1')
+            .replace(/`([^`]*)`/g, '$1').replace(/^#{1,6}\s*/gm, '')
+            .replace(/^\s*[-*]\s+/gm, '• ');
+  }
+
   function add(who, text, meta) {
+    text = who === 'jarvis' ? clean(text) : text;
     const div = document.createElement('div');
     div.className = 'msg ' + (who === 'you' ? 'you' : 'jarvis');
     const label = document.createElement('div'); label.className='who'; label.textContent=who;
@@ -615,7 +670,7 @@
     $('s_autoBrief').checked=S.autoBrief; $('s_city').value=S.city;
     $('s_showAlerts').checked=S.showAlerts; $('s_speakAlerts').checked=S.speakAlerts;
     $('s_cpu').value=S.cpu; $('s_ram').value=S.ram; $('s_model').textContent=jarvisModel||'offline';
-    populateVoiceList(); loadAboutMe(); loadPeople();
+    populateVoiceList();
     drawer.classList.add('open'); scrim.classList.add('open');
   }
   function closeSettings(){ drawer.classList.remove('open'); scrim.classList.remove('open'); }
@@ -723,8 +778,14 @@
   $('m_instr').addEventListener('change',e=>saveInstruction('mail',e.target.value));
   $('c_instr').addEventListener('change',e=>saveInstruction('calendar',e.target.value));
 
-  // ---------- People & About Me ----------
+  // ---------- People & About Me (full page) ----------
+  const peoplePage=$('peoplePage');
   let peopleCount = 0;
+  function openPeople(){ peoplePage.classList.add('open'); loadAboutMe(); loadPeople(); }
+  function closePeople(){ peoplePage.classList.remove('open'); }
+  $('peopleTab').addEventListener('click',openPeople);
+  $('peopleClose').addEventListener('click',closePeople);
+
   async function loadAboutMe(){ try{ const j=await (await fetch('/aboutme')).json(); $('a_me').value=j.text||''; }catch(e){} }
   $('a_me').addEventListener('change',e=>{ fetch('/aboutme',{method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify({text:e.target.value})}).catch(()=>{}); });
@@ -735,12 +796,17 @@
       peopleCount = people.length;
       const box=$('peopleList'); box.innerHTML='';
       if (!people.length){ box.innerHTML='<div class="hint">No people added yet.</div>'; return; }
-      people.forEach(p=>{ const d=document.createElement('div'); d.className='person';
-        d.innerHTML='<img src="'+(p.hasPhoto?('/people/photo?id='+encodeURIComponent(p.id)):'')+'" alt="">'
-          +'<div class="pn"><b></b><br><small></small></div><button title="Remove">✕</button>';
-        d.querySelector('b').textContent=p.name;
-        d.querySelector('small').textContent=[p.relationship,p.notes].filter(Boolean).join(' · ');
-        d.querySelector('button').addEventListener('click',async()=>{
+      people.forEach(p=>{ const d=document.createElement('div'); d.className='pperson';
+        const contact=[p.email,p.phone,p.company].filter(Boolean).join('   ·   ');
+        d.innerHTML='<img alt=""><div class="info"><div class="nm"></div><div class="rel"></div>'
+          +'<div class="ct"></div><div class="nt"></div></div><button class="del" title="Remove">✕</button>';
+        if(p.hasPhoto) d.querySelector('img').src='/people/photo?id='+encodeURIComponent(p.id);
+        d.querySelector('.nm').textContent=p.name;
+        d.querySelector('.rel').textContent=p.relationship||'';
+        d.querySelector('.ct').textContent=contact;
+        d.querySelector('.nt').textContent=p.notes||'';
+        d.querySelector('.del').addEventListener('click',async()=>{
+          if(!confirm('Remove '+p.name+'?')) return;
           await fetch('/people',{method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({delete:true,id:p.id})}); loadPeople(); });
         box.appendChild(d); });
@@ -751,8 +817,10 @@
     const file=$('p_photo').files[0];
     const photo = file ? await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(file); }) : '';
     await fetch('/people',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name,relationship:$('p_rel').value.trim(),notes:$('p_notes').value.trim(),photo})});
-    $('p_name').value=$('p_rel').value=$('p_notes').value=''; $('p_photo').value='';
+      body:JSON.stringify({name,relationship:$('p_rel').value.trim(),email:$('p_email').value.trim(),
+        phone:$('p_phone').value.trim(),company:$('p_company').value.trim(),notes:$('p_notes').value.trim(),photo})});
+    $('p_name').value=$('p_rel').value=$('p_email').value=$('p_phone').value=$('p_company').value=$('p_notes').value='';
+    $('p_photo').value='';
     loadPeople();
   });
   fetch('/people').then(r=>r.json()).then(p=>{ peopleCount=p.length; }).catch(()=>{});

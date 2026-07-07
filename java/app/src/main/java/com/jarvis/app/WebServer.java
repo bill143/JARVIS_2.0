@@ -173,7 +173,9 @@ public final class WebServer {
                         String name = j.path("name").asText("").strip();
                         if (!name.isEmpty()) {
                             people.add(name, j.path("relationship").asText(""),
-                                    j.path("notes").asText(""), j.path("photo").asText(""));
+                                    j.path("email").asText(""), j.path("phone").asText(""),
+                                    j.path("company").asText(""), j.path("notes").asText(""),
+                                    j.path("photo").asText(""));
                         }
                     }
                 } catch (IOException e) {
