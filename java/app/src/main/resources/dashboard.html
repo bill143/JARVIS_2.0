@@ -181,14 +181,14 @@
   const vstate = document.getElementById('vstate');
   let voiceOn = false, speaking = false, recog = null;
   const langSel = document.getElementById('lang');
-  function voiceLang() { return langSel.value; }   // #2 language-aware voice
+  function voiceLang() { return (langSel && langSel.value) || 'en-US'; }   // #2 language-aware voice
 
   function setVoiceState(text) { vstate.textContent = text; }
 
   function speak(text) {
-    if (!voiceOn || !window.speechSynthesis) return;
+    if (!voiceOn || !window.speechSynthesis || !text) return;
     stopListening();                       // echo guard: never listen to our own voice
-    speechSynthesis.cancel();
+    try { speechSynthesis.cancel(); } catch (e) {}
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.05;
     u.lang = voiceLang();
@@ -199,11 +199,29 @@
     speaking = true;
     interruptBtn.classList.add('show');
     setVoiceState('SPEAKING — ESC TO INTERRUPT');
-    u.onend = u.onerror = () => {
+
+    // Self-healing: onend can silently fail to fire after a cancel() (Chromium/Edge bug),
+    // which would otherwise leave `speaking` stuck true and permanently block listening.
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearInterval(keepAlive);
+      clearTimeout(watchdog);
       speaking = false;
       interruptBtn.classList.remove('show');
       if (voiceOn) startListening();
     };
+    u.onend = finish;
+    u.onerror = finish;
+    // Every few seconds: nudge synthesis past the ~15s auto-pause bug, and detect a
+    // real end even if onend never fired.
+    const keepAlive = setInterval(() => {
+      if (!speechSynthesis.speaking && !speechSynthesis.pending) { finish(); return; }
+      try { speechSynthesis.resume(); } catch (e) {}
+    }, 4000);
+    // Absolute backstop: never stay "speaking" longer than the text could plausibly take.
+    const watchdog = setTimeout(finish, Math.min(45000, 4000 + text.length * 90));
     speechSynthesis.speak(u);
   }
 
