@@ -100,8 +100,20 @@ public final class NewsTool implements Tool {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder()
-                .parse(new ByteArrayInputStream(rssXml.getBytes(StandardCharsets.UTF_8)));
+        var builder = factory.newDocumentBuilder();
+        // Quiet error handler: a backend returning HTML (with a DOCTYPE) rejects cleanly and the
+        // race falls back to the other source, without the default parser printing to stderr.
+        builder.setErrorHandler(new org.xml.sax.ErrorHandler() {
+            public void warning(org.xml.sax.SAXParseException e) { }
+            public void error(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException {
+                throw e;
+            }
+            public void fatalError(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException {
+                throw e;
+            }
+        });
+        Document doc = builder.parse(
+                new ByteArrayInputStream(rssXml.getBytes(StandardCharsets.UTF_8)));
 
         NodeList items = doc.getElementsByTagName("item");
         List<String> lines = new ArrayList<>();
