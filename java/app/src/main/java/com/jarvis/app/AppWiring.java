@@ -76,7 +76,8 @@ final class AppWiring {
             tools.register(vision);
             visionHook = vision::analyze;
             policy = AnthropicPolicy.withApiKey(apiKey, model, tools)
-                    .withMemoryContext(() -> recall(memory, people));
+                    .withMemoryContext(() -> recall(memory, people))
+                    .withHistory(() -> conversationHistory(memory, "dashboard", 24));
         } else {
             policy = context -> new Decision.Respond(OFFLINE_HINT + context.input());
         }
@@ -137,6 +138,23 @@ final class AppWiring {
 
     static boolean isOnline(String apiKey) {
         return apiKey != null && !apiKey.isBlank();
+    }
+
+    /** Reads the last {@code maxMessages} conversation messages for {@code sessionId}, in order. */
+    static java.util.List<AnthropicPolicy.ChatMessage> conversationHistory(
+            MemoryStore<String> memory, String sessionId, int maxMessages) {
+        String scope = com.jarvis.agent.orchestration.Orchestrator.conversationScope(sessionId);
+        java.util.List<AnthropicPolicy.ChatMessage> all = memory.query(scope).stream()
+                .sorted(java.util.Comparator.comparing(e -> e.key()))
+                .map(e -> {
+                    int tab = e.value().indexOf('\t');
+                    String role = tab < 0 ? "user" : e.value().substring(0, tab);
+                    String text = tab < 0 ? e.value() : e.value().substring(tab + 1);
+                    return new AnthropicPolicy.ChatMessage(role, text);
+                })
+                .collect(Collectors.toList());
+        int from = Math.max(0, all.size() - maxMessages);
+        return all.subList(from, all.size());
     }
 
     /** Builds a {@link GoogleAuth} from env credentials, or null if they are not set. */

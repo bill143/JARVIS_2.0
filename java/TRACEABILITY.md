@@ -154,6 +154,11 @@
 - **Safety:** `email_send`'s description instructs the model to confirm with the user before sending; all API/parse failures degrade to failed `ToolResult`s. Credentials/tokens live only on the user's machine (env + `~/.jarvis/memory.tsv`).
 - **Sequencing:** Google first (this step). Microsoft 365 (Graph) is the planned follow-up (REQ-STEP-028) once Google is confirmed working end-to-end.
 
+## REQ-STEP-033 notes (conversational memory — the big one)
+- **Root cause fixed:** the LLM previously received only the *current* message — no prior turns — so JARVIS effectively had zero short-term memory. Now the Orchestrator records a clean, ordered, role-tagged transcript (`conv:<sessionId>` scope, keys `%06d`, values `user\t…` / `assistant\t…`), and `AnthropicPolicy.buildRequest` replays the recent history as real user/assistant messages before the current turn.
+- `AppWiring` wires `policy.withHistory(() -> conversationHistory(memory, "dashboard", 24))` — last 24 messages (~12 exchanges). Empty history reproduces the old single-message request exactly (existing tests unaffected).
+- Durable: the transcript lives in the file-backed store, so context also survives restarts. Whitelist unchanged.
+
 ## REQ-STEP-032 notes (conversation mode — wake word once)
 - Voice now supports **conversation mode** (default on): the wake word activates an active session, after which utterances go straight to JARVIS with no wake word needed. It ends on a quiet timeout (default 45s, adjustable 10–600) or an end phrase ("that's all", "never mind", "stand down", "goodbye", "dismissed", …), returning to wake-word listening.
 - Echo guard preserved (mic pauses while he speaks); the quiet-timeout resets from the end of his reply. Status/orb show "IN CONVERSATION" vs "LISTENING". Turning voice off clears the session. Two new Voice settings: toggle + timeout seconds. Pure front-end (dashboard.html); no server change.

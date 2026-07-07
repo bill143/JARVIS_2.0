@@ -58,6 +58,8 @@ public final class AnthropicPolicy implements AgentPolicy {
     private final ToolRegistry tools;
     private final ObjectMapper mapper = new ObjectMapper();
     private volatile java.util.function.Supplier<String> memoryContext = () -> "";
+    private volatile java.util.function.Supplier<java.util.List<ChatMessage>> history =
+            java.util.List::of;
 
     /** Creates a policy with no tool access. */
     public AnthropicPolicy(LlmTransport transport, String model, int maxTokens) {
@@ -189,13 +191,35 @@ public final class AnthropicPolicy implements AgentPolicy {
         }
     }
 
+    /** One prior conversation message. {@code role} is "user" or "assistant". */
+    public record ChatMessage(String role, String content) {
+    }
+
+    /**
+     * Installs a supplier of recent conversation history (prior turns) so JARVIS follows a
+     * back-and-forth instead of treating every message in isolation. Returns this.
+     */
+    public AnthropicPolicy withHistory(java.util.function.Supplier<java.util.List<ChatMessage>> history) {
+        this.history = Objects.requireNonNull(history, "history");
+        return this;
+    }
+
     /** Builds the Messages API request body for {@code context}; exposed for tests. */
     String buildRequest(AgentContext context) {
         ObjectNode root = mapper.createObjectNode();
         root.put("model", model);
         root.put("max_tokens", maxTokens);
         root.put("system", systemPrompt());
-        ObjectNode message = root.putArray("messages").addObject();
+        com.fasterxml.jackson.databind.node.ArrayNode messages = root.putArray("messages");
+        for (ChatMessage m : history.get()) {
+            if (m.content() == null || m.content().isBlank()) {
+                continue;
+            }
+            ObjectNode prior = messages.addObject();
+            prior.put("role", "assistant".equals(m.role()) ? "assistant" : "user");
+            prior.put("content", m.content());
+        }
+        ObjectNode message = messages.addObject();
         message.put("role", "user");
         message.put("content", userContent(context));
         return root.toString();

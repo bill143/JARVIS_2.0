@@ -155,6 +155,28 @@ class AnthropicPolicyTest {
     }
 
     @Test
+    void priorConversationIsIncludedAsMessages() {
+        AnthropicPolicy policy = new AnthropicPolicy(request -> OK_RESPONSE, "m", 100)
+                .withHistory(() -> java.util.List.of(
+                        new AnthropicPolicy.ChatMessage("user", "my name is Bill"),
+                        new AnthropicPolicy.ChatMessage("assistant", "Noted, Bill.")));
+        String request = policy.buildRequest(AgentContext.initial("what's my name?"));
+        assertTrue(request.contains("my name is Bill"));
+        assertTrue(request.contains("Noted, Bill."));
+        assertTrue(request.contains("what's my name?"));
+        // Order: history user, history assistant, then the current user turn.
+        assertTrue(request.indexOf("my name is Bill") < request.indexOf("what's my name?"));
+    }
+
+    @Test
+    void emptyHistoryProducesJustTheCurrentTurn() {
+        AnthropicPolicy policy = new AnthropicPolicy(request -> OK_RESPONSE, "m", 100);
+        String request = policy.buildRequest(AgentContext.initial("hello"));
+        assertTrue(request.contains("hello"));
+        assertTrue(request.contains("\"role\":\"user\""));
+    }
+
+    @Test
     void personaAddressesTheUserAsSir() {
         AnthropicPolicy policy = new AnthropicPolicy(request -> OK_RESPONSE, "m", 100);
         String request = policy.buildRequest(AgentContext.initial("hello"));

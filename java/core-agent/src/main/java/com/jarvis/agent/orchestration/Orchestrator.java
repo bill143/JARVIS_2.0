@@ -108,5 +108,18 @@ public final class Orchestrator {
         memory.put(sessionId, key, value, Map.of(
                 "stopReason", result.stopReason().name(),
                 "toolSteps", String.valueOf(result.steps().size())));
+
+        // Clean, ordered, role-tagged conversation history so the model can follow the discussion.
+        String conv = conversationScope(sessionId);
+        int seq = memory.query(conv).size();
+        memory.put(conv, String.format("%06d", seq), "user\t" + prompt);
+        String reply = result.stopReason() == AgentResult.StopReason.RESPONDED
+                ? result.response() : "(no response)";
+        memory.put(conv, String.format("%06d", seq + 1), "assistant\t" + reply);
+    }
+
+    /** Memory scope holding the ordered conversation transcript for {@code sessionId}. */
+    public static String conversationScope(String sessionId) {
+        return "conv:" + sessionId;
     }
 }

@@ -105,6 +105,23 @@ class OrchestratorTest {
     }
 
     @Test
+    void conversationTranscriptIsRecordedInOrder() {
+        MemoryStore<String> memory = new InMemoryStore<>();
+        Orchestrator orchestrator = orchestrator(memory);
+        orchestrator.handle("s", "hello one");
+        orchestrator.handle("s", "and two");
+
+        String conv = Orchestrator.conversationScope("s");
+        java.util.List<String> lines = memory.query(conv).stream()
+                .sorted(java.util.Comparator.comparing(e -> e.key()))
+                .map(e -> e.value()).toList();
+        assertEquals(4, lines.size());   // user, assistant, user, assistant
+        assertEquals("user\thello one", lines.get(0));
+        assertTrue(lines.get(1).startsWith("assistant\t"));
+        assertEquals("user\tand two", lines.get(2));
+    }
+
+    @Test
     void budgetExhaustionIsRecordedAsNoResponse() {
         MemoryStore<String> memory = new InMemoryStore<>();
         AgentResult result = orchestrator(memory).handle("s", "I am stuck");
