@@ -1,9 +1,7 @@
 package com.jarvis.integrations.llm;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jarvis.agent.loop.AgentContext;
 import com.jarvis.agent.loop.AgentPolicy;
 import com.jarvis.agent.loop.AgentStep;
@@ -17,6 +15,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -52,7 +52,7 @@ public final class AnthropicPolicy implements AgentPolicy {
                     + " are read aloud and shown as plain text. Use plain capitalized words or numbered"
                     + " lines for structure instead.";
 
-    private final LlmTransport transport;
+    private final LlmProvider provider;
     private final String model;
     private final int maxTokens;
     private final ToolRegistry tools;
@@ -61,20 +61,40 @@ public final class AnthropicPolicy implements AgentPolicy {
     private volatile java.util.function.Supplier<java.util.List<ChatMessage>> history =
             java.util.List::of;
 
-    /** Creates a policy with no tool access. */
+    /** Creates a policy with no tool access, talking to Claude over {@code transport}. */
     public AnthropicPolicy(LlmTransport transport, String model, int maxTokens) {
         this(transport, model, maxTokens, null);
     }
 
-    /** Creates a policy that may invoke tools from {@code tools} (nullable = no tools). */
+    /**
+     * Creates a policy that may invoke tools from {@code tools} (nullable = no tools), talking to
+     * Claude over {@code transport}. The transport is wrapped in an {@link AnthropicProvider}; to
+     * drive a different model, use {@link #withProvider}.
+     */
     public AnthropicPolicy(LlmTransport transport, String model, int maxTokens, ToolRegistry tools) {
-        this.transport = Objects.requireNonNull(transport, "transport");
+        this(new AnthropicProvider(Objects.requireNonNull(transport, "transport")),
+                model, maxTokens, tools);
+    }
+
+    /** Creates a policy over an arbitrary {@link LlmProvider} (the multi-provider seam). */
+    private AnthropicPolicy(LlmProvider provider, String model, int maxTokens, ToolRegistry tools) {
+        this.provider = Objects.requireNonNull(provider, "provider");
         this.model = Objects.requireNonNull(model, "model");
         if (maxTokens < 1) {
             throw new IllegalArgumentException("maxTokens must be at least 1, got " + maxTokens);
         }
         this.maxTokens = maxTokens;
         this.tools = tools;
+    }
+
+    /**
+     * Creates a policy driven by any {@link LlmProvider}. Claude is the only implementation today
+     * ({@link AnthropicProvider}); this is the entry point a future OpenAI/Gemini provider plugs
+     * into without changing the policy.
+     */
+    public static AnthropicPolicy withProvider(
+            LlmProvider provider, String model, int maxTokens, ToolRegistry tools) {
+        return new AnthropicPolicy(provider, model, maxTokens, tools);
     }
 
     /** Creates a tool-less policy that calls the real Anthropic API with {@code apiKey}. */
@@ -156,7 +176,7 @@ public final class AnthropicPolicy implements AgentPolicy {
     public Decision decide(AgentContext context) {
         String text;
         try {
-            text = extractText(transport.complete(buildRequest(context))).strip();
+            text = provider.complete(buildLlmRequest(context)).text().strip();
         } catch (IOException | RuntimeException e) {
             return new Decision.Respond("Sorry — I couldn't reach my language model ("
                     + e.getMessage() + "). Please try again.");
@@ -204,25 +224,23 @@ public final class AnthropicPolicy implements AgentPolicy {
         return this;
     }
 
-    /** Builds the Messages API request body for {@code context}; exposed for tests. */
-    String buildRequest(AgentContext context) {
-        ObjectNode root = mapper.createObjectNode();
-        root.put("model", model);
-        root.put("max_tokens", maxTokens);
-        root.put("system", systemPrompt());
-        com.fasterxml.jackson.databind.node.ArrayNode messages = root.putArray("messages");
+    /** Assembles the neutral request for {@code context}: system prompt + history + current turn. */
+    private LlmProvider.Request buildLlmRequest(AgentContext context) {
+        List<LlmProvider.Message> messages = new ArrayList<>();
         for (ChatMessage m : history.get()) {
             if (m.content() == null || m.content().isBlank()) {
                 continue;
             }
-            ObjectNode prior = messages.addObject();
-            prior.put("role", "assistant".equals(m.role()) ? "assistant" : "user");
-            prior.put("content", m.content());
+            messages.add(new LlmProvider.Message(
+                    "assistant".equals(m.role()) ? "assistant" : "user", m.content()));
         }
-        ObjectNode message = messages.addObject();
-        message.put("role", "user");
-        message.put("content", userContent(context));
-        return root.toString();
+        messages.add(new LlmProvider.Message("user", userContent(context)));
+        return new LlmProvider.Request(model, systemPrompt(), messages, maxTokens);
+    }
+
+    /** Builds the Messages API request body for {@code context}; exposed for tests. */
+    String buildRequest(AgentContext context) {
+        return AnthropicProvider.serialize(buildLlmRequest(context));
     }
 
     private String systemPrompt() {
@@ -262,16 +280,6 @@ public final class AnthropicPolicy implements AgentPolicy {
 
     /** Pulls the first text block out of a Messages API response; exposed for tests. */
     String extractText(String responseJson) {
-        try {
-            JsonNode content = mapper.readTree(responseJson).path("content");
-            for (JsonNode block : content) {
-                if ("text".equals(block.path("type").asText())) {
-                    return block.path("text").asText();
-                }
-            }
-            throw new IllegalStateException("no text block in response: " + responseJson);
-        } catch (IOException e) {
-            throw new IllegalStateException("unparseable API response", e);
-        }
+        return AnthropicProvider.extractText(responseJson);
     }
 }
