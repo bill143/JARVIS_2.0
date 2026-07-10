@@ -9,15 +9,20 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class WebServerTest {
 
     private WebServer server;
     private String base;
     private final HttpClient client = HttpClient.newHttpClient();
+
+    @TempDir
+    Path tmp;
 
     @BeforeEach
     void startServer() throws Exception {
@@ -147,6 +152,39 @@ class WebServerTest {
                     HttpResponse.BodyHandlers.ofString());
             assertTrue(got.body().contains("flag client emails"));
             assertEquals("flag client emails", memory.get("instructions", "mail").orElseThrow().value());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void peopleUpdateRoutesThroughThePostHandler() throws Exception {
+        PeopleStore people = new PeopleStore(tmp.resolve("people.json"));
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), people, null);
+        try {
+            String b = "http://localhost:" + wired.port() + "/people";
+            client.send(HttpRequest.newBuilder(URI.create(b))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"name\":\"Rich\",\"email\":\"old@x.com\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            String id = people.all().get(0).id();
+
+            HttpResponse<String> upd = client.send(HttpRequest.newBuilder(URI.create(b))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"id\":\"" + id + "\",\"name\":\"Richard\","
+                                            + "\"email\":\"richard@x.com\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, upd.statusCode());
+            assertEquals(1, people.all().size());              // updated in place, not appended
+            assertEquals("Richard", people.all().get(0).name());
+            assertEquals("richard@x.com", people.all().get(0).email());
+            assertTrue(upd.body().contains("Richard"));        // summaries reflect the change
         } finally {
             wired.stop();
         }

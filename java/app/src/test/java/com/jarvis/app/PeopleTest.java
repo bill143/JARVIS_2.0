@@ -46,6 +46,35 @@ class PeopleTest {
     }
 
     @Test
+    void updateChangesFieldsInPlaceKeepingTheSameId() {
+        PeopleStore s = store();
+        String id = s.add("Rich", "coworker", "old@x.com", "111", "Acme", "note", "");
+        assertTrue(s.update(id, "Richard Stanczak", "Coworker", "richard@oneillcontractors.com",
+                "(630) 808-1454", "O'Neill Contractors", "estimator", ""));
+
+        List<PeopleStore.Person> all = s.all();
+        assertEquals(1, all.size());                       // updated, not appended
+        assertEquals(id, all.get(0).id());                 // id preserved
+        assertEquals("Richard Stanczak", all.get(0).name());
+        assertEquals("richard@oneillcontractors.com", all.get(0).email());
+        assertEquals("(630) 808-1454", all.get(0).phone());
+    }
+
+    @Test
+    void updateWithBlankPhotoKeepsTheExistingPhoto() {
+        PeopleStore s = store();
+        String id = s.add("Ann", "sister", "", "", "", "", "data:image/png;base64,KEEP");
+        s.update(id, "Ann", "sister", "ann@x.com", "", "", "", "");   // no new photo
+        assertEquals("data:image/png;base64,KEEP", s.all().get(0).photo());
+        assertEquals("ann@x.com", s.all().get(0).email());
+    }
+
+    @Test
+    void updateReturnsFalseForUnknownId() {
+        assertFalse(store().update("nope", "X", "", "", "", "", "", ""));
+    }
+
+    @Test
     void summariesOmitPhotoBytes() {
         PeopleStore s = store();
         s.add("Ann", "sister", "", "", "", "", "data:image/png;base64,ZZZZ");

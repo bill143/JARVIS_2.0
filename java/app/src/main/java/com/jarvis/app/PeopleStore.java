@@ -78,6 +78,27 @@ public final class PeopleStore {
         return id;
     }
 
+    /**
+     * Updates the person with {@code id} in place, keeping their id. A blank {@code photo} leaves
+     * the existing photo untouched (so an edit that doesn't re-upload keeps recognition working).
+     *
+     * @return {@code true} if a person with that id existed and was updated
+     */
+    public synchronized boolean update(String id, String name, String relationship, String email,
+            String phone, String company, String notes, String photo) {
+        List<Person> people = all();
+        for (int i = 0; i < people.size(); i++) {
+            if (people.get(i).id().equals(id)) {
+                String keepPhoto = (photo == null || photo.isBlank()) ? people.get(i).photo() : photo;
+                people.set(i, new Person(id, name, nz(relationship), nz(email), nz(phone),
+                        nz(company), nz(notes), nz(keepPhoto)));
+                persist(people);
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static String nz(String s) {
         return s == null ? "" : s;
     }

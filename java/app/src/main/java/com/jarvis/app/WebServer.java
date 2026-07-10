@@ -171,7 +171,13 @@ public final class WebServer {
                         people.delete(j.path("id").asText(""));
                     } else {
                         String name = j.path("name").asText("").strip();
-                        if (!name.isEmpty()) {
+                        String id = j.path("id").asText("").strip();
+                        if (!name.isEmpty() && !id.isEmpty()) {
+                            people.update(id, name, j.path("relationship").asText(""),
+                                    j.path("email").asText(""), j.path("phone").asText(""),
+                                    j.path("company").asText(""), j.path("notes").asText(""),
+                                    j.path("photo").asText(""));
+                        } else if (!name.isEmpty()) {
                             people.add(name, j.path("relationship").asText(""),
                                     j.path("email").asText(""), j.path("phone").asText(""),
                                     j.path("company").asText(""), j.path("notes").asText(""),

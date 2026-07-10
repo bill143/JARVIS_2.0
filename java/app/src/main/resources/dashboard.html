@@ -182,7 +182,12 @@
   .pperson .info .rel { color:var(--cyan); font-size:12px; }
   .pperson .info .ct { color:var(--dim); font-size:12px; margin-top:3px; }
   .pperson .info .nt { color:var(--text); font-size:12px; margin-top:4px; }
-  .pperson .del { background:none; border:none; color:#ff8ba0; cursor:pointer; font-size:18px; }
+  .pperson .info .ct a.clink { color:var(--cyan); text-decoration:none; border-bottom:1px dotted transparent; }
+  .pperson .info .ct a.clink:hover { color:#eaf7ff; border-bottom-color:var(--cyan); }
+  .pperson .acts { display:flex; flex-direction:column; gap:6px; flex:0 0 auto; }
+  .pperson .acts button { background:none; border:none; cursor:pointer; font-size:18px; line-height:1; padding:2px; }
+  .pperson .edit { color:var(--cyan); }
+  .pperson .del { color:#ff8ba0; }
 
   /* Workspace overlay (MAIL / CALENDAR) */
   .wsp { position:fixed; z-index:22; top:50%; left:50%;
@@ -368,7 +373,7 @@
     </div>
 
     <div class="pcard">
-      <h4>Add a Person</h4>
+      <h4 id="p_formTitle">Add a Person</h4>
       <div class="pgrid">
         <div><label>Name *</label><input type="text" id="p_name"></div>
         <div><label>Relationship</label><input type="text" id="p_rel" placeholder="wife, coworker, client…"></div>
@@ -378,8 +383,9 @@
         <div><label>Photo (for recognition)</label><input type="file" id="p_photo" accept="image/*"></div>
         <div style="grid-column:1 / -1;"><label>Notes</label><textarea id="p_notes" placeholder="Anything JARVIS should know — how you know them, preferences, context."></textarea></div>
       </div>
-      <div style="margin-top:10px;"><button class="hbtn" id="p_add" type="button">＋ Add person</button></div>
-      <div class="hint" style="margin-top:6px;">Photos & contacts stay on your PC. JARVIS can use a person's email to write to them by name.</div>
+      <div style="margin-top:10px;"><button class="hbtn" id="p_add" type="button">＋ Add person</button>
+        <button class="hbtn" id="p_cancel" type="button" style="display:none;margin-left:8px;">Cancel</button></div>
+      <div class="hint" style="margin-top:6px;">Photos & contacts stay on your PC. JARVIS can use a person's email to write to them by name. When editing, leave Photo empty to keep the current one.</div>
     </div>
 
     <div class="pcard">
@@ -823,6 +829,18 @@
   $('a_me').addEventListener('change',e=>{ fetch('/aboutme',{method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify({text:e.target.value})}).catch(()=>{}); });
 
+  let editingId=null;
+  function contactInto(ct,p){
+    ct.innerHTML='';
+    const parts=[];
+    if(p.email){ const a=document.createElement('a'); a.className='clink';
+      a.href='https://mail.google.com/mail/?view=cm&fs=1&to='+encodeURIComponent(p.email);
+      a.target='_blank'; a.rel='noopener'; a.title='Email '+p.email; a.textContent=p.email; parts.push(a); }
+    if(p.phone){ const a=document.createElement('a'); a.className='clink';
+      a.href='tel:'+p.phone.replace(/[^0-9+]/g,''); a.title='Call '+p.phone; a.textContent=p.phone; parts.push(a); }
+    if(p.company){ const s=document.createElement('span'); s.textContent=p.company; parts.push(s); }
+    parts.forEach((el,i)=>{ if(i>0) ct.appendChild(document.createTextNode('   ·   ')); ct.appendChild(el); });
+  }
   async function loadPeople(){
     try {
       const people = await (await fetch('/people')).json();
@@ -830,30 +848,51 @@
       const box=$('peopleList'); box.innerHTML='';
       if (!people.length){ box.innerHTML='<div class="hint">No people added yet.</div>'; return; }
       people.forEach(p=>{ const d=document.createElement('div'); d.className='pperson';
-        const contact=[p.email,p.phone,p.company].filter(Boolean).join('   ·   ');
         d.innerHTML='<img alt=""><div class="info"><div class="nm"></div><div class="rel"></div>'
-          +'<div class="ct"></div><div class="nt"></div></div><button class="del" title="Remove">✕</button>';
+          +'<div class="ct"></div><div class="nt"></div></div>'
+          +'<div class="acts"><button class="edit" title="Edit">✎</button>'
+          +'<button class="del" title="Remove">✕</button></div>';
         if(p.hasPhoto) d.querySelector('img').src='/people/photo?id='+encodeURIComponent(p.id);
         d.querySelector('.nm').textContent=p.name;
         d.querySelector('.rel').textContent=p.relationship||'';
-        d.querySelector('.ct').textContent=contact;
+        contactInto(d.querySelector('.ct'),p);
         d.querySelector('.nt').textContent=p.notes||'';
+        d.querySelector('.edit').addEventListener('click',()=>startEdit(p));
         d.querySelector('.del').addEventListener('click',async()=>{
           if(!confirm('Remove '+p.name+'?')) return;
+          if(editingId===p.id) resetPersonForm();
           await fetch('/people',{method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({delete:true,id:p.id})}); loadPeople(); });
         box.appendChild(d); });
     } catch(e){}
   }
+  function startEdit(p){
+    editingId=p.id;
+    $('p_name').value=p.name||''; $('p_rel').value=p.relationship||'';
+    $('p_email').value=p.email||''; $('p_phone').value=p.phone||'';
+    $('p_company').value=p.company||''; $('p_notes').value=p.notes||''; $('p_photo').value='';
+    $('p_formTitle').textContent='Edit '+(p.name||'Person');
+    $('p_add').textContent='✔ Save changes'; $('p_cancel').style.display='';
+    $('p_name').scrollIntoView({behavior:'smooth',block:'center'}); $('p_name').focus();
+  }
+  function resetPersonForm(){
+    editingId=null;
+    $('p_name').value=$('p_rel').value=$('p_email').value=$('p_phone').value=$('p_company').value=$('p_notes').value='';
+    $('p_photo').value='';
+    $('p_formTitle').textContent='Add a Person';
+    $('p_add').textContent='＋ Add person'; $('p_cancel').style.display='none';
+  }
+  $('p_cancel').addEventListener('click',resetPersonForm);
   $('p_add').addEventListener('click',async()=>{
     const name=$('p_name').value.trim(); if(!name){ alert('Name is required'); return; }
     const file=$('p_photo').files[0];
     const photo = file ? await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(file); }) : '';
+    const payload={name,relationship:$('p_rel').value.trim(),email:$('p_email').value.trim(),
+      phone:$('p_phone').value.trim(),company:$('p_company').value.trim(),notes:$('p_notes').value.trim(),photo};
+    if(editingId) payload.id=editingId;
     await fetch('/people',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name,relationship:$('p_rel').value.trim(),email:$('p_email').value.trim(),
-        phone:$('p_phone').value.trim(),company:$('p_company').value.trim(),notes:$('p_notes').value.trim(),photo})});
-    $('p_name').value=$('p_rel').value=$('p_email').value=$('p_phone').value=$('p_company').value=$('p_notes').value='';
-    $('p_photo').value='';
+      body:JSON.stringify(payload)});
+    resetPersonForm();
     loadPeople();
   });
   fetch('/people').then(r=>r.json()).then(p=>{ peopleCount=p.length; }).catch(()=>{});
