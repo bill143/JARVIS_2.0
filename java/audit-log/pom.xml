@@ -10,27 +10,17 @@
     <relativePath>../pom.xml</relativePath>
   </parent>
 
-  <artifactId>app</artifactId>
+  <artifactId>audit-log</artifactId>
 
   <dependencies>
     <dependency>
       <groupId>com.jarvis</groupId>
-      <artifactId>api</artifactId>
+      <artifactId>memory</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
       <groupId>com.jarvis</groupId>
-      <artifactId>integrations</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>com.jarvis</groupId>
-      <artifactId>audit-log</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>com.jarvis</groupId>
-      <artifactId>ui</artifactId>
+      <artifactId>tool-execution</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
@@ -45,7 +35,6 @@
   </dependencies>
 
   <build>
-    <finalName>jarvis</finalName>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -54,26 +43,6 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-shade-plugin</artifactId>
-        <version>3.6.0</version>
-        <executions>
-          <execution>
-            <phase>package</phase>
-            <goals>
-              <goal>shade</goal>
-            </goals>
-            <configuration>
-              <transformers>
-                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                  <mainClass>com.jarvis.app.Main</mainClass>
-                </transformer>
-              </transformers>
-            </configuration>
-          </execution>
-        </executions>
       </plugin>
     </plugins>
   </build>

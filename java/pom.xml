@@ -16,6 +16,7 @@
     <module>rag</module>
     <module>speech</module>
     <module>integrations</module>
+    <module>audit-log</module>
     <module>api</module>
     <module>ui</module>
     <module>app</module>

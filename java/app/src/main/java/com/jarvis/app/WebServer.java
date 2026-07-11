@@ -64,19 +64,20 @@ public final class WebServer {
             com.jarvis.integrations.google.GoogleWorkspaceService google,
             com.jarvis.memory.MemoryStore<String> memory) throws IOException {
         return start(api, online, model, port, monitor, vision, googleConnected, google, memory,
-                null, null);
+                null, null, null);
     }
 
     /**
      * Full wiring. Adds {@code people} → {@code GET/POST /people} and {@code recognizer}
-     * (nullable) → {@code POST /recognize} for on-demand webcam face matching, plus
-     * {@code GET/POST /aboutme}.
+     * (nullable) → {@code POST /recognize} for on-demand webcam face matching,
+     * {@code GET/POST /aboutme}, and {@code auditLog} (nullable) → {@code GET /audit}.
      */
     public static WebServer start(JarvisApi api, boolean online, String model, int port,
             HardwareMonitor monitor, VisionHook vision, boolean googleConnected,
             com.jarvis.integrations.google.GoogleWorkspaceService google,
             com.jarvis.memory.MemoryStore<String> memory,
-            PeopleStore people, PeopleRecognizer recognizer) throws IOException {
+            PeopleStore people, PeopleRecognizer recognizer,
+            com.jarvis.audit.AuditLog auditLog) throws IOException {
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -101,6 +102,51 @@ public final class WebServer {
             t.put("ramTotalGb", Math.round(s.ramTotalGb() * 10) / 10.0);
             t.put("cores", s.cores());
             respond(exchange, 200, "application/json", t.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/audit", exchange -> {
+            if (auditLog == null) {
+                respond(exchange, 200, "application/json", "[]".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            com.jarvis.audit.AuditQuery q = com.jarvis.audit.AuditQuery.all();
+            String action = param(exchange, "action", "");
+            if (!action.isBlank()) {
+                q = q.action(action);
+            }
+            String risk = param(exchange, "risk", "");
+            if (!risk.isBlank()) {
+                try {
+                    q = q.riskTier(com.jarvis.tools.RiskTier.valueOf(risk));
+                } catch (IllegalArgumentException ignored) {
+                    // unknown tier -> no risk filter
+                }
+            }
+            String outcome = param(exchange, "outcome", "");
+            if (!outcome.isBlank()) {
+                try {
+                    q = q.outcome(com.jarvis.audit.AuditOutcome.valueOf(outcome));
+                } catch (IllegalArgumentException ignored) {
+                    // unknown outcome -> no outcome filter
+                }
+            }
+            int limit = parseInt(param(exchange, "limit", "200"), 200);
+            java.util.List<com.jarvis.audit.AuditEntry> entries = auditLog.query(q);
+            ArrayNode arr = MAPPER.createArrayNode();
+            int start = Math.max(0, entries.size() - limit);
+            for (int i = entries.size() - 1; i >= start; i--) {   // newest first
+                com.jarvis.audit.AuditEntry e = entries.get(i);
+                ObjectNode o = arr.addObject();
+                o.put("seq", e.seq());
+                o.put("at", e.at().toString());
+                o.put("category", e.event().category().name());
+                o.put("action", e.event().action());
+                o.put("trigger", e.event().trigger().name());
+                o.put("riskTier", e.event().riskTier().name());
+                o.put("outcome", e.event().outcome().name());
+                o.put("detail", e.event().detail());
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/mail", exchange -> {

@@ -163,7 +163,7 @@ class WebServerTest {
         WebServer wired = WebServer.start(
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
-                new com.jarvis.memory.InMemoryStore<>(), people, null);
+                new com.jarvis.memory.InMemoryStore<>(), people, null, null);
         try {
             String b = "http://localhost:" + wired.port() + "/people";
             client.send(HttpRequest.newBuilder(URI.create(b))
@@ -185,6 +185,40 @@ class WebServerTest {
             assertEquals("Richard", people.all().get(0).name());
             assertEquals("richard@x.com", people.all().get(0).email());
             assertTrue(upd.body().contains("Richard"));        // summaries reflect the change
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void auditEndpointReturnsRecordedEventsNewestFirstWithFilters() throws Exception {
+        com.jarvis.audit.AuditLog log =
+                new com.jarvis.audit.RecordStoreAuditLog(new com.jarvis.memory.InMemoryRecordStore());
+        log.record(com.jarvis.audit.AuditEvent.toolSuccess(
+                "clock", com.jarvis.tools.RiskTier.READ_ONLY, "-"));
+        log.record(new com.jarvis.audit.AuditEvent(
+                com.jarvis.audit.AuditCategory.DESTRUCTIVE_ACTION, "email_trash",
+                com.jarvis.audit.AuditTrigger.USER, com.jarvis.tools.RiskTier.DESTRUCTIVE,
+                com.jarvis.audit.AuditOutcome.SUCCESS, "args: [id]"));
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null, log);
+        try {
+            String base = "http://localhost:" + wired.port() + "/audit";
+            HttpResponse<String> all = client.send(
+                    HttpRequest.newBuilder(URI.create(base)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, all.statusCode());
+            // Newest first: email_trash appears before clock in the payload.
+            assertTrue(all.body().indexOf("email_trash") < all.body().indexOf("clock"));
+
+            HttpResponse<String> destructive = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "?risk=DESTRUCTIVE")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(destructive.body().contains("email_trash"));
+            assertFalse(destructive.body().contains("clock"));
         } finally {
             wired.stop();
         }

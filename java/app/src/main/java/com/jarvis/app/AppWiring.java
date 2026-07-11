@@ -6,6 +6,9 @@ import com.jarvis.agent.orchestration.Orchestrator;
 import com.jarvis.agent.routing.PromptRouter;
 import com.jarvis.api.DefaultJarvisApi;
 import com.jarvis.api.JarvisApi;
+import com.jarvis.audit.AuditLog;
+import com.jarvis.audit.AuditedTool;
+import com.jarvis.audit.RecordStoreAuditLog;
 import com.jarvis.integrations.PluginManager;
 import com.jarvis.integrations.google.AuthorizedGoogleClient;
 import com.jarvis.integrations.google.GoogleAuth;
@@ -16,10 +19,13 @@ import com.jarvis.integrations.mark.MarkToolsPlugin;
 import com.jarvis.integrations.mark.SystemControlPlugin;
 import com.jarvis.integrations.mark.VisionTool;
 import com.jarvis.memory.FileBackedStore;
+import com.jarvis.memory.FileRecordStore;
+import com.jarvis.memory.InMemoryRecordStore;
 import com.jarvis.memory.MemoryStore;
 import com.jarvis.planning.Plan;
 import com.jarvis.planning.PlanStep;
 import com.jarvis.planning.Planner;
+import com.jarvis.tools.Tool;
 import com.jarvis.tools.ToolRegistry;
 import java.nio.file.Path;
 import java.util.List;
@@ -39,7 +45,8 @@ final class AppWiring {
     record Runtime(JarvisApi api, boolean online, String model,
             HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected,
             com.jarvis.integrations.google.GoogleWorkspaceService googleService,
-            MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer) {
+            MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer,
+            AuditLog auditLog) {
     }
 
     private AppWiring() {
@@ -69,25 +76,39 @@ final class AppWiring {
                 Path.of(System.getProperty("user.home"), ".jarvis", "people.json"));
 
         WebServer.VisionHook visionHook = null;
-        AgentPolicy policy;
         if (online) {
             LlmTransport apiTransport = AnthropicPolicy.anthropicTransport(apiKey);
             VisionTool vision = new VisionTool(apiTransport, model);
             tools.register(vision);
             visionHook = vision::analyze;
-            policy = AnthropicPolicy.withApiKey(apiKey, model, tools)
-                    .withMemoryContext(() -> recall(memory, people))
-                    .withHistory(() -> conversationHistory(memory, "dashboard", 24));
-        } else {
-            policy = context -> new Decision.Respond(OFFLINE_HINT + context.input());
         }
 
-        JarvisApi api = assemble(policy, tools, memory);
+        // Governance: every tool call is recorded to a durable audit log (~/.jarvis/audit).
+        AuditLog auditLog = new RecordStoreAuditLog(new FileRecordStore(
+                Path.of(System.getProperty("user.home"), ".jarvis", "audit")));
+        ToolRegistry auditedTools = auditRegistry(tools, auditLog);
+
+        AgentPolicy policy = online
+                ? AnthropicPolicy.withApiKey(apiKey, model, auditedTools)
+                        .withMemoryContext(() -> recall(memory, people))
+                        .withHistory(() -> conversationHistory(memory, "dashboard", 24))
+                : context -> new Decision.Respond(OFFLINE_HINT + context.input());
+
+        JarvisApi api = assemble(policy, auditedTools, memory);
         HardwareMonitor monitor = new HardwareMonitor();
         PeopleRecognizer recognizer = online
                 ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
-                memory, people, recognizer);
+                memory, people, recognizer, auditLog);
+    }
+
+    /** Wraps every tool in {@code raw} with an {@link AuditedTool} into a fresh registry. */
+    private static ToolRegistry auditRegistry(ToolRegistry raw, AuditLog auditLog) {
+        ToolRegistry audited = new ToolRegistry();
+        for (Tool tool : raw.list()) {
+            audited.register(new AuditedTool(tool, auditLog));
+        }
+        return audited;
     }
 
     /** Lighter wiring with an injectable store (tests). No monitor, no vision. */
@@ -96,10 +117,12 @@ final class AppWiring {
         PluginManager plugins = new PluginManager(tools);
         plugins.install(new MarkToolsPlugin(memory));
         plugins.install(new SystemControlPlugin());
+        ToolRegistry auditedTools = auditRegistry(
+                tools, new RecordStoreAuditLog(new InMemoryRecordStore()));
         AgentPolicy policy = isOnline(apiKey)
-                ? AnthropicPolicy.withApiKey(apiKey, model, tools).withMemoryContext(() -> recall(memory))
+                ? AnthropicPolicy.withApiKey(apiKey, model, auditedTools).withMemoryContext(() -> recall(memory))
                 : context -> new Decision.Respond(OFFLINE_HINT + context.input());
-        return assemble(policy, tools, memory);
+        return assemble(policy, auditedTools, memory);
     }
 
     private static JarvisApi assemble(AgentPolicy policy, ToolRegistry tools, MemoryStore<String> memory) {

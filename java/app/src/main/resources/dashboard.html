@@ -188,6 +188,23 @@
   .pperson .acts button { background:none; border:none; cursor:pointer; font-size:18px; line-height:1; padding:2px; }
   .pperson .edit { color:var(--cyan); }
   .pperson .del { color:#ff8ba0; }
+  .auditbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .auditbar input[type=text], .auditbar select, .auditbar input[type=date] {
+    background:#0c1a2c; border:1px solid var(--line); color:var(--text); border-radius:8px; padding:7px 10px; font-size:13px; }
+  .auditbar input[type=text] { min-width:200px; }
+  table.audit { width:100%; border-collapse:collapse; font-size:12px; }
+  table.audit th { text-align:left; color:var(--cyan); font-weight:600; letter-spacing:1px;
+    border-bottom:1px solid var(--line); padding:8px 10px; position:sticky; top:0; background:var(--bg); }
+  table.audit td { border-bottom:1px solid rgba(120,160,200,.12); padding:7px 10px; vertical-align:top; }
+  table.audit td.detail { color:var(--dim); font-family:ui-monospace,Menlo,Consolas,monospace; word-break:break-word; }
+  table.audit tr:hover td { background:rgba(80,140,200,.06); }
+  .rtag { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11px; font-weight:600; letter-spacing:.5px; }
+  .rtag.READ_ONLY { color:#7fe3b0; background:rgba(60,200,140,.12); }
+  .rtag.MUTATING { color:#ffd479; background:rgba(220,180,60,.14); }
+  .rtag.DESTRUCTIVE { color:#ff8ba0; background:rgba(230,80,110,.15); }
+  .rtag.UNKNOWN { color:var(--dim); background:rgba(120,160,200,.12); }
+  .otag.FAILURE { color:#ff8ba0; font-weight:600; }
+  .otag.SUCCESS { color:#7fe3b0; }
 
   /* Workspace overlay (MAIL / CALENDAR) */
   .wsp { position:fixed; z-index:22; top:50%; left:50%;
@@ -223,6 +240,7 @@
       <button class="hbtn" id="voice" type="button" title="Toggle voice; say your wake word, ESC interrupts">🎤 VOICE</button>
       <button class="hbtn" id="camera" type="button" title="Look through the webcam">📷 CAMERA</button>
       <button class="hbtn" id="peopleTab" type="button" title="People & About Me">👥 PEOPLE</button>
+      <button class="hbtn" id="auditTab" type="button" title="Audit log — every action JARVIS takes">🛡 AUDIT</button>
       <button class="hbtn" id="settings" type="button" title="All settings">⚙ SETTINGS</button>
       <button class="hbtn alert" id="interrupt" type="button" title="Stop JARVIS (or press ESC)">✋ STOP</button>
     </div>
@@ -391,6 +409,41 @@
     <div class="pcard">
       <h4>Directory</h4>
       <div id="peopleList"></div>
+    </div>
+  </div>
+</div>
+
+<div class="page" id="auditPage">
+  <div class="page-head">
+    <h2>🛡  AUDIT LOG</h2>
+    <span style="margin-left:auto;"></span>
+    <button class="hbtn" id="auditRefresh" type="button">↻ Refresh</button>
+    <button class="hbtn" id="auditClose" type="button">CLOSE</button>
+  </div>
+  <div class="page-body" style="max-width:1100px;">
+    <div class="hint" style="margin-bottom:10px;">Every tool JARVIS runs is recorded here — what ran, what it was, and whether it worked. This is the single source of truth behind the permission and status systems.</div>
+    <div class="auditbar">
+      <input type="text" id="au_action" placeholder="filter by tool (e.g. email)…">
+      <select id="au_risk">
+        <option value="">All risk tiers</option>
+        <option value="READ_ONLY">Read-only</option>
+        <option value="MUTATING">Mutating</option>
+        <option value="DESTRUCTIVE">Destructive</option>
+        <option value="UNKNOWN">Unclassified</option>
+      </select>
+      <select id="au_outcome">
+        <option value="">All outcomes</option>
+        <option value="SUCCESS">Success</option>
+        <option value="FAILURE">Failure</option>
+      </select>
+      <label style="font-size:12px;color:var(--dim);">Since <input type="date" id="au_since"></label>
+    </div>
+    <div id="auditCount" class="hint" style="margin:8px 0;"></div>
+    <div style="overflow-x:auto;">
+      <table class="audit" id="auditTable">
+        <thead><tr><th>Time</th><th>Tool / Action</th><th>Risk</th><th>Trigger</th><th>Outcome</th><th>Detail</th></tr></thead>
+        <tbody id="auditRows"></tbody>
+      </table>
     </div>
   </div>
 </div>
@@ -824,6 +877,46 @@
   function closePeople(){ peoplePage.classList.remove('open'); }
   $('peopleTab').addEventListener('click',openPeople);
   $('peopleClose').addEventListener('click',closePeople);
+
+  // ---- Audit Log page ----
+  const auditPage=$('auditPage');
+  function openAudit(){ auditPage.classList.add('open'); loadAudit(); }
+  function closeAudit(){ auditPage.classList.remove('open'); }
+  $('auditTab').addEventListener('click',openAudit);
+  $('auditClose').addEventListener('click',closeAudit);
+  $('auditRefresh').addEventListener('click',loadAudit);
+  ['au_action','au_risk','au_outcome','au_since'].forEach(id=>{
+    const el=$(id); const ev = el.tagName==='SELECT'||el.type==='date' ? 'change' : 'input';
+    el.addEventListener(ev,loadAudit); });
+  function fmtTime(iso){ try{ return new Date(iso).toLocaleString(); }catch(e){ return iso; } }
+  async function loadAudit(){
+    const qs=new URLSearchParams();
+    const act=$('au_action').value.trim(); if(act) qs.set('action',act);
+    const risk=$('au_risk').value; if(risk) qs.set('risk',risk);
+    const out=$('au_outcome').value; if(out) qs.set('outcome',out);
+    qs.set('limit','500');
+    let rows=[];
+    try{ rows=await (await fetch('/audit?'+qs.toString())).json(); }catch(e){ rows=[]; }
+    const since=$('au_since').value ? new Date($('au_since').value+'T00:00:00') : null;
+    if(since) rows=rows.filter(r=> new Date(r.at) >= since);
+    const tb=$('auditRows'); tb.innerHTML='';
+    if(!rows.length){ $('auditCount').textContent='No matching activity yet.'; return; }
+    $('auditCount').textContent=rows.length+' event'+(rows.length===1?'':'s');
+    rows.forEach(r=>{ const tr=document.createElement('tr');
+      const risk=(r.riskTier||'UNKNOWN'), out=(r.outcome||'SUCCESS');
+      const cells=[
+        ['time',fmtTime(r.at)], ['act',r.action||''],
+        ['risk','<span class="rtag '+risk+'">'+risk.replace('_',' ')+'</span>'],
+        ['trig',r.trigger||''],
+        ['out','<span class="otag '+out+'">'+out+'</span>'],
+        ['detail',r.detail||'']
+      ];
+      cells.forEach(([cls,val])=>{ const td=document.createElement('td');
+        if(cls==='detail') td.className='detail';
+        if(cls==='risk'||cls==='out') td.innerHTML=val; else td.textContent=val;
+        tr.appendChild(td); });
+      tb.appendChild(tr); });
+  }
 
   async function loadAboutMe(){ try{ const j=await (await fetch('/aboutme')).json(); $('a_me').value=j.text||''; }catch(e){} }
   $('a_me').addEventListener('change',e=>{ fetch('/aboutme',{method:'POST',
