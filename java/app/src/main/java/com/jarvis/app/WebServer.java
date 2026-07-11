@@ -96,6 +96,7 @@ public final class WebServer {
         WorkflowService workflows = governance == null ? null : governance.workflows();
         com.jarvis.kb.KnowledgeBase knowledge = governance == null ? null : governance.knowledge();
         MultiAgentService agents = governance == null ? null : governance.agents();
+        AutonomousService autonomous = governance == null ? null : governance.autonomous();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -482,6 +483,33 @@ public final class WebServer {
             ObjectNode out = MAPPER.createObjectNode();
             out.put("completed", completed);
             respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/autonomous/run", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod()) || autonomous == null) {
+                respond(exchange, autonomous == null ? 503 : 405, "text/plain",
+                        (autonomous == null ? "autonomous unavailable" : "method not allowed")
+                                .getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String goal;
+            try (InputStream body = exchange.getRequestBody()) {
+                goal = MAPPER.readTree(body).path("goal").asText("").strip();
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (goal.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty goal".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            com.jarvis.autonomous.AutonomousRunner.AutonomousRun run = autonomous.run(goal);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("goal", run.goal());
+            o.put("completed", run.completed());
+            ArrayNode steps = o.putArray("steps");
+            run.steps().forEach(steps::add);
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/agents/run", exchange -> {

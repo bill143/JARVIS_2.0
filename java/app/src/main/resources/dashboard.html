@@ -536,7 +536,8 @@
   <div class="page-body" style="max-width:900px;">
     <div class="hint" style="margin-bottom:10px;">Give a goal — a planner, executor, and critic collaborate under a hard turn budget. Every turn is gated by the permission layer and written to the audit log.</div>
     <div style="display:flex;gap:8px;"><input id="agGoal" class="minput" style="flex:1;" placeholder="Goal for the team…">
-      <button class="hbtn" id="agRun" type="button">Run</button></div>
+      <button class="hbtn" id="agRun" type="button">▶ Team</button>
+      <button class="hbtn" id="agAuto" type="button" title="Autonomous planner: one agent iterates goal → next step, under a hard step budget.">▶ Autonomous</button></div>
     <div id="agOut" style="margin-top:14px;"></div>
   </div>
 </div>
@@ -1552,7 +1553,25 @@
       fin.appendChild(fr); fin.appendChild(fc); out.appendChild(fin);
     }catch(e){ out.innerHTML='<div class="hint">Run failed. Is JARVIS online (API key set)?</div>'; }
   }
+  async function autoRun(){
+    const goal=$('agGoal').value.trim(); if(!goal) return;
+    const out=$('agOut'); out.innerHTML='<div class="hint">Autonomous planner working… (goal → step, budgeted)</div>';
+    try{
+      const j=await (await fetch('/autonomous/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({goal})})).json();
+      out.innerHTML='';
+      const g=document.createElement('div'); g.className='agfinal';
+      const gr=document.createElement('div'); gr.className='agrole'; gr.textContent=(j.completed?'GOAL COMPLETED':'GOAL (budget reached)');
+      const gc=document.createElement('div'); gc.className='agc'; gc.textContent=j.goal||goal;
+      g.appendChild(gr); g.appendChild(gc); out.appendChild(g);
+      (j.steps||[]).forEach((s,i)=>{ const d=document.createElement('div'); d.className='agmsg';
+        const r=document.createElement('div'); r.className='agrole'; r.textContent='STEP '+(i+1);
+        const c=document.createElement('div'); c.className='agc'; c.textContent=s;
+        d.appendChild(r); d.appendChild(c); out.appendChild(d);
+      });
+    }catch(e){ out.innerHTML='<div class="hint">Run failed. Is JARVIS online (API key set)?</div>'; }
+  }
   $('agRun').addEventListener('click',agRun);
+  $('agAuto').addEventListener('click',autoRun);
   $('agGoal').addEventListener('keydown',e=>{ if(e.key==='Enter') agRun(); });
 
   // ---- System Monitor page (full telemetry gauges) ----

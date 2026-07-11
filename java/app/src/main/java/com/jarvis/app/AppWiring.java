@@ -77,12 +77,13 @@ final class AppWiring {
             AuditLog auditLog, PluginRegistry pluginRegistry,
             PermissionBroker permissions, PermissionPolicy permissionPolicy,
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
-            WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents) {
+            WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
+            AutonomousService autonomous) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
-                    updates, license, usage, tasks, workflows, knowledge, agents);
+                    updates, license, usage, tasks, workflows, knowledge, agents, autonomous);
         }
     }
 
@@ -90,7 +91,7 @@ final class AppWiring {
     record Governance(AuditLog auditLog, PluginRegistry plugins,
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
-            KnowledgeBase knowledge, MultiAgentService agents) {
+            KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous) {
     }
 
     private AppWiring() {
@@ -173,10 +174,11 @@ final class AppWiring {
         KnowledgeBase knowledge = new KnowledgeBase(new FileRecordStore(
                 Path.of(System.getProperty("user.home"), ".jarvis", "knowledge")));
         MultiAgentService agents = new MultiAgentService(api, auditLog);
+        AutonomousService autonomous = new AutonomousService(api, auditLog);
 
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license, usageMeter, tasks, workflows, knowledge, agents);
+                updates, license, usageMeter, tasks, workflows, knowledge, agents, autonomous);
     }
 
     /**
