@@ -85,6 +85,8 @@ public final class WebServer {
                 governance == null ? null : governance.permissions();
         com.jarvis.security.PermissionPolicy permissionPolicy =
                 governance == null ? null : governance.permissionPolicy();
+        com.jarvis.updater.UpdateChecker updates =
+                governance == null ? null : governance.updates();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -109,6 +111,26 @@ public final class WebServer {
             t.put("ramTotalGb", Math.round(s.ramTotalGb() * 10) / 10.0);
             t.put("cores", s.cores());
             respond(exchange, 200, "application/json", t.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/update", exchange -> {
+            ObjectNode o = MAPPER.createObjectNode();
+            if (updates == null) {
+                o.put("state", "DISABLED");
+                o.put("currentVersion", AppWiring.APP_VERSION);
+                o.put("message", "Update checks are off.");
+            } else {
+                com.jarvis.updater.UpdateStatus s = updates.latest();
+                o.put("state", s.state().name());
+                o.put("currentVersion", s.currentVersion());
+                o.put("message", s.message());
+                if (s.available() != null) {
+                    o.put("version", s.available().version());
+                    o.put("downloadUrl", s.available().downloadUrl());
+                    o.put("notes", s.available().notes());
+                }
+            }
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/permissions/pending", exchange -> {

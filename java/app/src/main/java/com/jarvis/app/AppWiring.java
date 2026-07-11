@@ -19,6 +19,11 @@ import com.jarvis.security.AuthorizingTool;
 import com.jarvis.security.PermissionBroker;
 import com.jarvis.security.PermissionLevel;
 import com.jarvis.security.PermissionPolicy;
+import com.jarvis.updater.HttpManifestSource;
+import com.jarvis.updater.ManifestSource;
+import com.jarvis.updater.ManifestVerifier;
+import com.jarvis.updater.UpdateChecker;
+import com.jarvis.updater.Version;
 import com.jarvis.integrations.google.AuthorizedGoogleClient;
 import com.jarvis.integrations.google.GoogleAuth;
 import com.jarvis.integrations.google.GoogleWorkspacePlugin;
@@ -54,23 +59,27 @@ final class AppWiring {
             "(offline mode - set the ANTHROPIC_API_KEY environment variable to enable AI) "
                     + "You said: ";
 
+    /** The running application version (kept in sync with packaging --app-version). */
+    static final String APP_VERSION = "0.1.0";
+
     /** Everything the launcher needs to run. */
     record Runtime(JarvisApi api, boolean online, String model,
             HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected,
             com.jarvis.integrations.google.GoogleWorkspaceService googleService,
             MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer,
             AuditLog auditLog, PluginRegistry pluginRegistry,
-            PermissionBroker permissions, PermissionPolicy permissionPolicy) {
+            PermissionBroker permissions, PermissionPolicy permissionPolicy,
+            UpdateChecker updates) {
 
-        /** The governance surface (audit, tool registry, permission gate) the web layer exposes. */
+        /** The cross-cutting services the web layer exposes (governance + update status). */
         Governance governance() {
-            return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy);
+            return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy, updates);
         }
     }
 
-    /** Governance dependencies the web server exposes: audit log, tool registry, permission gate. */
+    /** Services the web server exposes: audit log, tool registry, permission gate, update status. */
     record Governance(AuditLog auditLog, PluginRegistry plugins,
-            PermissionBroker permissions, PermissionPolicy permissionPolicy) {
+            PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates) {
     }
 
     private AppWiring() {
@@ -126,8 +135,36 @@ final class AppWiring {
         HardwareMonitor monitor = new HardwareMonitor();
         PeopleRecognizer recognizer = online
                 ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
+
+        // Non-blocking startup update check (notify-only). Dormant unless JARVIS_UPDATE_URL is set.
+        UpdateChecker updates = updateChecker();
+        Thread updateThread = new Thread(updates::check, "jarvis-update-check");
+        updateThread.setDaemon(true);
+        updateThread.start();
+
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
-                memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy);
+                memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
+                updates);
+    }
+
+    /**
+     * Builds the update checker. Dormant by default: it only checks when {@code JARVIS_UPDATE_URL}
+     * points at a hosted manifest, and only trusts one signed by the key in the optional resource
+     * {@code /update-public-key.b64}. With neither, it reports DISABLED and never touches the network.
+     */
+    static UpdateChecker updateChecker() {
+        String url = System.getenv("JARVIS_UPDATE_URL");
+        ManifestSource source = (url == null || url.isBlank()) ? null : HttpManifestSource.of(url);
+        ManifestVerifier verifier = null;
+        try (InputStream in = AppWiring.class.getResourceAsStream("/update-public-key.b64")) {
+            if (in != null) {
+                verifier = ManifestVerifier.fromBase64(
+                        new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            }
+        } catch (IOException | RuntimeException e) {
+            verifier = null;   // no / bad key -> manifests will be reported UNVERIFIED
+        }
+        return new UpdateChecker(Version.parse(APP_VERSION), source, verifier);
     }
 
     /**

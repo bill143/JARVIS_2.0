@@ -199,7 +199,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, broker, policy));
+                new AppWiring.Governance(null, null, broker, policy, null));
         try {
             String base = "http://localhost:" + wired.port();
             // A tool thread asks for approval; it will block until we answer via the endpoint.
@@ -243,6 +243,53 @@ class WebServerTest {
     }
 
     @Test
+    void updateEndpointReportsAVerifiedAvailableUpdate() throws Exception {
+        java.security.KeyPair kp = java.security.KeyPairGenerator.getInstance("RSA").genKeyPair();
+        com.jarvis.updater.ManifestSource source = () -> com.jarvis.updater.ManifestSigner.sign(
+                new com.jarvis.updater.UpdateManifest(
+                        "9.9.9", "https://example.com/JARVIS-9.9.9.msi", "Big update"),
+                kp.getPrivate());
+        com.jarvis.updater.UpdateChecker checker = new com.jarvis.updater.UpdateChecker(
+                com.jarvis.updater.Version.parse("0.1.0"), source,
+                new com.jarvis.updater.ManifestVerifier(kp.getPublic()));
+        checker.check();   // populate latest()
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, checker));
+        try {
+            String body = client.send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/update"))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body();
+            assertTrue(body.contains("\"state\":\"UPDATE_AVAILABLE\""));
+            assertTrue(body.contains("\"version\":\"9.9.9\""));
+            assertTrue(body.contains("JARVIS-9.9.9.msi"));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void updateEndpointReportsDisabledWhenNoCheckerIsWired() throws Exception {
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null, (AppWiring.Governance) null);
+        try {
+            String body = client.send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/update"))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body();
+            assertTrue(body.contains("\"state\":\"DISABLED\""));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void toolsEndpointExposesManifestsRiskTiersAndHealth() throws Exception {
         com.jarvis.registry.PluginRegistry plugins = new com.jarvis.registry.PluginRegistry(
                 java.util.List.of(
@@ -255,7 +302,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, plugins, null, null));
+                new AppWiring.Governance(null, plugins, null, null, null));
         try {
             HttpResponse<String> r = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/tools"))
@@ -286,7 +333,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/audit"))
@@ -317,7 +364,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port() + "/audit";
             HttpResponse<String> all = client.send(

@@ -126,6 +126,8 @@
   .statusbar .dot.off { background:var(--amber); box-shadow:0 0 7px var(--amber); }
   .statusbar .spacer { margin-left:auto; }
   .statusbar b { color:var(--text); font-weight:500; }
+  .statusbar .sbupd a { color:#ffd479; text-decoration:none; font-weight:600; }
+  .statusbar .sbupd a:hover { text-decoration:underline; }
 
   /* Settings drawer */
   .scrim { position:fixed; inset:0; background:rgba(0,0,0,.55); opacity:0; pointer-events:none;
@@ -354,9 +356,10 @@
   <div class="statusbar">
     <span><span class="dot" id="sbDot"></span><span id="sbMode">CONNECTING…</span></span>
     <span>MIC: <b id="sbMic">OFF</b></span>
+    <span class="sbupd" id="sbUpdate"></span>
     <span class="spacer"></span>
     <span id="sbClock">--:--:--</span>
-    <span>J.A.R.V.I.S. · v0.1</span>
+    <span>J.A.R.V.I.S. · v<span id="sbVersion">0.1.0</span></span>
   </div>
 </div>
 
@@ -994,6 +997,23 @@
   $('actMore').addEventListener('click',openAudit);
   setInterval(loadActivity,3000);
   loadActivity();
+
+  // ---- Update check (notify-only; startup check runs server-side, this just surfaces it) ----
+  async function checkUpdate(){
+    try{
+      const u=await (await fetch('/update')).json();
+      if(u.currentVersion) $('sbVersion').textContent=u.currentVersion;
+      const el=$('sbUpdate'); el.innerHTML='';
+      if(u.state==='UPDATE_AVAILABLE' && u.downloadUrl){
+        const a=document.createElement('a'); a.href=u.downloadUrl; a.target='_blank'; a.rel='noopener';
+        a.title=u.notes||''; a.textContent='⬆ Update v'+u.version+' available';
+        el.appendChild(a);
+      }
+    }catch(e){}
+  }
+  checkUpdate();
+  setTimeout(checkUpdate,5000);   // catch the async startup check finishing
+  setInterval(checkUpdate,60000);
   ['au_action','au_risk','au_outcome','au_since'].forEach(id=>{
     const el=$(id); const ev = el.tagName==='SELECT'||el.type==='date' ? 'change' : 'input';
     el.addEventListener(ev,loadAudit); });
