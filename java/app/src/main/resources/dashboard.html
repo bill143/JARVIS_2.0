@@ -53,6 +53,13 @@
   .htag.OPERATIONAL { color:#7fe3b0; background:rgba(60,200,140,.12); }
   .htag.DEGRADED { color:#ffd479; background:rgba(220,180,60,.14); }
   .htag.CIRCUIT_OPEN { color:#ff8ba0; background:rgba(230,80,110,.15); }
+  .gauges { display:flex; gap:34px; flex-wrap:wrap; justify-content:center; margin:10px 0 26px; }
+  .gauge { width:190px; height:190px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    background:conic-gradient(rgba(41,120,180,.15) 0deg, rgba(41,120,180,.15) 360deg); }
+  .gauge .ghole { width:150px; height:150px; border-radius:50%; background:var(--bg); display:flex;
+    flex-direction:column; align-items:center; justify-content:center; }
+  .gauge .gval { font-size:36px; font-weight:600; color:#eaf7ff; font-variant-numeric:tabular-nums; }
+  .gauge .glbl { color:var(--dim); font-size:10px; letter-spacing:2px; margin-top:4px; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -507,7 +514,17 @@
 <div class="page cpage" id="cpage-sysmon">
   <div class="page-head"><h2>📈  SYSTEM MONITOR</h2><span style="margin-left:auto;"></span>
     <button class="hbtn pgclose" type="button">CLOSE</button></div>
-  <div class="page-body" id="sysmonBody"><div class="hint">Loading…</div></div>
+  <div class="page-body" id="sysmonBody" style="max-width:900px;">
+    <div class="gauges">
+      <div class="gauge" id="gCpu"><div class="ghole"><div class="gval" id="gCpuVal">—</div><div class="glbl">CPU LOAD</div></div></div>
+      <div class="gauge" id="gRam"><div class="ghole"><div class="gval" id="gRamVal">—</div><div class="glbl">MEMORY</div></div></div>
+    </div>
+    <div class="ustats">
+      <div class="ustat"><div class="ulbl">CPU cores</div><div class="uval" id="gCores">—</div></div>
+      <div class="ustat"><div class="ulbl">Memory used</div><div class="uval" id="gRamUsed">—</div></div>
+      <div class="ustat"><div class="ulbl">Memory total</div><div class="uval" id="gRamTotal">—</div></div>
+    </div>
+  </div>
 </div>
 
 <div class="scrim" id="scrim"></div>
@@ -1323,6 +1340,24 @@
     });
   }
   pageLoaders.tools=loadTools;
+
+  // ---- System Monitor page (full telemetry gauges) ----
+  function setGauge(gid,vid,pct){
+    pct=Math.max(0,Math.min(100,pct||0));
+    const col = pct<70?'var(--green)':(pct<85?'var(--amber)':'var(--red)');
+    const deg=pct*3.6;
+    $(gid).style.background='conic-gradient('+col+' '+deg+'deg, rgba(41,120,180,.15) '+deg+'deg)';
+    $(vid).textContent=Math.round(pct)+'%';
+  }
+  async function loadSysmon(){
+    let t; try{ t=await (await fetch('/telemetry')).json(); }catch(e){ return; }
+    setGauge('gCpu','gCpuVal',t.cpu); setGauge('gRam','gRamVal',t.ram);
+    $('gCores').textContent=t.cores!=null?t.cores:'—';
+    $('gRamUsed').textContent=(t.ramUsedGb!=null?t.ramUsedGb:0)+' GB';
+    $('gRamTotal').textContent=(t.ramTotalGb!=null?t.ramTotalGb:0)+' GB';
+  }
+  pageLoaders.sysmon=loadSysmon;
+  setInterval(()=>{ if($('cpage-sysmon').classList.contains('open')) loadSysmon(); },3000);
 
   // ---- Update check (notify-only; startup check runs server-side, this just surfaces it) ----
   async function checkUpdate(){
