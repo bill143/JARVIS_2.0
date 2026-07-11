@@ -25,6 +25,7 @@
     <module>tasks</module>
     <module>workflows</module>
     <module>knowledge-base</module>
+    <module>multi-agent</module>
     <module>api</module>
     <module>ui</module>
     <module>app</module>

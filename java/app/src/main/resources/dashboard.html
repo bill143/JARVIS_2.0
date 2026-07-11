@@ -86,6 +86,10 @@
   .kbhit { padding:8px 2px; border-bottom:1px solid rgba(120,160,200,.12); }
   .kbhit .kbt { color:#eaf7ff; font-size:13px; }
   .kbhit .kbs { color:var(--dim); font-size:11.5px; }
+  .agmsg,.agfinal { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
+  .agfinal { border-color:var(--cyan); background:rgba(65,217,255,.05); }
+  .agrole { color:var(--cyan); font-size:10px; letter-spacing:2px; margin-bottom:5px; }
+  .agc { color:var(--text); font-size:13px; white-space:pre-wrap; line-height:1.5; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -340,6 +344,7 @@
   <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
   <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
   <div class="navitem" data-nav="kb"><span class="ic">📚</span> Knowledge</div>
+  <div class="navitem" data-nav="agents"><span class="ic">🤖</span> Agents</div>
   <div class="navitem" data-nav="tools"><span class="ic">🧩</span> Tools &amp; Skills</div>
   <div class="navitem" data-nav="sysmon"><span class="ic">📈</span> System Monitor</div>
 </nav>
@@ -523,6 +528,16 @@
       <input id="convBox" placeholder="Message JARVIS…" class="minput" style="flex:1;">
       <button id="convSend" type="submit" class="hbtn">SEND</button>
     </form>
+  </div>
+</div>
+<div class="page cpage" id="cpage-agents">
+  <div class="page-head"><h2>🤖  MULTI-AGENT</h2><span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" style="max-width:900px;">
+    <div class="hint" style="margin-bottom:10px;">Give a goal — a planner, executor, and critic collaborate under a hard turn budget. Every turn is gated by the permission layer and written to the audit log.</div>
+    <div style="display:flex;gap:8px;"><input id="agGoal" class="minput" style="flex:1;" placeholder="Goal for the team…">
+      <button class="hbtn" id="agRun" type="button">Run</button></div>
+    <div id="agOut" style="margin-top:14px;"></div>
   </div>
 </div>
 <div class="page cpage" id="cpage-kb">
@@ -1518,6 +1533,27 @@
   $('kbSearchBtn').addEventListener('click',kbSearch);
   $('kbQuery').addEventListener('keydown',e=>{ if(e.key==='Enter') kbSearch(); });
   pageLoaders.kb=loadKB;
+
+  // ---- Multi-agent page ----
+  async function agRun(){
+    const goal=$('agGoal').value.trim(); if(!goal) return;
+    const out=$('agOut'); out.innerHTML='<div class="hint">Agents working… (planner → executor → critic → final)</div>';
+    try{
+      const j=await (await fetch('/agents/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({goal})})).json();
+      out.innerHTML='';
+      (j.messages||[]).forEach(m=>{ const d=document.createElement('div'); d.className='agmsg';
+        const r=document.createElement('div'); r.className='agrole'; r.textContent=m.role;
+        const c=document.createElement('div'); c.className='agc'; c.textContent=m.content;
+        d.appendChild(r); d.appendChild(c); out.appendChild(d);
+      });
+      const fin=document.createElement('div'); fin.className='agfinal';
+      const fr=document.createElement('div'); fr.className='agrole'; fr.textContent='FINAL ANSWER';
+      const fc=document.createElement('div'); fc.className='agc'; fc.textContent=j.result||'';
+      fin.appendChild(fr); fin.appendChild(fc); out.appendChild(fin);
+    }catch(e){ out.innerHTML='<div class="hint">Run failed. Is JARVIS online (API key set)?</div>'; }
+  }
+  $('agRun').addEventListener('click',agRun);
+  $('agGoal').addEventListener('keydown',e=>{ if(e.key==='Enter') agRun(); });
 
   // ---- System Monitor page (full telemetry gauges) ----
   function setGauge(gid,vid,pct){

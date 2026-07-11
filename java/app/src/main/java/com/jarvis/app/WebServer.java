@@ -95,6 +95,7 @@ public final class WebServer {
                 governance == null ? null : governance.tasks();
         WorkflowService workflows = governance == null ? null : governance.workflows();
         com.jarvis.kb.KnowledgeBase knowledge = governance == null ? null : governance.knowledge();
+        MultiAgentService agents = governance == null ? null : governance.agents();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -481,6 +482,37 @@ public final class WebServer {
             ObjectNode out = MAPPER.createObjectNode();
             out.put("completed", completed);
             respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/agents/run", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod()) || agents == null) {
+                respond(exchange, agents == null ? 503 : 405, "text/plain",
+                        (agents == null ? "multi-agent unavailable" : "method not allowed")
+                                .getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String goal;
+            try (InputStream body = exchange.getRequestBody()) {
+                goal = MAPPER.readTree(body).path("goal").asText("").strip();
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (goal.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty goal".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            com.jarvis.agents.MultiAgentManager.Conversation c = agents.run(goal);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("goal", c.goal());
+            o.put("result", c.result());
+            ArrayNode msgs = o.putArray("messages");
+            for (com.jarvis.agents.MultiAgentManager.Message m : c.messages()) {
+                ObjectNode mo = msgs.addObject();
+                mo.put("role", m.role().name());
+                mo.put("content", m.content());
+            }
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/kb/search", exchange -> {

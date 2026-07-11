@@ -77,12 +77,12 @@ final class AppWiring {
             AuditLog auditLog, PluginRegistry pluginRegistry,
             PermissionBroker permissions, PermissionPolicy permissionPolicy,
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
-            WorkflowService workflows, KnowledgeBase knowledge) {
+            WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
-                    updates, license, usage, tasks, workflows, knowledge);
+                    updates, license, usage, tasks, workflows, knowledge, agents);
         }
     }
 
@@ -90,7 +90,7 @@ final class AppWiring {
     record Governance(AuditLog auditLog, PluginRegistry plugins,
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
-            KnowledgeBase knowledge) {
+            KnowledgeBase knowledge, MultiAgentService agents) {
     }
 
     private AppWiring() {
@@ -172,10 +172,11 @@ final class AppWiring {
         workflows.startScheduler();
         KnowledgeBase knowledge = new KnowledgeBase(new FileRecordStore(
                 Path.of(System.getProperty("user.home"), ".jarvis", "knowledge")));
+        MultiAgentService agents = new MultiAgentService(api, auditLog);
 
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license, usageMeter, tasks, workflows, knowledge);
+                updates, license, usageMeter, tasks, workflows, knowledge, agents);
     }
 
     /**
