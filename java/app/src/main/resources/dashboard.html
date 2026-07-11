@@ -24,6 +24,19 @@
   #sidenav .navitem:hover { color:var(--text); background:rgba(80,140,200,.06); }
   #sidenav .navitem.active { color:#eaf7ff; border-left-color:var(--cyan); background:rgba(65,217,255,.08); }
   #sidenav .navitem .ic { width:18px; text-align:center; font-size:15px; }
+  .qcmds { display:flex; flex-wrap:wrap; gap:8px; }
+  .qcmd { background:rgba(65,217,255,.08); border:1px solid var(--line); color:var(--text);
+    border-radius:20px; padding:7px 13px; font-size:12px; cursor:pointer; }
+  .qcmd:hover { background:rgba(65,217,255,.18); color:#eaf7ff; }
+  .tline { display:flex; flex-direction:column; gap:0; max-height:190px; overflow-y:auto; }
+  .tline .trow { display:flex; gap:10px; align-items:flex-start; padding:5px 2px; position:relative; }
+  .tline .tdot { width:8px; height:8px; border-radius:50%; background:var(--cyan); margin-top:4px; flex:0 0 auto;
+    box-shadow:0 0 6px var(--cyan); }
+  .tline .trow.fail .tdot { background:var(--red); box-shadow:0 0 6px var(--red); }
+  .tline .trow.deny .tdot { background:var(--amber); box-shadow:0 0 6px var(--amber); }
+  .tline .tinfo { flex:1; font-size:12px; }
+  .tline .tinfo .tt { color:#dcecfb; }
+  .tline .tinfo .tm { color:var(--dim); font-size:10.5px; font-variant-numeric:tabular-nums; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -381,9 +394,23 @@
 
     <!-- RIGHT: chat -->
     <div class="col">
-      <div class="card chat">
+      <div class="card">
+        <h3>Quick Commands</h3>
+        <div class="qcmds">
+          <button class="qcmd" data-cmd="Give me my briefing" type="button">📋 Briefing</button>
+          <button class="qcmd" data-cmd="What's my system status?" type="button">🖥 System status</button>
+          <button class="qcmd" data-cmd="Any new email?" type="button">✉ New email</button>
+          <button class="qcmd" data-cmd="What's on my calendar today?" type="button">📅 Today</button>
+          <button class="qcmd" data-cmd="What can you do?" type="button">✨ Capabilities</button>
+        </div>
+      </div>
+      <div class="card chat" style="flex:1;">
         <h3>Command Log</h3>
         <div id="log"></div>
+      </div>
+      <div class="card">
+        <h3>Mission Timeline</h3>
+        <div id="timeline" class="tline"><div class="hint">No activity yet.</div></div>
       </div>
     </div>
   </div>
@@ -1138,6 +1165,24 @@
   $('actMore').addEventListener('click',openAudit);
   setInterval(loadActivity,3000);
   loadActivity();
+
+  // ---- Command Center home: quick commands + mission timeline ----
+  document.querySelectorAll('.qcmd').forEach(b=>b.addEventListener('click',()=>{
+    navTo('home'); $('box').value=b.dataset.cmd; $('send').click(); $('box').focus();
+  }));
+  async function loadTimeline(){
+    let rows=[]; try{ rows=await (await fetch('/audit?limit=6')).json(); }catch(e){ return; }
+    const box=$('timeline');
+    if(!rows.length){ box.innerHTML='<div class="hint">No activity yet.</div>'; return; }
+    box.innerHTML='';
+    rows.forEach(e=>{ const d=document.createElement('div'); d.className='trow '+actClass(e);
+      d.innerHTML='<span class="tdot"></span><div class="tinfo"><div class="tt"></div><div class="tm"></div></div>';
+      d.querySelector('.tt').textContent=(e.action||'')+(e.outcome==='FAILURE'?' — failed':'');
+      d.querySelector('.tm').textContent=fmtTime(e.at);
+      box.appendChild(d);
+    });
+  }
+  setInterval(loadTimeline,4000); loadTimeline();
 
   // ---- Update check (notify-only; startup check runs server-side, this just surfaces it) ----
   async function checkUpdate(){
