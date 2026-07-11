@@ -205,6 +205,14 @@
   .rtag.UNKNOWN { color:var(--dim); background:rgba(120,160,200,.12); }
   .otag.FAILURE { color:#ff8ba0; font-weight:600; }
   .otag.SUCCESS { color:#7fe3b0; }
+  .permwrap { position:fixed; inset:0; background:rgba(2,8,18,.74); display:flex; align-items:center; justify-content:center; z-index:200; }
+  .permwrap[hidden] { display:none; }
+  .permbox { width:min(460px,92vw); background:var(--bg); border:1px solid var(--cyan); border-radius:14px; padding:22px 24px; box-shadow:0 0 44px rgba(60,180,240,.28); }
+  .permhead { color:#ffd479; letter-spacing:2px; font-weight:700; font-size:13px; margin-bottom:12px; }
+  .permbody { color:#eaf7ff; font-size:15px; line-height:1.5; }
+  .permbody b { color:var(--cyan); }
+  .permtier { margin-top:12px; font-size:12px; color:var(--dim); }
+  .permbtns { display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
 
   /* Workspace overlay (MAIL / CALENDAR) */
   .wsp { position:fixed; z-index:22; top:50%; left:50%;
@@ -370,6 +378,16 @@
     <div class="row"><label for="s_ram">RAM alert threshold (%)</label><input type="number" id="s_ram" min="1" max="100"></div>
   </div>
   <div class="sect">
+    <h4>🛡 Security</h4>
+    <div class="row"><label for="s_perm">Confirm before actions</label>
+      <select id="s_perm">
+        <option value="DESTRUCTIVE">Destructive only</option>
+        <option value="MUTATING">Any change</option>
+        <option value="OFF">Off — never ask</option>
+      </select></div>
+    <div class="hint" style="padding:0 2px 4px;">JARVIS asks before running risky tools (send/delete mail, power off). Denied actions never run.</div>
+  </div>
+  <div class="sect">
     <h4>🧠 Session</h4>
     <div class="row"><label>Model</label><span id="s_model" class="hint"></span></div>
     <div class="row"><label>Conversation</label><button id="s_clearChat" type="button">Clear</button></div>
@@ -444,6 +462,18 @@
         <thead><tr><th>Time</th><th>Tool / Action</th><th>Risk</th><th>Trigger</th><th>Outcome</th><th>Detail</th></tr></thead>
         <tbody id="auditRows"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<div class="permwrap" id="permModal" hidden>
+  <div class="permbox">
+    <div class="permhead">⚠  PERMISSION REQUIRED</div>
+    <div class="permbody" id="permBody"></div>
+    <div class="permtier" id="permTier"></div>
+    <div class="permbtns">
+      <button class="hbtn alert" id="permDeny" type="button">Deny</button>
+      <button class="hbtn" id="permAllow" type="button">Allow</button>
     </div>
   </div>
 </div>
@@ -885,6 +915,39 @@
   $('auditTab').addEventListener('click',openAudit);
   $('auditClose').addEventListener('click',closeAudit);
   $('auditRefresh').addEventListener('click',loadAudit);
+
+  // ---- Permission prompts ----
+  let permCurrent=null, permBusy=false;
+  function permEsc(s){ const d=document.createElement('div'); d.textContent=String(s==null?'':s); return d.innerHTML; }
+  async function pollPermissions(){
+    if(permBusy) return;
+    try{
+      const list=await (await fetch('/permissions/pending')).json();
+      if(list.length){ if(!permCurrent || permCurrent.id!==list[0].id) showPerm(list[0]); }
+      else if(permCurrent){ hidePerm(); }
+    }catch(e){}
+  }
+  function showPerm(p){
+    permCurrent=p;
+    const t=(p.riskTier||'UNKNOWN');
+    $('permBody').innerHTML='JARVIS is requesting permission to run <b>'+permEsc(p.tool)+'</b>.';
+    $('permTier').innerHTML='<span class="rtag '+t+'">'+t.replace('_',' ')+'</span> &nbsp; '+permEsc(p.detail||'');
+    $('permModal').hidden=false;
+  }
+  function hidePerm(){ permCurrent=null; $('permModal').hidden=true; }
+  async function decidePerm(allow){
+    if(!permCurrent) return;
+    permBusy=true; const id=permCurrent.id;
+    try{ await fetch('/permissions/decide',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id,allow})}); }catch(e){}
+    hidePerm(); permBusy=false;
+  }
+  $('permAllow').addEventListener('click',()=>decidePerm(true));
+  $('permDeny').addEventListener('click',()=>decidePerm(false));
+  setInterval(pollPermissions,1200);
+  $('s_perm').addEventListener('change',e=>{ fetch('/permissions/config',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({level:e.target.value})}).catch(()=>{}); });
+  fetch('/permissions/config').then(r=>r.json()).then(j=>{ if(j.level) $('s_perm').value=j.level; }).catch(()=>{});
   ['au_action','au_risk','au_outcome','au_since'].forEach(id=>{
     const el=$(id); const ev = el.tagName==='SELECT'||el.type==='date' ? 'change' : 'input';
     el.addEventListener(ev,loadAudit); });

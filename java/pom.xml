@@ -18,6 +18,7 @@
     <module>integrations</module>
     <module>plugin-registry</module>
     <module>audit-log</module>
+    <module>security</module>
     <module>api</module>
     <module>ui</module>
     <module>app</module>

@@ -191,6 +191,58 @@ class WebServerTest {
     }
 
     @Test
+    void permissionsEndpointsSurfacePendingRequestsAndResolveThem() throws Exception {
+        com.jarvis.security.PermissionBroker broker = new com.jarvis.security.PermissionBroker(3_000);
+        com.jarvis.security.PermissionPolicy policy = new com.jarvis.security.PermissionPolicy();
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, broker, policy));
+        try {
+            String base = "http://localhost:" + wired.port();
+            // A tool thread asks for approval; it will block until we answer via the endpoint.
+            var pending = java.util.concurrent.CompletableFuture.supplyAsync(() ->
+                    broker.request("email_send", com.jarvis.tools.RiskTier.DESTRUCTIVE, "args: [to]"));
+
+            String id = null;
+            for (int i = 0; i < 100 && id == null; i++) {
+                HttpResponse<String> list = client.send(
+                        HttpRequest.newBuilder(URI.create(base + "/permissions/pending")).GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                if (list.body().contains("email_send")) {
+                    id = list.body().replaceAll(".*\"id\":\"([^\"]+)\".*", "$1");
+                } else {
+                    Thread.sleep(10);
+                }
+            }
+            assertTrue(id != null && id.startsWith("perm-"));
+
+            HttpResponse<String> decide = client.send(HttpRequest.newBuilder(
+                            URI.create(base + "/permissions/decide"))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"id\":\"" + id + "\",\"allow\":true}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(decide.body().contains("\"ok\":true"));
+            assertEquals(com.jarvis.security.PermissionOutcome.ALLOWED,
+                    pending.get(3, java.util.concurrent.TimeUnit.SECONDS));
+
+            // The config endpoint reflects and updates the level.
+            HttpResponse<String> cfg = client.send(HttpRequest.newBuilder(
+                            URI.create(base + "/permissions/config"))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString("{\"level\":\"MUTATING\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(cfg.body().contains("MUTATING"));
+            assertEquals(com.jarvis.security.PermissionLevel.MUTATING, policy.level());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void toolsEndpointExposesManifestsRiskTiersAndHealth() throws Exception {
         com.jarvis.registry.PluginRegistry plugins = new com.jarvis.registry.PluginRegistry(
                 java.util.List.of(
@@ -203,7 +255,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, plugins));
+                new AppWiring.Governance(null, plugins, null, null));
         try {
             HttpResponse<String> r = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/tools"))
@@ -234,7 +286,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null));
+                new AppWiring.Governance(log, null, null, null));
         try {
             String base = "http://localhost:" + wired.port() + "/audit";
             HttpResponse<String> all = client.send(

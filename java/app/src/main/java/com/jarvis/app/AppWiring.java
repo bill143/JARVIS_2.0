@@ -15,6 +15,10 @@ import com.jarvis.registry.HealthTrackingTool;
 import com.jarvis.registry.ManifestLoader;
 import com.jarvis.registry.PluginRegistry;
 import com.jarvis.registry.ToolManifest;
+import com.jarvis.security.AuthorizingTool;
+import com.jarvis.security.PermissionBroker;
+import com.jarvis.security.PermissionLevel;
+import com.jarvis.security.PermissionPolicy;
 import com.jarvis.integrations.google.AuthorizedGoogleClient;
 import com.jarvis.integrations.google.GoogleAuth;
 import com.jarvis.integrations.google.GoogleWorkspacePlugin;
@@ -55,16 +59,18 @@ final class AppWiring {
             HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected,
             com.jarvis.integrations.google.GoogleWorkspaceService googleService,
             MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer,
-            AuditLog auditLog, PluginRegistry pluginRegistry) {
+            AuditLog auditLog, PluginRegistry pluginRegistry,
+            PermissionBroker permissions, PermissionPolicy permissionPolicy) {
 
-        /** The governance surface (audit + tool registry) the web layer exposes. */
+        /** The governance surface (audit, tool registry, permission gate) the web layer exposes. */
         Governance governance() {
-            return new Governance(auditLog, pluginRegistry);
+            return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy);
         }
     }
 
-    /** Governance dependencies the web server exposes: the audit log and the tool registry. */
-    record Governance(AuditLog auditLog, PluginRegistry plugins) {
+    /** Governance dependencies the web server exposes: audit log, tool registry, permission gate. */
+    record Governance(AuditLog auditLog, PluginRegistry plugins,
+            PermissionBroker permissions, PermissionPolicy permissionPolicy) {
     }
 
     private AppWiring() {
@@ -101,11 +107,14 @@ final class AppWiring {
             visionHook = vision::analyze;
         }
 
-        // Governance: manifest-driven risk tiers + a durable audit log (~/.jarvis/audit).
+        // Governance: manifest-driven risk tiers, a durable audit log, and permission prompts.
         PluginRegistry pluginRegistry = pluginRegistry();
         AuditLog auditLog = new RecordStoreAuditLog(new FileRecordStore(
                 Path.of(System.getProperty("user.home"), ".jarvis", "audit")));
-        ToolRegistry governedTools = governedRegistry(tools, pluginRegistry, auditLog);
+        PermissionPolicy permissionPolicy = new PermissionPolicy();   // prompt on destructive
+        PermissionBroker permissions = new PermissionBroker();
+        ToolRegistry governedTools = governedRegistry(
+                tools, pluginRegistry, auditLog, permissionPolicy, permissions);
 
         AgentPolicy policy = online
                 ? AnthropicPolicy.withApiKey(apiKey, model, governedTools)
@@ -118,20 +127,23 @@ final class AppWiring {
         PeopleRecognizer recognizer = online
                 ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
-                memory, people, recognizer, auditLog, pluginRegistry);
+                memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy);
     }
 
     /**
-     * Wraps every tool with health tracking (feeds {@link PluginRegistry}) and audit recording at
-     * the tool's manifest-declared {@link com.jarvis.tools.RiskTier}, into a fresh registry.
+     * Wraps every tool with the full governance stack: health tracking (feeds {@link PluginRegistry}),
+     * audit recording at the tool's manifest {@link com.jarvis.tools.RiskTier}, and a permission gate
+     * that confirms mutating/destructive actions. Layering (outermost first): authorize → audit →
+     * health → raw, so a denied action is never executed and never counts as a health failure.
      */
-    private static ToolRegistry governedRegistry(
-            ToolRegistry raw, PluginRegistry registry, AuditLog auditLog) {
+    private static ToolRegistry governedRegistry(ToolRegistry raw, PluginRegistry registry,
+            AuditLog auditLog, PermissionPolicy permissionPolicy, PermissionBroker permissions) {
         ToolRegistry governed = new ToolRegistry();
         for (Tool tool : raw.list()) {
+            com.jarvis.tools.RiskTier tier = registry.riskTier(tool.name());
             Tool tracked = new HealthTrackingTool(tool, registry);
-            governed.register(new AuditedTool(
-                    tracked, auditLog, registry.riskTier(tool.name()), AuditTrigger.USER));
+            Tool audited = new AuditedTool(tracked, auditLog, tier, AuditTrigger.USER);
+            governed.register(new AuthorizingTool(audited, tier, permissionPolicy, permissions, auditLog));
         }
         return governed;
     }
@@ -159,7 +171,8 @@ final class AppWiring {
         plugins.install(new MarkToolsPlugin(memory));
         plugins.install(new SystemControlPlugin());
         ToolRegistry governedTools = governedRegistry(
-                tools, pluginRegistry(), new RecordStoreAuditLog(new InMemoryRecordStore()));
+                tools, pluginRegistry(), new RecordStoreAuditLog(new InMemoryRecordStore()),
+                new PermissionPolicy(PermissionLevel.OFF), new PermissionBroker());
         AgentPolicy policy = isOnline(apiKey)
                 ? AnthropicPolicy.withApiKey(apiKey, model, governedTools).withMemoryContext(() -> recall(memory))
                 : context -> new Decision.Respond(OFFLINE_HINT + context.input());

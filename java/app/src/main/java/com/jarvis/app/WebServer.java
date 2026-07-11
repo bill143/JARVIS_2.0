@@ -81,6 +81,10 @@ public final class WebServer {
             AppWiring.Governance governance) throws IOException {
         com.jarvis.audit.AuditLog auditLog = governance == null ? null : governance.auditLog();
         com.jarvis.registry.PluginRegistry plugins = governance == null ? null : governance.plugins();
+        com.jarvis.security.PermissionBroker permissions =
+                governance == null ? null : governance.permissions();
+        com.jarvis.security.PermissionPolicy permissionPolicy =
+                governance == null ? null : governance.permissionPolicy();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -105,6 +109,57 @@ public final class WebServer {
             t.put("ramTotalGb", Math.round(s.ramTotalGb() * 10) / 10.0);
             t.put("cores", s.cores());
             respond(exchange, 200, "application/json", t.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/permissions/pending", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (permissions != null) {
+                for (com.jarvis.security.PendingPermission p : permissions.pending()) {
+                    ObjectNode o = arr.addObject();
+                    o.put("id", p.id());
+                    o.put("tool", p.tool());
+                    o.put("riskTier", p.riskTier().name());
+                    o.put("detail", p.detail());
+                    o.put("at", p.requestedAtMillis());
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/permissions/decide", exchange -> {
+            boolean ok = false;
+            if (permissions != null && "POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    ok = permissions.decide(j.path("id").asText(""), j.path("allow").asBoolean(false));
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("ok", ok);
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/permissions/config", exchange -> {
+            if (permissionPolicy != null && "POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    try {
+                        permissionPolicy.setLevel(
+                                com.jarvis.security.PermissionLevel.valueOf(j.path("level").asText("")));
+                    } catch (IllegalArgumentException ignored) {
+                        // unknown level -> leave unchanged
+                    }
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("level", permissionPolicy == null ? "OFF" : permissionPolicy.level().name());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/tools", exchange -> {
