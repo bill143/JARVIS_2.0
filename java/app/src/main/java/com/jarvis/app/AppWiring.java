@@ -7,9 +7,14 @@ import com.jarvis.agent.routing.PromptRouter;
 import com.jarvis.api.DefaultJarvisApi;
 import com.jarvis.api.JarvisApi;
 import com.jarvis.audit.AuditLog;
+import com.jarvis.audit.AuditTrigger;
 import com.jarvis.audit.AuditedTool;
 import com.jarvis.audit.RecordStoreAuditLog;
 import com.jarvis.integrations.PluginManager;
+import com.jarvis.registry.HealthTrackingTool;
+import com.jarvis.registry.ManifestLoader;
+import com.jarvis.registry.PluginRegistry;
+import com.jarvis.registry.ToolManifest;
 import com.jarvis.integrations.google.AuthorizedGoogleClient;
 import com.jarvis.integrations.google.GoogleAuth;
 import com.jarvis.integrations.google.GoogleWorkspacePlugin;
@@ -27,7 +32,11 @@ import com.jarvis.planning.PlanStep;
 import com.jarvis.planning.Planner;
 import com.jarvis.tools.Tool;
 import com.jarvis.tools.ToolRegistry;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -46,7 +55,16 @@ final class AppWiring {
             HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected,
             com.jarvis.integrations.google.GoogleWorkspaceService googleService,
             MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer,
-            AuditLog auditLog) {
+            AuditLog auditLog, PluginRegistry pluginRegistry) {
+
+        /** The governance surface (audit + tool registry) the web layer exposes. */
+        Governance governance() {
+            return new Governance(auditLog, pluginRegistry);
+        }
+    }
+
+    /** Governance dependencies the web server exposes: the audit log and the tool registry. */
+    record Governance(AuditLog auditLog, PluginRegistry plugins) {
     }
 
     private AppWiring() {
@@ -83,32 +101,55 @@ final class AppWiring {
             visionHook = vision::analyze;
         }
 
-        // Governance: every tool call is recorded to a durable audit log (~/.jarvis/audit).
+        // Governance: manifest-driven risk tiers + a durable audit log (~/.jarvis/audit).
+        PluginRegistry pluginRegistry = pluginRegistry();
         AuditLog auditLog = new RecordStoreAuditLog(new FileRecordStore(
                 Path.of(System.getProperty("user.home"), ".jarvis", "audit")));
-        ToolRegistry auditedTools = auditRegistry(tools, auditLog);
+        ToolRegistry governedTools = governedRegistry(tools, pluginRegistry, auditLog);
 
         AgentPolicy policy = online
-                ? AnthropicPolicy.withApiKey(apiKey, model, auditedTools)
+                ? AnthropicPolicy.withApiKey(apiKey, model, governedTools)
                         .withMemoryContext(() -> recall(memory, people))
                         .withHistory(() -> conversationHistory(memory, "dashboard", 24))
                 : context -> new Decision.Respond(OFFLINE_HINT + context.input());
 
-        JarvisApi api = assemble(policy, auditedTools, memory);
+        JarvisApi api = assemble(policy, governedTools, memory);
         HardwareMonitor monitor = new HardwareMonitor();
         PeopleRecognizer recognizer = online
                 ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
-                memory, people, recognizer, auditLog);
+                memory, people, recognizer, auditLog, pluginRegistry);
     }
 
-    /** Wraps every tool in {@code raw} with an {@link AuditedTool} into a fresh registry. */
-    private static ToolRegistry auditRegistry(ToolRegistry raw, AuditLog auditLog) {
-        ToolRegistry audited = new ToolRegistry();
+    /**
+     * Wraps every tool with health tracking (feeds {@link PluginRegistry}) and audit recording at
+     * the tool's manifest-declared {@link com.jarvis.tools.RiskTier}, into a fresh registry.
+     */
+    private static ToolRegistry governedRegistry(
+            ToolRegistry raw, PluginRegistry registry, AuditLog auditLog) {
+        ToolRegistry governed = new ToolRegistry();
         for (Tool tool : raw.list()) {
-            audited.register(new AuditedTool(tool, auditLog));
+            Tool tracked = new HealthTrackingTool(tool, registry);
+            governed.register(new AuditedTool(
+                    tracked, auditLog, registry.riskTier(tool.name()), AuditTrigger.USER));
         }
-        return audited;
+        return governed;
+    }
+
+    /** Loads built-in tool manifests (bundled resource) plus any user plugins in ~/.jarvis/plugins. */
+    static PluginRegistry pluginRegistry() {
+        List<ToolManifest> manifests = new ArrayList<>();
+        try (InputStream in = AppWiring.class.getResourceAsStream("/manifests/builtin.json")) {
+            if (in != null) {
+                manifests.addAll(ManifestLoader.parseArray(
+                        new String(in.readAllBytes(), StandardCharsets.UTF_8)));
+            }
+        } catch (IOException e) {
+            // No bundled manifests -> tools default to UNKNOWN risk.
+        }
+        manifests.addAll(ManifestLoader.loadDirectory(
+                Path.of(System.getProperty("user.home"), ".jarvis", "plugins")));
+        return new PluginRegistry(manifests);
     }
 
     /** Lighter wiring with an injectable store (tests). No monitor, no vision. */
@@ -117,12 +158,12 @@ final class AppWiring {
         PluginManager plugins = new PluginManager(tools);
         plugins.install(new MarkToolsPlugin(memory));
         plugins.install(new SystemControlPlugin());
-        ToolRegistry auditedTools = auditRegistry(
-                tools, new RecordStoreAuditLog(new InMemoryRecordStore()));
+        ToolRegistry governedTools = governedRegistry(
+                tools, pluginRegistry(), new RecordStoreAuditLog(new InMemoryRecordStore()));
         AgentPolicy policy = isOnline(apiKey)
-                ? AnthropicPolicy.withApiKey(apiKey, model, auditedTools).withMemoryContext(() -> recall(memory))
+                ? AnthropicPolicy.withApiKey(apiKey, model, governedTools).withMemoryContext(() -> recall(memory))
                 : context -> new Decision.Respond(OFFLINE_HINT + context.input());
-        return assemble(policy, auditedTools, memory);
+        return assemble(policy, governedTools, memory);
     }
 
     private static JarvisApi assemble(AgentPolicy policy, ToolRegistry tools, MemoryStore<String> memory) {

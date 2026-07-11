@@ -163,7 +163,7 @@ class WebServerTest {
         WebServer wired = WebServer.start(
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
-                new com.jarvis.memory.InMemoryStore<>(), people, null, null);
+                new com.jarvis.memory.InMemoryStore<>(), people, null, (AppWiring.Governance) null);
         try {
             String b = "http://localhost:" + wired.port() + "/people";
             client.send(HttpRequest.newBuilder(URI.create(b))
@@ -191,6 +191,35 @@ class WebServerTest {
     }
 
     @Test
+    void toolsEndpointExposesManifestsRiskTiersAndHealth() throws Exception {
+        com.jarvis.registry.PluginRegistry plugins = new com.jarvis.registry.PluginRegistry(
+                java.util.List.of(
+                        new com.jarvis.registry.ToolManifest("clock", "the time",
+                                com.jarvis.tools.RiskTier.READ_ONLY, java.util.List.of()),
+                        new com.jarvis.registry.ToolManifest("email_send", "send mail",
+                                com.jarvis.tools.RiskTier.DESTRUCTIVE, java.util.List.of())));
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, plugins));
+        try {
+            HttpResponse<String> r = client.send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/tools"))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("email_send"));
+            assertTrue(r.body().contains("DESTRUCTIVE"));
+            assertTrue(r.body().contains("READ_ONLY"));
+            assertTrue(r.body().contains("OPERATIONAL"));   // health present
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void auditEndpointReturnsRecordedEventsNewestFirstWithFilters() throws Exception {
         com.jarvis.audit.AuditLog log =
                 new com.jarvis.audit.RecordStoreAuditLog(new com.jarvis.memory.InMemoryRecordStore());
@@ -204,7 +233,8 @@ class WebServerTest {
         WebServer wired = WebServer.start(
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
-                new com.jarvis.memory.InMemoryStore<>(), null, null, log);
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(log, null));
         try {
             String base = "http://localhost:" + wired.port() + "/audit";
             HttpResponse<String> all = client.send(

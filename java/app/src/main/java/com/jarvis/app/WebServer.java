@@ -70,14 +70,17 @@ public final class WebServer {
     /**
      * Full wiring. Adds {@code people} → {@code GET/POST /people} and {@code recognizer}
      * (nullable) → {@code POST /recognize} for on-demand webcam face matching,
-     * {@code GET/POST /aboutme}, and {@code auditLog} (nullable) → {@code GET /audit}.
+     * {@code GET/POST /aboutme}, and {@code governance} (nullable) → {@code GET /audit}
+     * (audit log) and {@code GET /tools} (tool manifests, risk tiers, health).
      */
     public static WebServer start(JarvisApi api, boolean online, String model, int port,
             HardwareMonitor monitor, VisionHook vision, boolean googleConnected,
             com.jarvis.integrations.google.GoogleWorkspaceService google,
             com.jarvis.memory.MemoryStore<String> memory,
             PeopleStore people, PeopleRecognizer recognizer,
-            com.jarvis.audit.AuditLog auditLog) throws IOException {
+            AppWiring.Governance governance) throws IOException {
+        com.jarvis.audit.AuditLog auditLog = governance == null ? null : governance.auditLog();
+        com.jarvis.registry.PluginRegistry plugins = governance == null ? null : governance.plugins();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -102,6 +105,24 @@ public final class WebServer {
             t.put("ramTotalGb", Math.round(s.ramTotalGb() * 10) / 10.0);
             t.put("cores", s.cores());
             respond(exchange, 200, "application/json", t.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/tools", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (plugins != null) {
+                for (com.jarvis.registry.ToolStats s : plugins.allStats()) {
+                    ObjectNode o = arr.addObject();
+                    o.put("name", s.name());
+                    o.put("description",
+                            plugins.manifestFor(s.name()).map(m -> m.description()).orElse(""));
+                    o.put("riskTier", s.riskTier().name());
+                    o.put("health", s.health().name());
+                    o.put("totalCalls", s.totalCalls());
+                    o.put("failures", s.failures());
+                    o.put("lastError", s.lastError());
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/audit", exchange -> {
