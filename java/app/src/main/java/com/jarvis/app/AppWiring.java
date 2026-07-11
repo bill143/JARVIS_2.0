@@ -24,6 +24,7 @@ import com.jarvis.licensing.LicenseManager;
 import com.jarvis.licensing.LicenseVerifier;
 import com.jarvis.metering.PriceTable;
 import com.jarvis.metering.UsageMeter;
+import com.jarvis.tasks.TaskBoard;
 import com.jarvis.updater.HttpManifestSource;
 import com.jarvis.updater.ManifestSource;
 import com.jarvis.updater.ManifestVerifier;
@@ -74,19 +75,19 @@ final class AppWiring {
             MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer,
             AuditLog auditLog, PluginRegistry pluginRegistry,
             PermissionBroker permissions, PermissionPolicy permissionPolicy,
-            UpdateChecker updates, LicenseManager license, UsageMeter usage) {
+            UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
-            return new Governance(
-                    auditLog, pluginRegistry, permissions, permissionPolicy, updates, license, usage);
+            return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
+                    updates, license, usage, tasks);
         }
     }
 
-    /** Services the web server exposes: audit, tools, permissions, updates, licensing, usage. */
+    /** Services the web server exposes: audit, tools, permissions, updates, licensing, usage, tasks. */
     record Governance(AuditLog auditLog, PluginRegistry plugins,
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
-            LicenseManager license, UsageMeter usage) {
+            LicenseManager license, UsageMeter usage, TaskBoard tasks) {
     }
 
     private AppWiring() {
@@ -159,10 +160,12 @@ final class AppWiring {
         updateThread.start();
 
         LicenseManager license = licenseManager();
+        TaskBoard tasks = new TaskBoard(new FileRecordStore(
+                Path.of(System.getProperty("user.home"), ".jarvis", "tasks")));
 
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license, usageMeter);
+                updates, license, usageMeter, tasks);
     }
 
     /**

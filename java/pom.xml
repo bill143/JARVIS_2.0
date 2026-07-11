@@ -22,6 +22,7 @@
     <module>updater</module>
     <module>licensing</module>
     <module>usage-metering</module>
+    <module>tasks</module>
     <module>api</module>
     <module>ui</module>
     <module>app</module>

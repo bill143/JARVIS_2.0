@@ -91,6 +91,8 @@ public final class WebServer {
                 governance == null ? null : governance.license();
         com.jarvis.metering.UsageMeter usage =
                 governance == null ? null : governance.usage();
+        com.jarvis.tasks.TaskBoard tasks =
+                governance == null ? null : governance.tasks();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -477,6 +479,48 @@ public final class WebServer {
             ObjectNode out = MAPPER.createObjectNode();
             out.put("completed", completed);
             respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/tasks", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod()) && tasks != null) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String action = j.path("action").asText("");
+                    if ("create".equals(action)) {
+                        java.util.List<String> deps = new java.util.ArrayList<>();
+                        j.path("dependsOn").forEach(d -> deps.add(d.asText()));
+                        tasks.create(j.path("title").asText("").strip(),
+                                j.path("notes").asText(""), deps, System.currentTimeMillis());
+                    } else if ("move".equals(action)) {
+                        try {
+                            tasks.move(j.path("id").asText(""), com.jarvis.tasks.TaskStatus.valueOf(
+                                    j.path("status").asText("TODO")));
+                        } catch (IllegalArgumentException ignored) {
+                            // unknown status -> no move
+                        }
+                    } else if ("delete".equals(action)) {
+                        tasks.delete(j.path("id").asText(""));
+                    }
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (tasks != null) {
+                java.util.List<com.jarvis.tasks.Task> all = tasks.list();
+                for (com.jarvis.tasks.Task t : all) {
+                    ObjectNode o = arr.addObject();
+                    o.put("id", t.id());
+                    o.put("title", t.title());
+                    o.put("notes", t.notes());
+                    o.put("status", t.status().name());
+                    o.put("blocked", com.jarvis.tasks.TaskBoard.isBlocked(t, all));
+                    ArrayNode deps = o.putArray("dependsOn");
+                    t.dependsOn().forEach(deps::add);
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/memory", exchange -> {

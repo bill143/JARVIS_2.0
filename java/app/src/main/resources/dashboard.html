@@ -60,6 +60,17 @@
     flex-direction:column; align-items:center; justify-content:center; }
   .gauge .gval { font-size:36px; font-weight:600; color:#eaf7ff; font-variant-numeric:tabular-nums; }
   .gauge .glbl { color:var(--dim); font-size:10px; letter-spacing:2px; margin-top:4px; }
+  .kanban { display:flex; gap:16px; align-items:flex-start; }
+  .kcol { flex:1; background:rgba(80,140,200,.05); border:1px solid var(--line); border-radius:12px; padding:12px; min-height:220px; }
+  .kcol h4 { color:var(--cyan); font-size:11px; letter-spacing:2px; margin-bottom:10px; text-transform:uppercase; }
+  .kcards { display:flex; flex-direction:column; gap:10px; }
+  .kcard { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .kcard .kt { color:#eaf7ff; font-size:13px; }
+  .kcard .kblk { color:var(--amber); font-size:10px; margin-top:3px; }
+  .kcard .kact { display:flex; gap:6px; margin-top:8px; }
+  .kcard .kbtn { background:none; border:1px solid var(--line); color:var(--dim); border-radius:6px; padding:2px 9px; font-size:12px; cursor:pointer; }
+  .kcard .kbtn:hover { color:#eaf7ff; border-color:var(--cyan); }
+  .kcard .kbtn.del { color:#ff8ba0; margin-left:auto; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -311,6 +322,7 @@
   <div class="navitem" data-nav="home"><span class="ic">⬡</span> Command Center</div>
   <div class="navitem" data-nav="memory"><span class="ic">🧠</span> Memory</div>
   <div class="navitem" data-nav="conv"><span class="ic">💬</span> Conversations</div>
+  <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
   <div class="navitem" data-nav="tools"><span class="ic">🧩</span> Tools &amp; Skills</div>
   <div class="navitem" data-nav="sysmon"><span class="ic">📈</span> System Monitor</div>
 </nav>
@@ -494,6 +506,21 @@
       <input id="convBox" placeholder="Message JARVIS…" class="minput" style="flex:1;">
       <button id="convSend" type="submit" class="hbtn">SEND</button>
     </form>
+  </div>
+</div>
+<div class="page cpage" id="cpage-tasks">
+  <div class="page-head"><h2>✅  TASKS</h2><span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" style="max-width:1120px;">
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <input type="text" id="taskTitle" placeholder="New task…" class="minput" style="flex:1;">
+      <button class="hbtn" id="taskAdd" type="button">Add task</button>
+    </div>
+    <div class="kanban">
+      <div class="kcol"><h4>To do</h4><div class="kcards" id="col-TODO"></div></div>
+      <div class="kcol"><h4>In progress</h4><div class="kcards" id="col-IN_PROGRESS"></div></div>
+      <div class="kcol"><h4>Done</h4><div class="kcards" id="col-DONE"></div></div>
+    </div>
   </div>
 </div>
 <div class="page cpage" id="cpage-tools">
@@ -1340,6 +1367,29 @@
     });
   }
   pageLoaders.tools=loadTools;
+
+  // ---- Tasks (Kanban) page ----
+  const KCOLS=['TODO','IN_PROGRESS','DONE'];
+  function mkbtn(txt,fn,cls){ const b=document.createElement('button'); b.className='kbtn'+(cls?' '+cls:''); b.type='button'; b.textContent=txt; b.addEventListener('click',fn); return b; }
+  async function taskPost(body){ await fetch('/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); loadTasks(); }
+  async function loadTasks(){
+    let rows=[]; try{ rows=await (await fetch('/tasks')).json(); }catch(e){ return; }
+    KCOLS.forEach(c=>$('col-'+c).innerHTML='');
+    rows.forEach(t=>{ const card=document.createElement('div'); card.className='kcard';
+      const title=document.createElement('div'); title.className='kt'; title.textContent=t.title; card.appendChild(title);
+      if(t.blocked){ const b=document.createElement('div'); b.className='kblk'; b.textContent='⛔ blocked by a dependency'; card.appendChild(b); }
+      const act=document.createElement('div'); act.className='kact';
+      const idx=KCOLS.indexOf(t.status);
+      if(idx>0) act.appendChild(mkbtn('←',()=>taskPost({action:'move',id:t.id,status:KCOLS[idx-1]})));
+      if(idx<KCOLS.length-1) act.appendChild(mkbtn('→',()=>taskPost({action:'move',id:t.id,status:KCOLS[idx+1]})));
+      act.appendChild(mkbtn('✕',()=>taskPost({action:'delete',id:t.id}),'del'));
+      card.appendChild(act);
+      ($('col-'+t.status)||$('col-TODO')).appendChild(card);
+    });
+  }
+  $('taskAdd').addEventListener('click',()=>{ const v=$('taskTitle').value.trim(); if(!v) return; $('taskTitle').value=''; taskPost({action:'create',title:v}); });
+  $('taskTitle').addEventListener('keydown',e=>{ if(e.key==='Enter') $('taskAdd').click(); });
+  pageLoaders.tasks=loadTasks;
 
   // ---- System Monitor page (full telemetry gauges) ----
   function setGauge(gid,vid,pct){
