@@ -65,6 +65,11 @@
     </dependency>
     <dependency>
       <groupId>com.jarvis</groupId>
+      <artifactId>knowledge-base</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.jarvis</groupId>
       <artifactId>ui</artifactId>
       <version>${project.version}</version>
     </dependency>

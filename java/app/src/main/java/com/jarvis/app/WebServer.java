@@ -94,6 +94,7 @@ public final class WebServer {
         com.jarvis.tasks.TaskBoard tasks =
                 governance == null ? null : governance.tasks();
         WorkflowService workflows = governance == null ? null : governance.workflows();
+        com.jarvis.kb.KnowledgeBase knowledge = governance == null ? null : governance.knowledge();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -480,6 +481,54 @@ public final class WebServer {
             ObjectNode out = MAPPER.createObjectNode();
             out.put("completed", completed);
             respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/kb/search", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (knowledge != null) {
+                int k = parseInt(param(exchange, "k", "5"), 5);
+                for (com.jarvis.rag.ScoredDocument s : knowledge.search(param(exchange, "q", ""), k)) {
+                    ObjectNode o = arr.addObject();
+                    o.put("id", s.document().id());
+                    o.put("title", com.jarvis.kb.KnowledgeBase.titleOf(s.document()));
+                    o.put("score", s.score());
+                    String c = s.document().content();
+                    o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/kb", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod()) && knowledge != null) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String action = j.path("action").asText("");
+                    if ("add".equals(action)) {
+                        if (!j.path("content").asText("").isBlank()
+                                || !j.path("title").asText("").isBlank()) {
+                            knowledge.add(j.path("title").asText(""), j.path("content").asText(""),
+                                    System.currentTimeMillis());
+                        }
+                    } else if ("delete".equals(action)) {
+                        knowledge.delete(j.path("id").asText(""));
+                    }
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (knowledge != null) {
+                for (com.jarvis.rag.Document d : knowledge.list()) {
+                    ObjectNode o = arr.addObject();
+                    o.put("id", d.id());
+                    o.put("title", com.jarvis.kb.KnowledgeBase.titleOf(d));
+                    String c = d.content();
+                    o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/workflows/runs", exchange -> {

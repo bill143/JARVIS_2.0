@@ -24,6 +24,7 @@ import com.jarvis.licensing.LicenseManager;
 import com.jarvis.licensing.LicenseVerifier;
 import com.jarvis.metering.PriceTable;
 import com.jarvis.metering.UsageMeter;
+import com.jarvis.kb.KnowledgeBase;
 import com.jarvis.tasks.TaskBoard;
 import com.jarvis.updater.HttpManifestSource;
 import com.jarvis.updater.ManifestSource;
@@ -76,19 +77,20 @@ final class AppWiring {
             AuditLog auditLog, PluginRegistry pluginRegistry,
             PermissionBroker permissions, PermissionPolicy permissionPolicy,
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
-            WorkflowService workflows) {
+            WorkflowService workflows, KnowledgeBase knowledge) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
-                    updates, license, usage, tasks, workflows);
+                    updates, license, usage, tasks, workflows, knowledge);
         }
     }
 
     /** Services the web server exposes: audit, tools, permissions, updates, licensing, usage, tasks. */
     record Governance(AuditLog auditLog, PluginRegistry plugins,
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
-            LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows) {
+            LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
+            KnowledgeBase knowledge) {
     }
 
     private AppWiring() {
@@ -168,10 +170,12 @@ final class AppWiring {
                 new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "workflow-runs")),
                 api, auditLog);
         workflows.startScheduler();
+        KnowledgeBase knowledge = new KnowledgeBase(new FileRecordStore(
+                Path.of(System.getProperty("user.home"), ".jarvis", "knowledge")));
 
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license, usageMeter, tasks, workflows);
+                updates, license, usageMeter, tasks, workflows, knowledge);
     }
 
     /**

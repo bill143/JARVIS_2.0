@@ -83,6 +83,9 @@
   .wfdet { margin:6px 0 2px 4px; border-left:2px solid var(--line); padding-left:10px; }
   .wfstep { color:var(--dim); font-size:11.5px; padding:2px 0; font-family:ui-monospace,Menlo,Consolas,monospace; word-break:break-word; }
   .wfstep.bad { color:#ff8ba0; }
+  .kbhit { padding:8px 2px; border-bottom:1px solid rgba(120,160,200,.12); }
+  .kbhit .kbt { color:#eaf7ff; font-size:13px; }
+  .kbhit .kbs { color:var(--dim); font-size:11.5px; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -336,6 +339,7 @@
   <div class="navitem" data-nav="conv"><span class="ic">💬</span> Conversations</div>
   <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
   <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
+  <div class="navitem" data-nav="kb"><span class="ic">📚</span> Knowledge</div>
   <div class="navitem" data-nav="tools"><span class="ic">🧩</span> Tools &amp; Skills</div>
   <div class="navitem" data-nav="sysmon"><span class="ic">📈</span> System Monitor</div>
 </nav>
@@ -519,6 +523,23 @@
       <input id="convBox" placeholder="Message JARVIS…" class="minput" style="flex:1;">
       <button id="convSend" type="submit" class="hbtn">SEND</button>
     </form>
+  </div>
+</div>
+<div class="page cpage" id="cpage-kb">
+  <div class="page-head"><h2>📚  KNOWLEDGE BASE</h2><span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" style="max-width:900px;">
+    <div class="pcard"><h4>Add a document</h4>
+      <input id="kbTitle" class="minput" placeholder="Title…">
+      <textarea id="kbContent" class="minput" style="min-height:90px;margin-top:8px;" placeholder="Content JARVIS can recall and search…"></textarea>
+      <div style="margin-top:8px;"><button class="hbtn" id="kbAdd" type="button">Add</button></div>
+    </div>
+    <div class="pcard"><h4>Search</h4>
+      <div style="display:flex;gap:8px;"><input id="kbQuery" class="minput" style="flex:1;" placeholder="Search your knowledge…">
+        <button class="hbtn" id="kbSearchBtn" type="button">Search</button></div>
+      <div id="kbResults" style="margin-top:10px;"></div>
+    </div>
+    <div class="pcard"><h4>All documents</h4><div id="kbList"><div class="hint">None yet.</div></div></div>
   </div>
 </div>
 <div class="page cpage" id="cpage-workflows">
@@ -1468,6 +1489,35 @@
     $('wfName').value=''; $('wfSteps').value='';
   });
   pageLoaders.workflows=loadWorkflows;
+
+  // ---- Knowledge Base page ----
+  async function kbPost(body){ await fetch('/kb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); loadKB(); }
+  async function loadKB(){
+    let docs=[]; try{ docs=await (await fetch('/kb')).json(); }catch(e){ return; }
+    const box=$('kbList'); box.innerHTML=''; if(!docs.length){ box.innerHTML='<div class="hint">None yet.</div>'; }
+    docs.forEach(d=>{ const row=document.createElement('div'); row.className='memrow';
+      const s=document.createElement('span'); s.className='memval';
+      const b=document.createElement('b'); b.textContent=d.title||'(untitled)';
+      const sn=document.createElement('span'); sn.style.color='var(--dim)'; sn.style.marginLeft='8px'; sn.textContent=d.snippet||'';
+      s.appendChild(b); s.appendChild(sn);
+      const del=document.createElement('button'); del.className='memdel'; del.textContent='✕'; del.addEventListener('click',()=>kbPost({action:'delete',id:d.id}));
+      row.appendChild(s); row.appendChild(del); box.appendChild(row);
+    });
+  }
+  async function kbSearch(){
+    const q=$('kbQuery').value.trim(); const box=$('kbResults'); if(!q){ box.innerHTML=''; return; }
+    let hits=[]; try{ hits=await (await fetch('/kb/search?q='+encodeURIComponent(q)+'&k=8')).json(); }catch(e){}
+    box.innerHTML=''; if(!hits.length){ box.innerHTML='<div class="hint">No matches.</div>'; return; }
+    hits.forEach(h=>{ const d=document.createElement('div'); d.className='kbhit';
+      const t=document.createElement('div'); t.className='kbt'; t.textContent=h.title||'(untitled)';
+      const s=document.createElement('div'); s.className='kbs'; s.textContent=h.snippet||'';
+      d.appendChild(t); d.appendChild(s); box.appendChild(d);
+    });
+  }
+  $('kbAdd').addEventListener('click',()=>{ const t=$('kbTitle').value.trim(),c=$('kbContent').value.trim(); if(!t&&!c) return; kbPost({action:'add',title:t,content:c}); $('kbTitle').value='';$('kbContent').value=''; });
+  $('kbSearchBtn').addEventListener('click',kbSearch);
+  $('kbQuery').addEventListener('keydown',e=>{ if(e.key==='Enter') kbSearch(); });
+  pageLoaders.kb=loadKB;
 
   // ---- System Monitor page (full telemetry gauges) ----
   function setGauge(gid,vid,pct){
