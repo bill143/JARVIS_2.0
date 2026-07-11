@@ -598,9 +598,11 @@ public final class WebServer {
                 return;
             }
             String prompt;
+            String mode;
             try (InputStream body = exchange.getRequestBody()) {
                 JsonNode json = MAPPER.readTree(body);
                 prompt = json.path("prompt").asText("");
+                mode = json.path("mode").asText("");
             } catch (IOException e) {
                 respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
                 return;
@@ -609,7 +611,9 @@ public final class WebServer {
                 respond(exchange, 400, "text/plain", "empty prompt".getBytes(StandardCharsets.UTF_8));
                 return;
             }
-            ChatResponse chat = api.chat(new ChatRequest("dashboard", prompt.strip()));
+            String preamble = modePreamble(mode);
+            String effective = preamble.isEmpty() ? prompt.strip() : preamble + "\n\n" + prompt.strip();
+            ChatResponse chat = api.chat(new ChatRequest("dashboard", effective));
             ObjectNode reply = MAPPER.createObjectNode();
             reply.put("completed", chat.completed());
             reply.put("response", chat.completed()
@@ -664,6 +668,23 @@ public final class WebServer {
         } catch (NumberFormatException e) {
             return dflt;
         }
+    }
+
+    /** Maps a Conversations chat mode to an instruction prepended to the user's message. */
+    private static String modePreamble(String mode) {
+        return switch (mode == null ? "" : mode.toLowerCase(java.util.Locale.ROOT)) {
+            case "compose" -> "Mode: Compose. Help the user write — produce polished, well-structured"
+                    + " prose or copy for the request below.";
+            case "research" -> "Mode: Research. Research the request below thoroughly and answer with"
+                    + " organized findings; note sources if you looked anything up.";
+            case "execute" -> "Mode: Execute. Act on the request below using your tools where"
+                    + " appropriate, and confirm concisely what you did.";
+            case "debug" -> "Mode: Debug. Treat the request below as a technical problem: reason step by"
+                    + " step, identify likely causes, and give concrete fixes.";
+            case "brainstorm" -> "Mode: Brainstorm. Offer several creative options and ideas for the"
+                    + " request below; think broadly.";
+            default -> "";
+        };
     }
 
     private static ObjectNode licenseJson(com.jarvis.licensing.LicenseStatus s) {

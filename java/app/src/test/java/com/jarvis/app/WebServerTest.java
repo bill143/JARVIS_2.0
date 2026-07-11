@@ -81,6 +81,17 @@ class WebServerTest {
     }
 
     @Test
+    void chatAcceptsAConversationModeAndStillAnswers() throws Exception {
+        HttpResponse<String> response = post("/chat",
+                "{\"prompt\":\"outline a plan\",\"mode\":\"research\"}");
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("\"completed\":true"));
+        // Offline echo returns the effective prompt, so the mode preamble is applied.
+        assertTrue(response.body().contains("Mode: Research"));
+        assertTrue(response.body().contains("outline a plan"));
+    }
+
+    @Test
     void chatRejectsBadRequests() throws Exception {
         assertEquals(400, post("/chat", "{\"prompt\":\"\"}").statusCode());
         assertEquals(400, post("/chat", "not json").statusCode());

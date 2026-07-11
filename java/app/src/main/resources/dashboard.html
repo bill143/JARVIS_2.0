@@ -41,6 +41,14 @@
   .memrow { display:flex; align-items:center; gap:10px; padding:7px 2px; border-bottom:1px solid rgba(120,160,200,.12); }
   .memrow .memval { flex:1; color:#dcecfb; font-size:13px; }
   .memrow .memdel { background:none; border:none; color:#ff8ba0; cursor:pointer; font-size:14px; }
+  .cmodes { display:flex; flex-wrap:wrap; gap:8px; }
+  .cmode { background:rgba(65,217,255,.06); border:1px solid var(--line); color:var(--dim); border-radius:20px; padding:8px 14px; font-size:13px; cursor:pointer; }
+  .cmode.active { color:#eaf7ff; border-color:var(--cyan); background:rgba(65,217,255,.14); }
+  .convlog { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding:10px 2px; min-height:200px; }
+  .convlog .cmsg { max-width:80%; padding:9px 13px; border-radius:12px; font-size:13px; line-height:1.5; white-space:pre-wrap; }
+  .convlog .cmsg.user { align-self:flex-end; background:rgba(65,217,255,.14); color:#eaf7ff; }
+  .convlog .cmsg.bot { align-self:flex-start; background:rgba(120,160,200,.08); }
+  .convlog .cmsg.think { color:var(--dim); font-style:italic; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -461,7 +469,21 @@
 <div class="page cpage" id="cpage-conv">
   <div class="page-head"><h2>💬  CONVERSATIONS</h2><span style="margin-left:auto;"></span>
     <button class="hbtn pgclose" type="button">CLOSE</button></div>
-  <div class="page-body" id="convBody"><div class="hint">Loading…</div></div>
+  <div class="page-body" id="convBody" style="display:flex;flex-direction:column;max-width:900px;">
+    <div class="cmodes" id="convModes">
+      <button class="cmode active" data-mode="compose" data-desc="Writing help — polished prose &amp; copy." type="button">✍ Compose</button>
+      <button class="cmode" data-mode="research" data-desc="Thorough, organized findings." type="button">🔎 Research</button>
+      <button class="cmode" data-mode="execute" data-desc="Action-oriented; uses tools." type="button">⚡ Execute</button>
+      <button class="cmode" data-mode="debug" data-desc="Step-by-step technical debugging." type="button">🛠 Debug</button>
+      <button class="cmode" data-mode="brainstorm" data-desc="Creative options &amp; ideas." type="button">💡 Brainstorm</button>
+    </div>
+    <div class="hint" id="convDesc" style="margin:8px 2px;">Writing help — polished prose &amp; copy.</div>
+    <div id="convLog" class="convlog"></div>
+    <form class="cmd" id="convForm" autocomplete="off" style="margin-top:12px;">
+      <input id="convBox" placeholder="Message JARVIS…" class="minput" style="flex:1;">
+      <button id="convSend" type="submit" class="hbtn">SEND</button>
+    </form>
+  </div>
 </div>
 <div class="page cpage" id="cpage-tools">
   <div class="page-head"><h2>🧩  TOOLS &amp; SKILLS</h2><span style="margin-left:auto;"></span>
@@ -1241,6 +1263,28 @@
   $('memMail').addEventListener('change',e=>{ fetch('/instructions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({area:'mail',text:e.target.value})}).catch(()=>{}); });
   $('memCal').addEventListener('change',e=>{ fetch('/instructions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({area:'calendar',text:e.target.value})}).catch(()=>{}); });
   pageLoaders.memory=loadMemory;
+
+  // ---- Conversations page (5 chat modes via routing) ----
+  let convMode='compose';
+  document.querySelectorAll('#convModes .cmode').forEach(b=>b.addEventListener('click',()=>{
+    convMode=b.dataset.mode;
+    document.querySelectorAll('#convModes .cmode').forEach(x=>x.classList.toggle('active',x===b));
+    $('convDesc').textContent=b.dataset.desc;
+  }));
+  function convAppend(text,cls){ const d=document.createElement('div'); d.className='cmsg '+cls; d.textContent=text;
+    $('convLog').appendChild(d); $('convLog').scrollTop=$('convLog').scrollHeight; return d; }
+  $('convForm').addEventListener('submit',async(e)=>{
+    e.preventDefault();
+    const msg=$('convBox').value.trim(); if(!msg) return;
+    convAppend(msg,'user'); $('convBox').value='';
+    const thinking=convAppend('…','bot think');
+    try{
+      const j=await (await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({prompt:msg,mode:convMode})})).json();
+      thinking.remove(); convAppend(j.response||'(no answer)','bot');
+    }catch(err){ thinking.remove(); convAppend('Something went wrong. Please try again.','bot'); }
+  });
+  pageLoaders.conv=()=>$('convBox').focus();
 
   // ---- Update check (notify-only; startup check runs server-side, this just surfaces it) ----
   async function checkUpdate(){
