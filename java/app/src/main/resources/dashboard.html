@@ -344,6 +344,7 @@
   <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
   <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
   <div class="navitem" data-nav="kb"><span class="ic">📚</span> Knowledge</div>
+  <div class="navitem" data-nav="intel"><span class="ic">✨</span> Intelligence</div>
   <div class="navitem" data-nav="agents"><span class="ic">🤖</span> Agents</div>
   <div class="navitem" data-nav="tools"><span class="ic">🧩</span> Tools &amp; Skills</div>
   <div class="navitem" data-nav="sysmon"><span class="ic">📈</span> System Monitor</div>
@@ -556,6 +557,26 @@
       <div id="kbResults" style="margin-top:10px;"></div>
     </div>
     <div class="pcard"><h4>All documents</h4><div id="kbList"><div class="hint">None yet.</div></div></div>
+  </div>
+</div>
+<div class="page cpage" id="cpage-intel">
+  <div class="page-head"><h2>✨  PERSONAL INTELLIGENCE</h2>
+    <span id="intelMode" style="margin-left:12px;font-size:11px;letter-spacing:1px;padding:2px 8px;border:1px solid var(--dim);border-radius:10px;color:var(--dim);">KEYWORD</span>
+    <span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" style="max-width:900px;">
+    <div class="hint" id="intelBanner" style="margin-bottom:10px;">Recall by meaning. Cloud embeddings are dormant by default — recall falls back to keyword search until an embeddings key is wired, then the same box searches semantically.</div>
+    <div class="pcard"><h4>Remember something</h4>
+      <input id="intelTitle" class="minput" placeholder="Title…">
+      <textarea id="intelContent" class="minput" style="min-height:90px;margin-top:8px;" placeholder="A fact, preference, or note JARVIS should recall by meaning…"></textarea>
+      <div style="margin-top:8px;"><button class="hbtn" id="intelAdd" type="button">Remember</button></div>
+    </div>
+    <div class="pcard"><h4>Recall</h4>
+      <div style="display:flex;gap:8px;"><input id="intelQuery" class="minput" style="flex:1;" placeholder="Ask by meaning…">
+        <button class="hbtn" id="intelSearchBtn" type="button">Recall</button></div>
+      <div id="intelResults" style="margin-top:10px;"></div>
+    </div>
+    <div class="pcard"><h4>All memories</h4><div id="intelList"><div class="hint">None yet.</div></div></div>
   </div>
 </div>
 <div class="page cpage" id="cpage-workflows">
@@ -1534,6 +1555,44 @@
   $('kbSearchBtn').addEventListener('click',kbSearch);
   $('kbQuery').addEventListener('keydown',e=>{ if(e.key==='Enter') kbSearch(); });
   pageLoaders.kb=loadKB;
+
+  // ---- Personal Intelligence (semantic recall) page ----
+  function intelSetMode(mode){
+    const semantic=(mode==='semantic'); const badge=$('intelMode');
+    badge.textContent=(mode||'keyword').toUpperCase();
+    badge.style.color=semantic?'var(--accent)':'var(--dim)';
+    badge.style.borderColor=semantic?'var(--accent)':'var(--dim)';
+    $('intelBanner').textContent=semantic
+      ? 'Recall by meaning is live — searches match on semantics, not just shared words.'
+      : 'Recall by meaning. Cloud embeddings are dormant by default — recall falls back to keyword search until an embeddings key is wired, then the same box searches semantically.';
+  }
+  async function intelPost(body){ await fetch('/semantic',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); loadIntel(); }
+  async function loadIntel(){
+    let j={items:[],mode:'keyword'}; try{ j=await (await fetch('/semantic')).json(); }catch(e){ return; }
+    intelSetMode(j.mode); const items=j.items||[];
+    const box=$('intelList'); box.innerHTML=''; if(!items.length){ box.innerHTML='<div class="hint">None yet.</div>'; }
+    items.forEach(d=>{ const row=document.createElement('div'); row.className='memrow';
+      const s=document.createElement('span'); s.className='memval';
+      const b=document.createElement('b'); b.textContent=d.title||'(untitled)';
+      const sn=document.createElement('span'); sn.style.color='var(--dim)'; sn.style.marginLeft='8px'; sn.textContent=d.snippet||'';
+      s.appendChild(b); s.appendChild(sn); row.appendChild(s); box.appendChild(row);
+    });
+  }
+  async function intelSearch(){
+    const q=$('intelQuery').value.trim(); const box=$('intelResults'); if(!q){ box.innerHTML=''; return; }
+    let j={results:[],mode:'keyword'}; try{ j=await (await fetch('/semantic/search?q='+encodeURIComponent(q)+'&k=8')).json(); }catch(e){}
+    intelSetMode(j.mode); const hits=j.results||[];
+    box.innerHTML=''; if(!hits.length){ box.innerHTML='<div class="hint">Nothing recalled.</div>'; return; }
+    hits.forEach(h=>{ const d=document.createElement('div'); d.className='kbhit';
+      const t=document.createElement('div'); t.className='kbt'; t.textContent=h.title||'(untitled)';
+      const s=document.createElement('div'); s.className='kbs'; s.textContent=h.snippet||'';
+      d.appendChild(t); d.appendChild(s); box.appendChild(d);
+    });
+  }
+  $('intelAdd').addEventListener('click',()=>{ const t=$('intelTitle').value.trim(),c=$('intelContent').value.trim(); if(!t&&!c) return; intelPost({action:'add',title:t,content:c}); $('intelTitle').value='';$('intelContent').value=''; });
+  $('intelSearchBtn').addEventListener('click',intelSearch);
+  $('intelQuery').addEventListener('keydown',e=>{ if(e.key==='Enter') intelSearch(); });
+  pageLoaders.intel=loadIntel;
 
   // ---- Multi-agent page ----
   async function agRun(){

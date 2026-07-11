@@ -61,6 +61,8 @@ class WebServerTest {
         assertTrue(response.body().contains("speechSynthesis"));
         assertTrue(response.body().contains("id=\"orb\""));       // the HUD orb
         assertTrue(response.body().contains("/telemetry"));       // live metrics wiring
+        assertTrue(response.body().contains("PERSONAL INTELLIGENCE"));   // semantic recall page
+        assertTrue(response.body().contains("data-nav=\"intel\""));     // and its nav entry
     }
 
     @Test
