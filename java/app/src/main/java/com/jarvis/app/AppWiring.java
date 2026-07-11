@@ -108,6 +108,11 @@ final class AppWiring {
         PluginManager plugins = new PluginManager(tools);
         plugins.install(new MarkToolsPlugin(memory));
         plugins.install(new SystemControlPlugin());
+        // Phase 5 reference integration. Dormant until JARVIS_GITHUB_TOKEN is set — the tools are
+        // registered (and manifest-tiered) either way; a missing token yields a graceful error, not
+        // a crash. MUTATING actions are gated by the permission layer via their manifest risk tier.
+        plugins.install(new com.jarvis.integrations.github.GitHubPlugin(
+                com.jarvis.integrations.github.HttpGitHubTransport.fromEnvironment()));
 
         GoogleAuth google = googleAuth(memory);
         boolean googleConnected = google != null && google.isConnected();
@@ -249,13 +254,15 @@ final class AppWiring {
     /** Loads built-in tool manifests (bundled resource) plus any user plugins in ~/.jarvis/plugins. */
     static PluginRegistry pluginRegistry() {
         List<ToolManifest> manifests = new ArrayList<>();
-        try (InputStream in = AppWiring.class.getResourceAsStream("/manifests/builtin.json")) {
-            if (in != null) {
-                manifests.addAll(ManifestLoader.parseArray(
-                        new String(in.readAllBytes(), StandardCharsets.UTF_8)));
+        for (String resource : new String[] {"/manifests/builtin.json", "/manifests/github.json"}) {
+            try (InputStream in = AppWiring.class.getResourceAsStream(resource)) {
+                if (in != null) {
+                    manifests.addAll(ManifestLoader.parseArray(
+                            new String(in.readAllBytes(), StandardCharsets.UTF_8)));
+                }
+            } catch (IOException e) {
+                // A missing/unreadable manifest bundle -> those tools default to UNKNOWN risk.
             }
-        } catch (IOException e) {
-            // No bundled manifests -> tools default to UNKNOWN risk.
         }
         manifests.addAll(ManifestLoader.loadDirectory(
                 Path.of(System.getProperty("user.home"), ".jarvis", "plugins")));
