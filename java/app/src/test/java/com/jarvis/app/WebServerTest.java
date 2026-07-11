@@ -243,6 +243,39 @@ class WebServerTest {
     }
 
     @Test
+    void memoryEndpointListsAddsAndDeletesPreferences() throws Exception {
+        com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        memory.put("about", "me", "I'm Bill.");
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                true, "m", 0, new HardwareMonitor(), null, true, null, memory);
+        try {
+            String base = "http://localhost:" + wired.port() + "/memory";
+            // add a preference
+            client.send(HttpRequest.newBuilder(URI.create(base))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"action\":\"add\",\"value\":\"prefers metric units\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> listed = client.send(
+                    HttpRequest.newBuilder(URI.create(base)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(listed.body().contains("prefers metric units"));
+            assertTrue(listed.body().contains("I'm Bill."));   // about surfaced
+
+            String key = memory.query("preferences").get(0).key();
+            client.send(HttpRequest.newBuilder(URI.create(base))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"action\":\"delete\",\"key\":\"" + key + "\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(memory.query("preferences").isEmpty());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void onboardingCompletionFlagRoundTripsThroughMemory() throws Exception {
         com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
         WebServer wired = WebServer.start(

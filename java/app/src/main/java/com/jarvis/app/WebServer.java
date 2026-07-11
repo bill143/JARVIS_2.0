@@ -479,6 +479,54 @@ public final class WebServer {
             respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        server.createContext("/memory", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod()) && memory != null) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String action = j.path("action").asText("");
+                    if ("add".equals(action)) {
+                        String value = j.path("value").asText("").strip();
+                        if (!value.isEmpty()) {
+                            memory.put("preferences",
+                                    "pref-" + Long.toHexString(System.nanoTime()), value);
+                        }
+                    } else if ("delete".equals(action)) {
+                        memory.delete("preferences", j.path("key").asText(""));
+                    }
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode out = MAPPER.createObjectNode();
+            ArrayNode prefs = out.putArray("preferences");
+            ArrayNode rem = out.putArray("reminders");
+            if (memory != null) {
+                memory.query("preferences").stream()
+                        .sorted(java.util.Comparator.comparing(e -> e.key()))
+                        .forEach(e -> {
+                            ObjectNode o = prefs.addObject();
+                            o.put("key", e.key());
+                            o.put("value", e.value());
+                        });
+                memory.query("reminders").stream()
+                        .sorted(java.util.Comparator.comparing(e -> e.key()))
+                        .forEach(e -> {
+                            ObjectNode o = rem.addObject();
+                            o.put("key", e.key());
+                            o.put("value", e.value());
+                        });
+            }
+            out.put("about", memory == null ? ""
+                    : memory.get("about", "me").map(m -> m.value()).orElse(""));
+            ObjectNode instr = out.putObject("instructions");
+            instr.put("mail", memory == null ? ""
+                    : memory.get("instructions", "mail").map(m -> m.value()).orElse(""));
+            instr.put("calendar", memory == null ? ""
+                    : memory.get("instructions", "calendar").map(m -> m.value()).orElse(""));
+            respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/config", exchange -> {
             if ("POST".equals(exchange.getRequestMethod())) {
                 try (InputStream body = exchange.getRequestBody()) {

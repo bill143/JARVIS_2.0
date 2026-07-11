@@ -37,6 +37,10 @@
   .tline .tinfo { flex:1; font-size:12px; }
   .tline .tinfo .tt { color:#dcecfb; }
   .tline .tinfo .tm { color:var(--dim); font-size:10.5px; font-variant-numeric:tabular-nums; }
+  .minput { background:#0c1a2c; border:1px solid var(--line); color:var(--text); border-radius:8px; padding:9px 11px; font-size:13px; width:100%; box-sizing:border-box; font-family:inherit; }
+  .memrow { display:flex; align-items:center; gap:10px; padding:7px 2px; border-bottom:1px solid rgba(120,160,200,.12); }
+  .memrow .memval { flex:1; color:#dcecfb; font-size:13px; }
+  .memrow .memdel { background:none; border:none; color:#ff8ba0; cursor:pointer; font-size:14px; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -428,7 +432,31 @@
 <div class="page cpage" id="cpage-memory">
   <div class="page-head"><h2>🧠  MEMORY</h2><span style="margin-left:auto;"></span>
     <button class="hbtn pgclose" type="button">CLOSE</button></div>
-  <div class="page-body" id="memoryBody"><div class="hint">Loading…</div></div>
+  <div class="page-body" id="memoryBody" style="max-width:820px;">
+    <div class="pcard">
+      <h4>Facts JARVIS remembers</h4>
+      <div id="memPrefs"><div class="hint">Loading…</div></div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <input type="text" id="memAdd" placeholder="Add something to remember…" class="minput" style="flex:1;">
+        <button class="hbtn" id="memAddBtn" type="button">Add</button>
+      </div>
+    </div>
+    <div class="pcard">
+      <h4>About Me</h4>
+      <textarea id="memAbout" class="minput" style="min-height:90px;" placeholder="Who you are, how you like to be addressed, what matters to you…"></textarea>
+    </div>
+    <div class="pcard">
+      <h4>Email &amp; Calendar directions</h4>
+      <div class="hint" style="margin-bottom:4px;">Email</div>
+      <textarea id="memMail" class="minput" style="min-height:56px;"></textarea>
+      <div class="hint" style="margin:8px 0 4px;">Calendar</div>
+      <textarea id="memCal" class="minput" style="min-height:56px;"></textarea>
+    </div>
+    <div class="pcard">
+      <h4>Reminders</h4>
+      <div id="memRem"><div class="hint">None.</div></div>
+    </div>
+  </div>
 </div>
 <div class="page cpage" id="cpage-conv">
   <div class="page-head"><h2>💬  CONVERSATIONS</h2><span style="margin-left:auto;"></span>
@@ -1183,6 +1211,36 @@
     });
   }
   setInterval(loadTimeline,4000); loadTimeline();
+
+  // ---- Memory page ----
+  async function loadMemory(){
+    let j; try{ j=await (await fetch('/memory')).json(); }catch(e){ return; }
+    const pv=$('memPrefs'); pv.innerHTML='';
+    if(!(j.preferences||[]).length){ pv.innerHTML='<div class="hint">Nothing yet — JARVIS learns as you talk, or add a fact below.</div>'; }
+    (j.preferences||[]).forEach(p=>{ const row=document.createElement('div'); row.className='memrow';
+      const s=document.createElement('span'); s.className='memval'; s.textContent=p.value;
+      const del=document.createElement('button'); del.className='memdel'; del.textContent='✕'; del.title='Forget this';
+      del.addEventListener('click',async()=>{ await fetch('/memory',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'delete',key:p.key})}); loadMemory(); });
+      row.appendChild(s); row.appendChild(del); pv.appendChild(row);
+    });
+    const rv=$('memRem'); rv.innerHTML='';
+    if(!(j.reminders||[]).length){ rv.innerHTML='<div class="hint">None.</div>'; }
+    (j.reminders||[]).forEach(r=>{ const d=document.createElement('div'); d.className='memrow';
+      const s=document.createElement('span'); s.className='memval'; s.textContent=r.value; d.appendChild(s); rv.appendChild(d); });
+    $('memAbout').value=j.about||'';
+    $('memMail').value=(j.instructions||{}).mail||'';
+    $('memCal').value=(j.instructions||{}).calendar||'';
+  }
+  $('memAddBtn').addEventListener('click',async()=>{
+    const v=$('memAdd').value.trim(); if(!v) return;
+    await fetch('/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',value:v})});
+    $('memAdd').value=''; loadMemory();
+  });
+  $('memAbout').addEventListener('change',e=>{ fetch('/aboutme',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:e.target.value})}).catch(()=>{}); });
+  $('memMail').addEventListener('change',e=>{ fetch('/instructions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({area:'mail',text:e.target.value})}).catch(()=>{}); });
+  $('memCal').addEventListener('change',e=>{ fetch('/instructions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({area:'calendar',text:e.target.value})}).catch(()=>{}); });
+  pageLoaders.memory=loadMemory;
 
   // ---- Update check (notify-only; startup check runs server-side, this just surfaces it) ----
   async function checkUpdate(){
