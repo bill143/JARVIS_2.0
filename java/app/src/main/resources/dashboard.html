@@ -49,6 +49,10 @@
   .convlog .cmsg.user { align-self:flex-end; background:rgba(65,217,255,.14); color:#eaf7ff; }
   .convlog .cmsg.bot { align-self:flex-start; background:rgba(120,160,200,.08); }
   .convlog .cmsg.think { color:var(--dim); font-style:italic; }
+  .htag { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11px; font-weight:600; letter-spacing:.5px; }
+  .htag.OPERATIONAL { color:#7fe3b0; background:rgba(60,200,140,.12); }
+  .htag.DEGRADED { color:#ffd479; background:rgba(220,180,60,.14); }
+  .htag.CIRCUIT_OPEN { color:#ff8ba0; background:rgba(230,80,110,.15); }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -488,7 +492,17 @@
 <div class="page cpage" id="cpage-tools">
   <div class="page-head"><h2>🧩  TOOLS &amp; SKILLS</h2><span style="margin-left:auto;"></span>
     <button class="hbtn pgclose" type="button">CLOSE</button></div>
-  <div class="page-body" id="toolsBody"><div class="hint">Loading…</div></div>
+  <div class="page-body" id="toolsBody" style="max-width:1000px;">
+    <div class="hint" style="margin-bottom:6px;">Every tool JARVIS can use, its risk tier (drives permission prompts), and live health.</div>
+    <div class="hint" id="toolsCount" style="margin-bottom:10px;"></div>
+    <div style="overflow-x:auto;">
+      <table class="audit" id="toolsTable">
+        <thead><tr><th>Tool</th><th>What it does</th><th>Risk</th><th>Health</th>
+          <th style="text-align:right;">Calls</th><th style="text-align:right;">Fails</th></tr></thead>
+        <tbody id="toolsRows"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 <div class="page cpage" id="cpage-sysmon">
   <div class="page-head"><h2>📈  SYSTEM MONITOR</h2><span style="margin-left:auto;"></span>
@@ -1285,6 +1299,30 @@
     }catch(err){ thinking.remove(); convAppend('Something went wrong. Please try again.','bot'); }
   });
   pageLoaders.conv=()=>$('convBox').focus();
+
+  // ---- Tools & Skills page (registry health + manifests) ----
+  async function loadTools(){
+    let rows=[]; try{ rows=await (await fetch('/tools')).json(); }catch(e){ return; }
+    $('toolsCount').textContent=rows.length+' tools registered';
+    const tb=$('toolsRows'); tb.innerHTML='';
+    rows.forEach(t=>{ const tr=document.createElement('tr');
+      const risk=(t.riskTier||'UNKNOWN'), health=(t.health||'OPERATIONAL');
+      const cells=[
+        ['t', t.name||''],
+        ['detail', t.description||''],
+        ['h','<span class="rtag '+risk+'">'+risk.replace('_',' ')+'</span>'],
+        ['h','<span class="htag '+health+'">'+health.replace('_',' ')+'</span>'],
+        ['num', String(t.totalCalls||0)],
+        ['num', String(t.failures||0)]
+      ];
+      cells.forEach(([cls,val])=>{ const td=document.createElement('td');
+        if(cls==='num') td.className='num'; if(cls==='detail') td.className='detail';
+        if(cls==='h') td.innerHTML=val; else td.textContent=val;
+        tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+  }
+  pageLoaders.tools=loadTools;
 
   // ---- Update check (notify-only; startup check runs server-side, this just surfaces it) ----
   async function checkUpdate(){
