@@ -462,6 +462,23 @@ public final class WebServer {
             respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        server.createContext("/onboarding/complete", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod()) && memory != null) {
+                memory.put("app", "onboarded", "true");
+            }
+            ObjectNode out = MAPPER.createObjectNode();
+            out.put("completed", true);
+            respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/onboarding", exchange -> {
+            boolean completed = memory != null
+                    && memory.get("app", "onboarded").map(m -> "true".equals(m.value())).orElse(false);
+            ObjectNode out = MAPPER.createObjectNode();
+            out.put("completed", completed);
+            respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/config", exchange -> {
             if ("POST".equals(exchange.getRequestMethod())) {
                 try (InputStream body = exchange.getRequestBody()) {

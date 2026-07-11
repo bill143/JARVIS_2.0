@@ -243,6 +243,31 @@ class WebServerTest {
     }
 
     @Test
+    void onboardingCompletionFlagRoundTripsThroughMemory() throws Exception {
+        com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                true, "m", 0, new HardwareMonitor(), null, true, null, memory);
+        try {
+            String base = "http://localhost:" + wired.port();
+            assertTrue(client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/onboarding")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body().contains("\"completed\":false"));
+
+            client.send(HttpRequest.newBuilder(URI.create(base + "/onboarding/complete"))
+                            .POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertTrue(client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/onboarding")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body().contains("\"completed\":true"));
+            assertEquals("true", memory.get("app", "onboarded").orElseThrow().value());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void usageEndpointReportsMeteredCallsSummaryAndEvents() throws Exception {
         com.jarvis.metering.UsageMeter meter = new com.jarvis.metering.UsageMeter(
                 new com.jarvis.memory.InMemoryRecordStore(), com.jarvis.metering.PriceTable.defaults());

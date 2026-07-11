@@ -215,6 +215,10 @@
   .permbody b { color:var(--cyan); }
   .permtier { margin-top:12px; font-size:12px; color:var(--dim); }
   .permbtns { display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
+  .obdots { display:flex; gap:6px; margin-bottom:16px; }
+  .obdots span { width:26px; height:3px; border-radius:2px; background:var(--line); transition:background .2s; }
+  .obdots span.on { background:var(--cyan); }
+  .obok { color:#7fe3b0; font-size:12px; margin-left:8px; }
   .afeed { display:flex; flex-direction:column; gap:2px; overflow-y:auto; max-height:260px; }
   .afeed .aline { display:flex; gap:9px; align-items:baseline; padding:4px 6px; border-left:2px solid transparent; border-radius:0 6px 6px 0; }
   .afeed .aline:hover { background:rgba(80,140,200,.06); }
@@ -425,6 +429,7 @@
     <h4>🧠 Session</h4>
     <div class="row"><label>Model</label><span id="s_model" class="hint"></span></div>
     <div class="row"><label>Conversation</label><button id="s_clearChat" type="button">Clear</button></div>
+    <div class="row"><label>Run first-time setup again</label><button id="s_setup" type="button">Setup</button></div>
     <div class="row"><label>Reset all settings to defaults</label><button id="s_reset" class="danger" type="button">Reset</button></div>
   </div>
 </aside>
@@ -532,6 +537,43 @@
     <div class="permbtns">
       <button class="hbtn alert" id="permDeny" type="button">Deny</button>
       <button class="hbtn" id="permAllow" type="button">Allow</button>
+    </div>
+  </div>
+</div>
+
+<div class="permwrap" id="onboard" hidden>
+  <div class="permbox" style="width:min(560px,94vw);">
+    <div class="obdots" id="obDots"></div>
+    <div class="obstep" data-step="0">
+      <div class="permhead">👋  WELCOME</div>
+      <div class="permbody">Welcome to JARVIS, sir. A quick setup gets voice, email &amp; calendar, and your license ready — under a minute.</div>
+    </div>
+    <div class="obstep" data-step="1" hidden>
+      <div class="permhead">🎤  VOICE</div>
+      <div class="permbody">Enable your microphone so JARVIS can listen for its wake word. You can always change this later in your browser.</div>
+      <div style="margin-top:14px;"><button class="hbtn" id="obMic" type="button">Enable microphone</button> <span id="obMicOk" class="obok"></span></div>
+    </div>
+    <div class="obstep" data-step="2" hidden>
+      <div class="permhead">✉  EMAIL &amp; CALENDAR</div>
+      <div class="permbody" id="obGoogleMsg">Checking Google connection…</div>
+    </div>
+    <div class="obstep" data-step="3" hidden>
+      <div class="permhead">🔑  LICENSE</div>
+      <div class="permbody" id="obLicMsg">Checking license…</div>
+      <div id="obLicForm" hidden style="margin-top:12px;">
+        <input type="text" id="obLicKey" placeholder="Paste your license key…"
+               style="width:100%;background:#0c1a2c;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 11px;font-size:13px;box-sizing:border-box;">
+        <div style="margin-top:8px;"><button class="hbtn" id="obLicActivate" type="button">Activate</button> <span id="obLicOk" class="obok"></span></div>
+      </div>
+    </div>
+    <div class="obstep" data-step="4" hidden>
+      <div class="permhead">✓  ALL SET</div>
+      <div class="permbody">You're ready, sir. Press 🎤 VOICE and say your wake word, or just type a command below.</div>
+    </div>
+    <div class="permbtns" style="justify-content:space-between;">
+      <button class="hbtn" id="obSkip" type="button">Skip setup</button>
+      <span><button class="hbtn" id="obBack" type="button" style="display:none;">Back</button>
+      <button class="hbtn" id="obNext" type="button">Next</button></span>
     </div>
   </div>
 </div>
@@ -1067,8 +1109,9 @@
   async function refreshLicense(){
     try{
       const j=await (await fetch('/license')).json();
-      if(j.locked){ $('licenseMsg').textContent=j.message||'Enter your license key to activate JARVIS.'; $('licenseLock').hidden=false; }
-      else { $('licenseLock').hidden=true; }
+      // Don't stack the lock over the setup wizard; the wizard has its own license step.
+      if(j.locked && $('onboard').hidden){ $('licenseMsg').textContent=j.message||'Enter your license key to activate JARVIS.'; $('licenseLock').hidden=false; }
+      else if(!j.locked){ $('licenseLock').hidden=true; }
     }catch(e){}
   }
   $('licenseActivate').addEventListener('click',async()=>{
@@ -1107,6 +1150,62 @@
     }
   }
   setInterval(loadUsage,8000); loadUsage();
+
+  // ---- First-run onboarding wizard ----
+  const OB_STEPS=5;
+  let obStep=0;
+  function obRender(){
+    document.querySelectorAll('#onboard .obstep').forEach(el=>{ el.hidden = (+el.dataset.step !== obStep); });
+    const dots=$('obDots'); dots.innerHTML='';
+    for(let i=0;i<OB_STEPS;i++){ const s=document.createElement('span'); if(i<=obStep) s.className='on'; dots.appendChild(s); }
+    $('obBack').style.display = obStep>0 ? '' : 'none';
+    $('obNext').textContent = obStep===OB_STEPS-1 ? 'Finish' : 'Next';
+    if(obStep===2) obLoadGoogle();
+    if(obStep===3) obLoadLicense();
+  }
+  function obShow(){ obStep=0; obRender(); $('onboard').hidden=false; }
+  async function obFinish(){
+    try{ await fetch('/onboarding/complete',{method:'POST'}); }catch(e){}
+    $('onboard').hidden=true; refreshLicense();
+  }
+  $('obNext').addEventListener('click',()=>{ if(obStep<OB_STEPS-1){ obStep++; obRender(); } else { obFinish(); } });
+  $('obBack').addEventListener('click',()=>{ if(obStep>0){ obStep--; obRender(); } });
+  $('obSkip').addEventListener('click',obFinish);
+  $('s_setup').addEventListener('click',()=>{ closeSettings(); obShow(); });
+  $('obMic').addEventListener('click',async()=>{
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      stream.getTracks().forEach(t=>t.stop());
+      $('obMicOk').textContent='✓ Enabled'; $('obMic').disabled=true;
+    }catch(e){ $('obMicOk').style.color='#ffd479'; $('obMicOk').textContent='Denied — you can enable it later in the browser.'; }
+  });
+  async function obLoadGoogle(){
+    try{
+      const j=await (await fetch('/status')).json();
+      $('obGoogleMsg').innerHTML = j.google
+        ? 'Gmail &amp; Calendar are connected. <span class="obok">✓</span>'
+        : 'Not connected yet. To enable email &amp; calendar, close JARVIS and run it once with <b>--connect-google</b>. You can do this anytime — skip for now if you like.';
+    }catch(e){}
+  }
+  async function obLoadLicense(){
+    try{
+      const j=await (await fetch('/license')).json();
+      if(!j.locked){
+        $('obLicMsg').innerHTML=(j.state==='DEV'?'No activation needed for this build.':'Your license is active.')+' <span class="obok">✓</span>';
+        $('obLicForm').hidden=true;
+      } else { $('obLicMsg').textContent=j.message||'Enter your license key to activate.'; $('obLicForm').hidden=false; }
+    }catch(e){}
+  }
+  $('obLicActivate').addEventListener('click',async()=>{
+    const key=$('obLicKey').value.trim(); if(!key) return;
+    try{
+      const j=await (await fetch('/license/activate',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({key})})).json();
+      if(!j.locked){ $('obLicOk').style.color='#7fe3b0'; $('obLicOk').textContent='✓ Activated'; $('obLicForm').hidden=true; }
+      else { $('obLicOk').style.color='#ff8ba0'; $('obLicOk').textContent=j.message||'Not accepted.'; }
+    }catch(e){}
+  });
+  fetch('/onboarding').then(r=>r.json()).then(j=>{ if(!j.completed) obShow(); }).catch(()=>{});
   ['au_action','au_risk','au_outcome','au_since'].forEach(id=>{
     const el=$(id); const ev = el.tagName==='SELECT'||el.type==='date' ? 'change' : 'input';
     el.addEventListener(ev,loadAudit); });
