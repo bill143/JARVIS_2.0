@@ -50,6 +50,11 @@
     </dependency>
     <dependency>
       <groupId>com.jarvis</groupId>
+      <artifactId>usage-metering</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.jarvis</groupId>
       <artifactId>ui</artifactId>
       <version>${project.version}</version>
     </dependency>

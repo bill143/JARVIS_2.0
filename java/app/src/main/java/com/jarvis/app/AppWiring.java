@@ -22,6 +22,8 @@ import com.jarvis.security.PermissionPolicy;
 import com.jarvis.licensing.EncryptedLicenseStore;
 import com.jarvis.licensing.LicenseManager;
 import com.jarvis.licensing.LicenseVerifier;
+import com.jarvis.metering.PriceTable;
+import com.jarvis.metering.UsageMeter;
 import com.jarvis.updater.HttpManifestSource;
 import com.jarvis.updater.ManifestSource;
 import com.jarvis.updater.ManifestVerifier;
@@ -72,19 +74,19 @@ final class AppWiring {
             MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer,
             AuditLog auditLog, PluginRegistry pluginRegistry,
             PermissionBroker permissions, PermissionPolicy permissionPolicy,
-            UpdateChecker updates, LicenseManager license) {
+            UpdateChecker updates, LicenseManager license, UsageMeter usage) {
 
-        /** The cross-cutting services the web layer exposes (governance, updates, licensing). */
+        /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(
-                    auditLog, pluginRegistry, permissions, permissionPolicy, updates, license);
+                    auditLog, pluginRegistry, permissions, permissionPolicy, updates, license, usage);
         }
     }
 
-    /** Services the web server exposes: audit, tools, permission gate, update status, licensing. */
+    /** Services the web server exposes: audit, tools, permissions, updates, licensing, usage. */
     record Governance(AuditLog auditLog, PluginRegistry plugins,
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
-            LicenseManager license) {
+            LicenseManager license, UsageMeter usage) {
     }
 
     private AppWiring() {
@@ -130,10 +132,19 @@ final class AppWiring {
         ToolRegistry governedTools = governedRegistry(
                 tools, pluginRegistry, auditLog, permissionPolicy, permissions);
 
+        // Usage metering: every Claude call's token usage is recorded (durable, provider-agnostic).
+        UsageMeter usageMeter = new UsageMeter(new FileRecordStore(
+                Path.of(System.getProperty("user.home"), ".jarvis", "usage")), PriceTable.defaults());
+
         AgentPolicy policy = online
                 ? AnthropicPolicy.withApiKey(apiKey, model, governedTools)
                         .withMemoryContext(() -> recall(memory, people))
                         .withHistory(() -> conversationHistory(memory, "dashboard", 24))
+                        .withUsageSink((usedModel, in, out) -> {
+                            if (in > 0 || out > 0) {
+                                usageMeter.record("anthropic", usedModel, in, out);
+                            }
+                        })
                 : context -> new Decision.Respond(OFFLINE_HINT + context.input());
 
         JarvisApi api = assemble(policy, governedTools, memory);
@@ -151,7 +162,7 @@ final class AppWiring {
 
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license);
+                updates, license, usageMeter);
     }
 
     /**

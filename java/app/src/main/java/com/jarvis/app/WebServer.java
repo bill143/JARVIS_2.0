@@ -89,6 +89,8 @@ public final class WebServer {
                 governance == null ? null : governance.updates();
         com.jarvis.licensing.LicenseManager license =
                 governance == null ? null : governance.license();
+        com.jarvis.metering.UsageMeter usage =
+                governance == null ? null : governance.usage();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -113,6 +115,37 @@ public final class WebServer {
             t.put("ramTotalGb", Math.round(s.ramTotalGb() * 10) / 10.0);
             t.put("cores", s.cores());
             respond(exchange, 200, "application/json", t.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/usage", exchange -> {
+            ObjectNode o = MAPPER.createObjectNode();
+            ObjectNode summary = o.putObject("summary");
+            ArrayNode events = o.putArray("events");
+            if (usage != null) {
+                com.jarvis.metering.UsageSummary s = usage.summary();
+                summary.put("calls", s.calls());
+                summary.put("inputTokens", s.inputTokens());
+                summary.put("outputTokens", s.outputTokens());
+                summary.put("totalTokens", s.totalTokens());
+                summary.put("costUsd", s.costUsd());
+                int limit = parseInt(param(exchange, "limit", "100"), 100);
+                for (com.jarvis.metering.UsageEvent e : usage.recent(limit)) {
+                    ObjectNode ev = events.addObject();
+                    ev.put("at", e.at().toString());
+                    ev.put("provider", e.provider());
+                    ev.put("model", e.model());
+                    ev.put("inputTokens", e.inputTokens());
+                    ev.put("outputTokens", e.outputTokens());
+                    ev.put("costUsd", e.costUsd());
+                }
+            } else {
+                summary.put("calls", 0);
+                summary.put("inputTokens", 0);
+                summary.put("outputTokens", 0);
+                summary.put("totalTokens", 0);
+                summary.put("costUsd", 0);
+            }
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/license", exchange -> {

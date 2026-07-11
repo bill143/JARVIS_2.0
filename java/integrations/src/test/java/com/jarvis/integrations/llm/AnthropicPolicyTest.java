@@ -216,6 +216,22 @@ class AnthropicPolicyTest {
     }
 
     @Test
+    void usageSinkReceivesTokenCountsFromTheResponse() {
+        String withUsage = """
+                {"content":[{"type":"text","text":"hi"}],
+                 "usage":{"input_tokens":123,"output_tokens":45}}""";
+        long[] seen = new long[2];
+        String[] modelSeen = new String[1];
+        AnthropicPolicy policy = new AnthropicPolicy(request -> withUsage, "test-model", 100)
+                .withUsageSink((model, in, out) -> { modelSeen[0] = model; seen[0] = in; seen[1] = out; });
+
+        policy.decide(AgentContext.initial("hi"));
+        assertEquals("test-model", modelSeen[0]);
+        assertEquals(123, seen[0]);
+        assertEquals(45, seen[1]);
+    }
+
+    @Test
     void constructorValidation() {
         AnthropicPolicy.LlmTransport transport = request -> OK_RESPONSE;
         assertThrows(NullPointerException.class, () -> new AnthropicPolicy(null, "m", 10));

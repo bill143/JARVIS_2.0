@@ -199,7 +199,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, broker, policy, null, null));
+                new AppWiring.Governance(null, null, broker, policy, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             // A tool thread asks for approval; it will block until we answer via the endpoint.
@@ -243,6 +243,31 @@ class WebServerTest {
     }
 
     @Test
+    void usageEndpointReportsMeteredCallsSummaryAndEvents() throws Exception {
+        com.jarvis.metering.UsageMeter meter = new com.jarvis.metering.UsageMeter(
+                new com.jarvis.memory.InMemoryRecordStore(), com.jarvis.metering.PriceTable.defaults());
+        meter.record("anthropic", "claude-sonnet-5", 1000, 500);
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, meter));
+        try {
+            String body = client.send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/usage"))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body();
+            assertTrue(body.contains("\"calls\":1"));
+            assertTrue(body.contains("\"inputTokens\":1000"));
+            assertTrue(body.contains("\"costUsd\":"));
+            assertTrue(body.contains("claude-sonnet-5"));   // event surfaced
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void licenseEndpointsActivateVerifyAndReportStatus() throws Exception {
         java.security.KeyPair kp = java.security.KeyPairGenerator.getInstance("RSA").genKeyPair();
         com.jarvis.licensing.EncryptedLicenseStore store =
@@ -258,7 +283,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, mgr));
+                new AppWiring.Governance(null, null, null, null, null, mgr, null));
         try {
             String base = "http://localhost:" + wired.port();
             HttpResponse<String> before = client.send(
@@ -310,7 +335,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, checker, null));
+                new AppWiring.Governance(null, null, null, null, checker, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/update"))
@@ -354,7 +379,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, plugins, null, null, null, null));
+                new AppWiring.Governance(null, plugins, null, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/tools"))
@@ -385,7 +410,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/audit"))
@@ -416,7 +441,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port() + "/audit";
             HttpResponse<String> all = client.send(

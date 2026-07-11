@@ -60,6 +60,13 @@ public final class AnthropicPolicy implements AgentPolicy {
     private volatile java.util.function.Supplier<String> memoryContext = () -> "";
     private volatile java.util.function.Supplier<java.util.List<ChatMessage>> history =
             java.util.List::of;
+    private volatile UsageSink usageSink = (model, in, out) -> { };
+
+    /** Observes the token usage of each completion, so it can be metered. */
+    @FunctionalInterface
+    public interface UsageSink {
+        void record(String model, long inputTokens, long outputTokens);
+    }
 
     /** Creates a policy with no tool access, talking to Claude over {@code transport}. */
     public AnthropicPolicy(LlmTransport transport, String model, int maxTokens) {
@@ -147,6 +154,12 @@ public final class AnthropicPolicy implements AgentPolicy {
         return this;
     }
 
+    /** Installs a sink that observes each completion's token usage (for metering). Returns this. */
+    public AnthropicPolicy withUsageSink(UsageSink usageSink) {
+        this.usageSink = Objects.requireNonNull(usageSink, "usageSink");
+        return this;
+    }
+
     /** Real Messages API transport for {@code apiKey}; reusable by other API callers (vision). */
     public static LlmTransport anthropicTransport(String apiKey) {
         Objects.requireNonNull(apiKey, "apiKey");
@@ -176,7 +189,9 @@ public final class AnthropicPolicy implements AgentPolicy {
     public Decision decide(AgentContext context) {
         String text;
         try {
-            text = provider.complete(buildLlmRequest(context)).text().strip();
+            LlmProvider.Result result = provider.complete(buildLlmRequest(context));
+            usageSink.record(model, result.inputTokens(), result.outputTokens());
+            text = result.text().strip();
         } catch (IOException | RuntimeException e) {
             return new Decision.Respond("Sorry — I couldn't reach my language model ("
                     + e.getMessage() + "). Please try again.");

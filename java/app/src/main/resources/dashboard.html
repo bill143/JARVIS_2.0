@@ -227,6 +227,11 @@
   .afeed .aline.fail { border-left-color:#ff8ba0; }
   .afeed .aline.fail .aact { color:#ff8ba0; }
   .actcount { font-size:11px; color:#ff8ba0; font-weight:600; margin-left:6px; }
+  .ustats { display:flex; gap:14px; flex-wrap:wrap; }
+  .ustat { flex:1; min-width:150px; border:1px solid var(--line); border-radius:10px; padding:14px 16px; background:rgba(80,140,200,.05); }
+  .ustat .ulbl { color:var(--dim); font-size:11px; letter-spacing:1px; text-transform:uppercase; }
+  .ustat .uval { color:#eaf7ff; font-size:24px; font-weight:600; margin-top:6px; font-variant-numeric:tabular-nums; }
+  table.audit td.num { text-align:right; font-variant-numeric:tabular-nums; }
 
   /* Workspace overlay (MAIL / CALENDAR) */
   .wsp { position:fixed; z-index:22; top:50%; left:50%;
@@ -285,6 +290,14 @@
         <div class="kv"><span>MODEL</span><b id="modelKv">—</b></div>
         <div class="kv"><span>CONNECTION</span><b id="connKv">—</b></div>
         <div class="kv"><span>UPTIME</span><b id="uptime">00:00:00</b></div>
+      </div>
+      <div class="card">
+        <h3>Usage
+          <button class="hbtn" id="usageMore" type="button" title="Token & cost history"
+                  style="float:right;font-size:10px;padding:2px 8px;">HISTORY ▸</button></h3>
+        <div class="kv"><span>EST. COST</span><b id="uCost">$0.00</b></div>
+        <div class="kv"><span>TOKENS</span><b id="uTokens">0</b></div>
+        <div class="kv"><span>CALLS</span><b id="uCalls">0</b></div>
       </div>
       <div class="card">
         <h3>Subsystems</h3>
@@ -482,6 +495,30 @@
       <table class="audit" id="auditTable">
         <thead><tr><th>Time</th><th>Tool / Action</th><th>Risk</th><th>Trigger</th><th>Outcome</th><th>Detail</th></tr></thead>
         <tbody id="auditRows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="page" id="usagePage">
+  <div class="page-head">
+    <h2>📊  USAGE &amp; COST</h2>
+    <span style="margin-left:auto;"></span>
+    <button class="hbtn" id="usageRefresh" type="button">↻ Refresh</button>
+    <button class="hbtn" id="usageClose" type="button">CLOSE</button>
+  </div>
+  <div class="page-body" style="max-width:1000px;">
+    <div class="hint" style="margin-bottom:10px;">Token usage and estimated cost per Claude call. Costs are a local estimate from an editable price table — not a billing figure.</div>
+    <div class="ustats">
+      <div class="ustat"><div class="ulbl">Estimated cost</div><div class="uval" id="uCost2">$0.00</div></div>
+      <div class="ustat"><div class="ulbl">Total tokens</div><div class="uval" id="uTokens2">0</div></div>
+      <div class="ustat"><div class="ulbl">Calls</div><div class="uval" id="uCalls2">0</div></div>
+    </div>
+    <div id="usageCount" class="hint" style="margin:12px 0 8px;"></div>
+    <div style="overflow-x:auto;">
+      <table class="audit" id="usageTable">
+        <thead><tr><th>Time</th><th>Model</th><th style="text-align:right;">Input</th><th style="text-align:right;">Output</th><th style="text-align:right;">Cost</th></tr></thead>
+        <tbody id="usageRows"></tbody>
       </table>
     </div>
   </div>
@@ -1045,6 +1082,31 @@
     }catch(e){ $('licenseErr').textContent='Activation failed. Please try again.'; }
   });
   refreshLicense();
+
+  // ---- Usage & cost (metered from the audit of every Claude call) ----
+  const usagePage=$('usagePage');
+  function openUsage(){ usagePage.classList.add('open'); loadUsage(); }
+  function closeUsage(){ usagePage.classList.remove('open'); }
+  $('usageMore').addEventListener('click',openUsage);
+  $('usageClose').addEventListener('click',closeUsage);
+  $('usageRefresh').addEventListener('click',loadUsage);
+  function fmtTokens(n){ return (n||0).toLocaleString(); }
+  function fmtCost(c){ c=c||0; return '$'+(c>=1?c.toFixed(2):c.toFixed(4)); }
+  async function loadUsage(){
+    let j; try{ j=await (await fetch('/usage?limit=200')).json(); }catch(e){ return; }
+    const s=j.summary||{};
+    $('uCost').textContent=fmtCost(s.costUsd); $('uTokens').textContent=fmtTokens(s.totalTokens); $('uCalls').textContent=s.calls||0;
+    if(usagePage.classList.contains('open')){
+      $('uCost2').textContent=fmtCost(s.costUsd); $('uTokens2').textContent=fmtTokens(s.totalTokens); $('uCalls2').textContent=s.calls||0;
+      const rows=j.events||[]; const tb=$('usageRows'); tb.innerHTML='';
+      $('usageCount').textContent = rows.length ? (rows.length+' recent call'+(rows.length>1?'s':'')) : 'No usage recorded yet.';
+      rows.forEach(e=>{ const tr=document.createElement('tr');
+        const cells=[['',fmtTime(e.at)],['',e.model||''],['num',fmtTokens(e.inputTokens)],['num',fmtTokens(e.outputTokens)],['num',fmtCost(e.costUsd)]];
+        cells.forEach(([cls,val])=>{ const td=document.createElement('td'); if(cls) td.className=cls; td.textContent=val; tr.appendChild(td); });
+        tb.appendChild(tr); });
+    }
+  }
+  setInterval(loadUsage,8000); loadUsage();
   ['au_action','au_risk','au_outcome','au_since'].forEach(id=>{
     const el=$(id); const ev = el.tagName==='SELECT'||el.type==='date' ? 'change' : 'input';
     el.addEventListener(ev,loadAudit); });
