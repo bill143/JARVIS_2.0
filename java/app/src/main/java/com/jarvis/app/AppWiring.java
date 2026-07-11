@@ -78,12 +78,12 @@ final class AppWiring {
             PermissionBroker permissions, PermissionPolicy permissionPolicy,
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
-            AutonomousService autonomous) {
+            AutonomousService autonomous, SemanticMemoryService semantic) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
-                    updates, license, usage, tasks, workflows, knowledge, agents, autonomous);
+                    updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic);
         }
     }
 
@@ -91,7 +91,8 @@ final class AppWiring {
     record Governance(AuditLog auditLog, PluginRegistry plugins,
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
-            KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous) {
+            KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
+            SemanticMemoryService semantic) {
     }
 
     private AppWiring() {
@@ -175,10 +176,15 @@ final class AppWiring {
                 Path.of(System.getProperty("user.home"), ".jarvis", "knowledge")));
         MultiAgentService agents = new MultiAgentService(api, auditLog);
         AutonomousService autonomous = new AutonomousService(api, auditLog);
+        // Semantic memory: cloud embeddings dormant by default (decision D3) — keyword fallback until
+        // JARVIS_EMBEDDINGS_KEY is set, at which point recall becomes meaning-based.
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "semantic")),
+                HttpEmbeddingProvider.fromEnvironment(), auditLog);
 
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license, usageMeter, tasks, workflows, knowledge, agents, autonomous);
+                updates, license, usageMeter, tasks, workflows, knowledge, agents, autonomous, semantic);
     }
 
     /**

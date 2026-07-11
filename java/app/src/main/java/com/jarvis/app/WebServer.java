@@ -97,6 +97,7 @@ public final class WebServer {
         com.jarvis.kb.KnowledgeBase knowledge = governance == null ? null : governance.knowledge();
         MultiAgentService agents = governance == null ? null : governance.agents();
         AutonomousService autonomous = governance == null ? null : governance.autonomous();
+        SemanticMemoryService semantic = governance == null ? null : governance.semantic();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -589,6 +590,54 @@ public final class WebServer {
                 }
             }
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/semantic/search", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            root.put("mode", semantic != null && semantic.semantic() ? "semantic" : "keyword");
+            ArrayNode arr = root.putArray("results");
+            if (semantic != null) {
+                int k = parseInt(param(exchange, "k", "5"), 5);
+                for (com.jarvis.rag.ScoredDocument s : semantic.recall(param(exchange, "q", ""), k)) {
+                    ObjectNode o = arr.addObject();
+                    o.put("id", s.document().id());
+                    o.put("title", SemanticMemoryService.titleOf(s.document()));
+                    o.put("score", s.score());
+                    String c = s.document().content();
+                    o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
+                }
+            }
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/semantic", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod()) && semantic != null) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    if ("add".equals(j.path("action").asText(""))
+                            && (!j.path("content").asText("").isBlank()
+                                    || !j.path("title").asText("").isBlank())) {
+                        semantic.remember(j.path("title").asText(""), j.path("content").asText(""),
+                                System.currentTimeMillis());
+                    }
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode root = MAPPER.createObjectNode();
+            root.put("mode", semantic != null && semantic.semantic() ? "semantic" : "keyword");
+            ArrayNode arr = root.putArray("items");
+            if (semantic != null) {
+                for (com.jarvis.rag.Document d : semantic.all()) {
+                    ObjectNode o = arr.addObject();
+                    o.put("id", d.id());
+                    o.put("title", SemanticMemoryService.titleOf(d));
+                    String c = d.content();
+                    o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
+                }
+            }
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/workflows/runs", exchange -> {
