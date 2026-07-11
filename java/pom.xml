@@ -20,6 +20,7 @@
     <module>audit-log</module>
     <module>security</module>
     <module>updater</module>
+    <module>licensing</module>
     <module>api</module>
     <module>ui</module>
     <module>app</module>

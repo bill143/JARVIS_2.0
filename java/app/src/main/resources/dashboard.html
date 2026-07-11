@@ -499,6 +499,17 @@
   </div>
 </div>
 
+<div class="permwrap" id="licenseLock" hidden>
+  <div class="permbox" style="width:min(520px,92vw);">
+    <div class="permhead">🔒  ACTIVATION REQUIRED</div>
+    <div class="permbody" id="licenseMsg">Enter your license key to activate JARVIS.</div>
+    <input type="text" id="licenseKey" placeholder="Paste your license key…"
+           style="width:100%;margin-top:14px;background:#0c1a2c;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 11px;font-size:13px;box-sizing:border-box;">
+    <div id="licenseErr" class="hint" style="color:#ff8ba0;margin-top:6px;min-height:14px;"></div>
+    <div class="permbtns"><button class="hbtn" id="licenseActivate" type="button">Activate</button></div>
+  </div>
+</div>
+
 <div class="scrim" id="scrim2"></div>
 <div class="wsp" id="wsp">
   <div class="wsp-head">
@@ -1014,6 +1025,26 @@
   checkUpdate();
   setTimeout(checkUpdate,5000);   // catch the async startup check finishing
   setInterval(checkUpdate,60000);
+
+  // ---- Licensing (graceful locked state; dormant in DEV builds) ----
+  async function refreshLicense(){
+    try{
+      const j=await (await fetch('/license')).json();
+      if(j.locked){ $('licenseMsg').textContent=j.message||'Enter your license key to activate JARVIS.'; $('licenseLock').hidden=false; }
+      else { $('licenseLock').hidden=true; }
+    }catch(e){}
+  }
+  $('licenseActivate').addEventListener('click',async()=>{
+    const key=$('licenseKey').value.trim(); if(!key) return;
+    $('licenseErr').textContent='';
+    try{
+      const j=await (await fetch('/license/activate',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({key})})).json();
+      if(j.locked){ $('licenseErr').textContent=j.message||'That key was not accepted.'; }
+      else { $('licenseLock').hidden=true; }
+    }catch(e){ $('licenseErr').textContent='Activation failed. Please try again.'; }
+  });
+  refreshLicense();
   ['au_action','au_risk','au_outcome','au_since'].forEach(id=>{
     const el=$(id); const ev = el.tagName==='SELECT'||el.type==='date' ? 'change' : 'input';
     el.addEventListener(ev,loadAudit); });

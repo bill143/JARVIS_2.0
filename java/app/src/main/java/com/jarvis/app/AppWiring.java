@@ -19,6 +19,9 @@ import com.jarvis.security.AuthorizingTool;
 import com.jarvis.security.PermissionBroker;
 import com.jarvis.security.PermissionLevel;
 import com.jarvis.security.PermissionPolicy;
+import com.jarvis.licensing.EncryptedLicenseStore;
+import com.jarvis.licensing.LicenseManager;
+import com.jarvis.licensing.LicenseVerifier;
 import com.jarvis.updater.HttpManifestSource;
 import com.jarvis.updater.ManifestSource;
 import com.jarvis.updater.ManifestVerifier;
@@ -69,17 +72,19 @@ final class AppWiring {
             MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer,
             AuditLog auditLog, PluginRegistry pluginRegistry,
             PermissionBroker permissions, PermissionPolicy permissionPolicy,
-            UpdateChecker updates) {
+            UpdateChecker updates, LicenseManager license) {
 
-        /** The cross-cutting services the web layer exposes (governance + update status). */
+        /** The cross-cutting services the web layer exposes (governance, updates, licensing). */
         Governance governance() {
-            return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy, updates);
+            return new Governance(
+                    auditLog, pluginRegistry, permissions, permissionPolicy, updates, license);
         }
     }
 
-    /** Services the web server exposes: audit log, tool registry, permission gate, update status. */
+    /** Services the web server exposes: audit, tools, permission gate, update status, licensing. */
     record Governance(AuditLog auditLog, PluginRegistry plugins,
-            PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates) {
+            PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
+            LicenseManager license) {
     }
 
     private AppWiring() {
@@ -142,9 +147,32 @@ final class AppWiring {
         updateThread.setDaemon(true);
         updateThread.start();
 
+        LicenseManager license = licenseManager();
+
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates);
+                updates, license);
+    }
+
+    /**
+     * Builds the license manager. Dormant by default: with no embedded public key
+     * ({@code /license-public-key.b64}) it runs in DEV mode (unlocked). Ship that resource and
+     * unlicensed installs present the locked activation state. The license is stored, encrypted, at
+     * {@code ~/.jarvis/license.dat}.
+     */
+    static LicenseManager licenseManager() {
+        EncryptedLicenseStore store = new EncryptedLicenseStore(
+                Path.of(System.getProperty("user.home"), ".jarvis", "license.dat"));
+        LicenseVerifier verifier = null;
+        try (InputStream in = AppWiring.class.getResourceAsStream("/license-public-key.b64")) {
+            if (in != null) {
+                verifier = LicenseVerifier.fromBase64(
+                        new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            }
+        } catch (IOException | RuntimeException e) {
+            verifier = null;   // no / bad key -> DEV mode (unlocked)
+        }
+        return new LicenseManager(verifier, store);
     }
 
     /**

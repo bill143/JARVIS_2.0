@@ -87,6 +87,8 @@ public final class WebServer {
                 governance == null ? null : governance.permissionPolicy();
         com.jarvis.updater.UpdateChecker updates =
                 governance == null ? null : governance.updates();
+        com.jarvis.licensing.LicenseManager license =
+                governance == null ? null : governance.license();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -111,6 +113,38 @@ public final class WebServer {
             t.put("ramTotalGb", Math.round(s.ramTotalGb() * 10) / 10.0);
             t.put("cores", s.cores());
             respond(exchange, 200, "application/json", t.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/license", exchange -> {
+            com.jarvis.licensing.LicenseStatus s = license == null
+                    ? com.jarvis.licensing.LicenseStatus.dev() : license.status();
+            respond(exchange, 200, "application/json",
+                    licenseJson(s).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/license/activate", exchange -> {
+            com.jarvis.licensing.LicenseStatus s = license == null
+                    ? com.jarvis.licensing.LicenseStatus.dev() : license.status();
+            if (license != null && "POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    s = license.activate(MAPPER.readTree(body).path("key").asText(""));
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            respond(exchange, 200, "application/json",
+                    licenseJson(s).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/license/deactivate", exchange -> {
+            com.jarvis.licensing.LicenseStatus s = license == null
+                    ? com.jarvis.licensing.LicenseStatus.dev() : license.status();
+            if (license != null && "POST".equals(exchange.getRequestMethod())) {
+                s = license.deactivate();
+            }
+            respond(exchange, 200, "application/json",
+                    licenseJson(s).toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/update", exchange -> {
@@ -532,6 +566,20 @@ public final class WebServer {
         } catch (NumberFormatException e) {
             return dflt;
         }
+    }
+
+    private static ObjectNode licenseJson(com.jarvis.licensing.LicenseStatus s) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("state", s.state().name());
+        o.put("locked", s.isLocked());
+        o.put("message", s.message());
+        if (s.license() != null) {
+            o.put("licensee", s.license().licensee());
+            o.put("edition", s.license().edition());
+            o.put("expiresAt", s.license().expiresAt() == null
+                    ? null : s.license().expiresAt().toString());
+        }
+        return o;
     }
 
     private static String jsonStr(String s) {

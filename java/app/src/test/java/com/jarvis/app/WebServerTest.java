@@ -199,7 +199,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, broker, policy, null));
+                new AppWiring.Governance(null, null, broker, policy, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             // A tool thread asks for approval; it will block until we answer via the endpoint.
@@ -243,6 +243,58 @@ class WebServerTest {
     }
 
     @Test
+    void licenseEndpointsActivateVerifyAndReportStatus() throws Exception {
+        java.security.KeyPair kp = java.security.KeyPairGenerator.getInstance("RSA").genKeyPair();
+        com.jarvis.licensing.EncryptedLicenseStore store =
+                new com.jarvis.licensing.EncryptedLicenseStore(tmp.resolve("license.dat"));
+        com.jarvis.licensing.LicenseManager mgr = new com.jarvis.licensing.LicenseManager(
+                new com.jarvis.licensing.LicenseVerifier(kp.getPublic()), store);
+        String key = com.jarvis.licensing.LicenseSigner.sign(
+                new com.jarvis.licensing.License("Bill", "b@x.com", "standard",
+                        java.time.Instant.parse("2026-01-01T00:00:00Z"), null),
+                kp.getPrivate());
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, mgr));
+        try {
+            String base = "http://localhost:" + wired.port();
+            HttpResponse<String> before = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/license")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(before.body().contains("\"state\":\"UNLICENSED\""));
+            assertTrue(before.body().contains("\"locked\":true"));
+
+            HttpResponse<String> activated = client.send(HttpRequest.newBuilder(
+                            URI.create(base + "/license/activate"))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"key\":\"" + key + "\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(activated.body().contains("\"state\":\"LICENSED\""));
+            assertTrue(activated.body().contains("\"licensee\":\"Bill\""));
+            assertTrue(activated.body().contains("\"locked\":false"));
+
+            // A bogus key is rejected (INVALID), not accepted.
+            HttpResponse<String> bad = client.send(HttpRequest.newBuilder(
+                            URI.create(base + "/license/activate"))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString("{\"key\":\"nope.nope\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(bad.body().contains("\"state\":\"INVALID\""));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void licenseEndpointReportsDevWhenNoManagerWired() throws Exception {
+        assertTrue(get("/license").body().contains("\"state\":\"DEV\""));
+    }
+
+    @Test
     void updateEndpointReportsAVerifiedAvailableUpdate() throws Exception {
         java.security.KeyPair kp = java.security.KeyPairGenerator.getInstance("RSA").genKeyPair();
         com.jarvis.updater.ManifestSource source = () -> com.jarvis.updater.ManifestSigner.sign(
@@ -258,7 +310,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, checker));
+                new AppWiring.Governance(null, null, null, null, checker, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/update"))
@@ -302,7 +354,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, plugins, null, null, null));
+                new AppWiring.Governance(null, plugins, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/tools"))
@@ -333,7 +385,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/audit"))
@@ -364,7 +416,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port() + "/audit";
             HttpResponse<String> all = client.send(
