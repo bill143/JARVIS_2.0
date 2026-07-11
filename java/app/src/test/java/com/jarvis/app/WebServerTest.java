@@ -272,6 +272,37 @@ class WebServerTest {
     }
 
     @Test
+    void auditEndpointExposesTheFieldsTheHudActivityFeedClassifiesOn() throws Exception {
+        // The HUD feed colours lines by category + outcome and labels by riskTier — guard those
+        // fields stay in the /audit payload so the feed never silently goes blank.
+        com.jarvis.audit.AuditLog log =
+                new com.jarvis.audit.RecordStoreAuditLog(new com.jarvis.memory.InMemoryRecordStore());
+        log.record(new com.jarvis.audit.AuditEvent(
+                com.jarvis.audit.AuditCategory.SYSTEM, "power", com.jarvis.audit.AuditTrigger.USER,
+                com.jarvis.tools.RiskTier.DESTRUCTIVE, com.jarvis.audit.AuditOutcome.FAILURE,
+                "permission prompt -> DENIED"));
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(log, null, null, null));
+        try {
+            String body = client.send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/audit"))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body();
+            assertTrue(body.contains("\"category\":\"SYSTEM\""));
+            assertTrue(body.contains("\"outcome\":\"FAILURE\""));
+            assertTrue(body.contains("\"riskTier\":\"DESTRUCTIVE\""));
+            assertTrue(body.contains("\"action\":\"power\""));
+            assertTrue(body.contains("\"at\":"));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void auditEndpointReturnsRecordedEventsNewestFirstWithFilters() throws Exception {
         com.jarvis.audit.AuditLog log =
                 new com.jarvis.audit.RecordStoreAuditLog(new com.jarvis.memory.InMemoryRecordStore());

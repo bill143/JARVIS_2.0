@@ -213,6 +213,18 @@
   .permbody b { color:var(--cyan); }
   .permtier { margin-top:12px; font-size:12px; color:var(--dim); }
   .permbtns { display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
+  .afeed { display:flex; flex-direction:column; gap:2px; overflow-y:auto; max-height:260px; }
+  .afeed .aline { display:flex; gap:9px; align-items:baseline; padding:4px 6px; border-left:2px solid transparent; border-radius:0 6px 6px 0; }
+  .afeed .aline:hover { background:rgba(80,140,200,.06); }
+  .afeed .atime { color:var(--dim); font-size:10.5px; font-variant-numeric:tabular-nums; flex:0 0 auto; }
+  .afeed .aact { color:#dcecfb; font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .afeed .atag { font-size:9.5px; letter-spacing:.5px; color:var(--dim); flex:0 0 auto; }
+  .afeed .aline.ok { border-left-color:rgba(60,200,140,.35); }
+  .afeed .aline.deny { border-left-color:#ffd479; }
+  .afeed .aline.deny .aact { color:#ffd479; }
+  .afeed .aline.fail { border-left-color:#ff8ba0; }
+  .afeed .aline.fail .aact { color:#ff8ba0; }
+  .actcount { font-size:11px; color:#ff8ba0; font-weight:600; margin-left:6px; }
 
   /* Workspace overlay (MAIL / CALENDAR) */
   .wsp { position:fixed; z-index:22; top:50%; left:50%;
@@ -272,7 +284,7 @@
         <div class="kv"><span>CONNECTION</span><b id="connKv">—</b></div>
         <div class="kv"><span>UPTIME</span><b id="uptime">00:00:00</b></div>
       </div>
-      <div class="card" style="flex:1;">
+      <div class="card">
         <h3>Subsystems</h3>
         <div class="sub-list">
           <div class="item"><span class="sdot" id="ssAi"></span>Cognitive core</div>
@@ -283,6 +295,12 @@
           <div class="item"><span class="sdot"></span>Tool execution</div>
           <div class="item"><span class="sdot"></span>Hardware monitor</div>
         </div>
+      </div>
+      <div class="card" style="flex:1;">
+        <h3>Activity <span id="actCount" class="actcount"></span>
+          <button class="hbtn" id="actMore" type="button" title="Open the full Audit Log"
+                  style="float:right;font-size:10px;padding:2px 8px;">AUDIT ▸</button></h3>
+        <div id="activityFeed" class="afeed"><div class="hint">Waiting for activity…</div></div>
       </div>
     </div>
 
@@ -948,6 +966,34 @@
   $('s_perm').addEventListener('change',e=>{ fetch('/permissions/config',{method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify({level:e.target.value})}).catch(()=>{}); });
   fetch('/permissions/config').then(r=>r.json()).then(j=>{ if(j.level) $('s_perm').value=j.level; }).catch(()=>{});
+
+  // ---- HUD Activity feed (sourced from the audit log — single source of truth) ----
+  function actClass(e){
+    if(e.outcome==='FAILURE'){
+      return (e.category==='SYSTEM' || (e.detail||'').toLowerCase().indexOf('permission')>=0) ? 'deny' : 'fail';
+    }
+    return 'ok';
+  }
+  function actTime(iso){ try{ return new Date(iso).toLocaleTimeString(); }catch(e){ return ''; } }
+  async function loadActivity(){
+    let rows=[];
+    try{ rows=await (await fetch('/audit?limit=14')).json(); }catch(e){ return; }
+    const box=$('activityFeed');
+    if(!rows.length){ box.innerHTML='<div class="hint">No activity yet.</div>'; $('actCount').textContent=''; return; }
+    box.innerHTML=''; let issues=0;
+    rows.forEach(e=>{
+      const cls=actClass(e); if(cls!=='ok') issues++;
+      const d=document.createElement('div'); d.className='aline '+cls;
+      const t=document.createElement('span'); t.className='atime'; t.textContent=actTime(e.at);
+      const a=document.createElement('span'); a.className='aact'; a.textContent=e.action||''; a.title=(e.detail||'');
+      const g=document.createElement('span'); g.className='atag'; g.textContent=(e.riskTier||'').replace('_',' ');
+      d.appendChild(t); d.appendChild(a); d.appendChild(g); box.appendChild(d);
+    });
+    $('actCount').textContent = issues ? (issues+' issue'+(issues>1?'s':'')) : '';
+  }
+  $('actMore').addEventListener('click',openAudit);
+  setInterval(loadActivity,3000);
+  loadActivity();
   ['au_action','au_risk','au_outcome','au_since'].forEach(id=>{
     const el=$(id); const ev = el.tagName==='SELECT'||el.type==='date' ? 'change' : 'input';
     el.addEventListener(ev,loadAudit); });
