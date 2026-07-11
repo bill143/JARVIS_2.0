@@ -75,19 +75,20 @@ final class AppWiring {
             MemoryStore<String> memory, PeopleStore people, PeopleRecognizer recognizer,
             AuditLog auditLog, PluginRegistry pluginRegistry,
             PermissionBroker permissions, PermissionPolicy permissionPolicy,
-            UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks) {
+            UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
+            WorkflowService workflows) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
-                    updates, license, usage, tasks);
+                    updates, license, usage, tasks, workflows);
         }
     }
 
     /** Services the web server exposes: audit, tools, permissions, updates, licensing, usage, tasks. */
     record Governance(AuditLog auditLog, PluginRegistry plugins,
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
-            LicenseManager license, UsageMeter usage, TaskBoard tasks) {
+            LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows) {
     }
 
     private AppWiring() {
@@ -162,10 +163,15 @@ final class AppWiring {
         LicenseManager license = licenseManager();
         TaskBoard tasks = new TaskBoard(new FileRecordStore(
                 Path.of(System.getProperty("user.home"), ".jarvis", "tasks")));
+        WorkflowService workflows = new WorkflowService(
+                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "workflows")),
+                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "workflow-runs")),
+                api, auditLog);
+        workflows.startScheduler();
 
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license, usageMeter, tasks);
+                updates, license, usageMeter, tasks, workflows);
     }
 
     /**

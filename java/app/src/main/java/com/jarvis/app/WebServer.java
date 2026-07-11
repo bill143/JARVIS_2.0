@@ -93,6 +93,7 @@ public final class WebServer {
                 governance == null ? null : governance.usage();
         com.jarvis.tasks.TaskBoard tasks =
                 governance == null ? null : governance.tasks();
+        WorkflowService workflows = governance == null ? null : governance.workflows();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -479,6 +480,78 @@ public final class WebServer {
             ObjectNode out = MAPPER.createObjectNode();
             out.put("completed", completed);
             respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/workflows/runs", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (workflows != null) {
+                int limit = parseInt(param(exchange, "limit", "50"), 50);
+                for (com.jarvis.workflows.WorkflowRun run : workflows.recentRuns(limit)) {
+                    ObjectNode o = arr.addObject();
+                    o.put("id", run.id());
+                    o.put("workflowName", run.workflowName());
+                    o.put("startedAtMillis", run.startedAtMillis());
+                    o.put("trigger", run.trigger().name());
+                    o.put("ok", run.ok());
+                    ArrayNode steps = o.putArray("steps");
+                    run.steps().forEach(s -> {
+                        ObjectNode so = steps.addObject();
+                        so.put("step", s.step());
+                        so.put("output", s.output());
+                        so.put("ok", s.ok());
+                    });
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/workflows", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod()) && workflows != null) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String action = j.path("action").asText("");
+                    if ("save".equals(action)) {
+                        String id = j.path("id").asText("").isBlank()
+                                ? "w-" + Long.toHexString(System.nanoTime()) : j.path("id").asText();
+                        java.util.List<String> steps = new java.util.ArrayList<>();
+                        j.path("steps").forEach(s -> {
+                            if (!s.asText().isBlank()) {
+                                steps.add(s.asText().strip());
+                            }
+                        });
+                        com.jarvis.workflows.TriggerType trig;
+                        try {
+                            trig = com.jarvis.workflows.TriggerType.valueOf(
+                                    j.path("trigger").asText("MANUAL"));
+                        } catch (IllegalArgumentException e) {
+                            trig = com.jarvis.workflows.TriggerType.MANUAL;
+                        }
+                        workflows.save(new com.jarvis.workflows.Workflow(id, j.path("name").asText(""),
+                                steps, trig, j.path("intervalSeconds").asLong(0)));
+                    } else if ("delete".equals(action)) {
+                        workflows.delete(j.path("id").asText(""));
+                    } else if ("run".equals(action)) {
+                        workflows.run(j.path("id").asText(""),
+                                com.jarvis.workflows.TriggerType.MANUAL);
+                    }
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (workflows != null) {
+                for (com.jarvis.workflows.Workflow w : workflows.list()) {
+                    ObjectNode o = arr.addObject();
+                    o.put("id", w.id());
+                    o.put("name", w.name());
+                    o.put("trigger", w.trigger().name());
+                    o.put("intervalSeconds", w.intervalSeconds());
+                    ArrayNode steps = o.putArray("steps");
+                    w.steps().forEach(steps::add);
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/tasks", exchange -> {

@@ -71,6 +71,15 @@
   .kcard .kbtn { background:none; border:1px solid var(--line); color:var(--dim); border-radius:6px; padding:2px 9px; font-size:12px; cursor:pointer; }
   .kcard .kbtn:hover { color:#eaf7ff; border-color:var(--cyan); }
   .kcard .kbtn.del { color:#ff8ba0; margin-left:auto; }
+  .wfrow { display:flex; align-items:center; gap:12px; padding:10px 2px; border-bottom:1px solid rgba(120,160,200,.12); }
+  .wfinfo { flex:1; }
+  .wfinfo .wfn { color:#eaf7ff; font-size:14px; }
+  .wfinfo .wfm { color:var(--dim); font-size:11px; }
+  .wfacts { display:flex; gap:6px; }
+  .wfrun { padding:7px 2px; border-bottom:1px solid rgba(120,160,200,.12); font-size:12px; }
+  .wfrun .wfrh { display:flex; gap:8px; align-items:baseline; }
+  .wfrun .wfrok { color:#7fe3b0; } .wfrun .wfrfail { color:#ff8ba0; }
+  .wfrun .wfrt { color:var(--dim); font-size:10.5px; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -323,6 +332,7 @@
   <div class="navitem" data-nav="memory"><span class="ic">🧠</span> Memory</div>
   <div class="navitem" data-nav="conv"><span class="ic">💬</span> Conversations</div>
   <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
+  <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
   <div class="navitem" data-nav="tools"><span class="ic">🧩</span> Tools &amp; Skills</div>
   <div class="navitem" data-nav="sysmon"><span class="ic">📈</span> System Monitor</div>
 </nav>
@@ -506,6 +516,29 @@
       <input id="convBox" placeholder="Message JARVIS…" class="minput" style="flex:1;">
       <button id="convSend" type="submit" class="hbtn">SEND</button>
     </form>
+  </div>
+</div>
+<div class="page cpage" id="cpage-workflows">
+  <div class="page-head"><h2>⚙  WORKFLOWS</h2><span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" style="max-width:900px;">
+    <div class="pcard">
+      <h4>New workflow</h4>
+      <input id="wfName" class="minput" placeholder="Name…">
+      <div class="hint" style="margin:8px 0 4px;">Steps — one per line; each is an instruction JARVIS runs in order.</div>
+      <textarea id="wfSteps" class="minput" style="min-height:80px;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;">
+        <select id="wfTrigger" class="minput" style="width:auto;">
+          <option value="MANUAL">Manual</option>
+          <option value="SCHEDULE">Schedule</option>
+          <option value="WEBHOOK">Webhook</option>
+        </select>
+        <input id="wfInterval" class="minput" type="number" placeholder="every N sec (schedule)" style="width:auto;flex:1;min-width:140px;">
+        <button class="hbtn" id="wfSave" type="button">Save</button>
+      </div>
+    </div>
+    <div class="pcard"><h4>Your workflows</h4><div id="wfList"><div class="hint">None yet.</div></div></div>
+    <div class="pcard"><h4>Recent runs</h4><div id="wfRuns"><div class="hint">No runs yet.</div></div></div>
   </div>
 </div>
 <div class="page cpage" id="cpage-tasks">
@@ -1390,6 +1423,44 @@
   $('taskAdd').addEventListener('click',()=>{ const v=$('taskTitle').value.trim(); if(!v) return; $('taskTitle').value=''; taskPost({action:'create',title:v}); });
   $('taskTitle').addEventListener('keydown',e=>{ if(e.key==='Enter') $('taskAdd').click(); });
   pageLoaders.tasks=loadTasks;
+
+  // ---- Workflows page ----
+  async function wfPost(body){ await fetch('/workflows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); loadWorkflows(); }
+  async function loadWorkflows(){
+    let rows=[]; try{ rows=await (await fetch('/workflows')).json(); }catch(e){ return; }
+    const box=$('wfList'); box.innerHTML='';
+    if(!rows.length){ box.innerHTML='<div class="hint">None yet.</div>'; }
+    rows.forEach(w=>{ const d=document.createElement('div'); d.className='wfrow';
+      const info=document.createElement('div'); info.className='wfinfo';
+      const n=document.createElement('div'); n.className='wfn'; n.textContent=w.name||'(unnamed)';
+      const m=document.createElement('div'); m.className='wfm';
+      m.textContent=w.trigger+(w.trigger==='SCHEDULE'?' · every '+w.intervalSeconds+'s':'')+' · '+(w.steps||[]).length+' steps';
+      info.appendChild(n); info.appendChild(m);
+      const acts=document.createElement('div'); acts.className='wfacts';
+      acts.appendChild(mkbtn('▶ Run',()=>wfPost({action:'run',id:w.id})));
+      acts.appendChild(mkbtn('✕',()=>wfPost({action:'delete',id:w.id}),'del'));
+      d.appendChild(info); d.appendChild(acts); box.appendChild(d);
+    });
+    let runs=[]; try{ runs=await (await fetch('/workflows/runs?limit=20')).json(); }catch(e){}
+    const rb=$('wfRuns'); rb.innerHTML='';
+    if(!runs.length){ rb.innerHTML='<div class="hint">No runs yet.</div>'; }
+    runs.forEach(r=>{ const d=document.createElement('div'); d.className='wfrun';
+      const h=document.createElement('div'); h.className='wfrh';
+      const nm=document.createElement('span'); nm.textContent=r.workflowName||'(workflow)';
+      const st=document.createElement('span'); st.className=r.ok?'wfrok':'wfrfail'; st.textContent=r.ok?'✓ ok':'✕ failed';
+      const tm=document.createElement('span'); tm.className='wfrt'; tm.textContent=new Date(r.startedAtMillis).toLocaleString()+' · '+r.trigger;
+      h.appendChild(nm); h.appendChild(st); h.appendChild(tm); d.appendChild(h);
+      rb.appendChild(d);
+    });
+  }
+  $('wfSave').addEventListener('click',()=>{
+    const name=$('wfName').value.trim();
+    const steps=$('wfSteps').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    if(!name||!steps.length) return;
+    wfPost({action:'save',name,steps,trigger:$('wfTrigger').value,intervalSeconds:parseInt($('wfInterval').value||'0',10)||0});
+    $('wfName').value=''; $('wfSteps').value='';
+  });
+  pageLoaders.workflows=loadWorkflows;
 
   // ---- System Monitor page (full telemetry gauges) ----
   function setGauge(gid,vid,pct){

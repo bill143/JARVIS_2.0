@@ -210,7 +210,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, broker, policy, null, null, null, null));
+                new AppWiring.Governance(null, null, broker, policy, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             // A tool thread asks for approval; it will block until we answer via the endpoint.
@@ -254,6 +254,35 @@ class WebServerTest {
     }
 
     @Test
+    void workflowsEndpointSavesRunsAndRecordsHistory() throws Exception {
+        JarvisApi api = AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>());
+        WorkflowService svc = new WorkflowService(new com.jarvis.memory.InMemoryRecordStore(),
+                new com.jarvis.memory.InMemoryRecordStore(), api, null);
+        WebServer wired = WebServer.start(api, false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, svc));
+        try {
+            String base = "http://localhost:" + wired.port();
+            post2(base + "/workflows",
+                    "{\"action\":\"save\",\"name\":\"Brief\",\"steps\":[\"say hello\"],\"trigger\":\"MANUAL\"}");
+            HttpResponse<String> defs = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/workflows")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(defs.body().contains("Brief"));
+
+            String id = svc.list().get(0).id();
+            post2(base + "/workflows", "{\"action\":\"run\",\"id\":\"" + id + "\"}");
+            HttpResponse<String> runs = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/workflows/runs")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(runs.body().contains("Brief"));
+            assertTrue(runs.body().contains("say hello"));   // step recorded in history
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void tasksEndpointCreatesMovesAndListsWithBlockedFlag() throws Exception {
         com.jarvis.tasks.TaskBoard board =
                 new com.jarvis.tasks.TaskBoard(new com.jarvis.memory.InMemoryRecordStore());
@@ -261,7 +290,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, board));
+                new AppWiring.Governance(null, null, null, null, null, null, null, board, null));
         try {
             String base = "http://localhost:" + wired.port() + "/tasks";
             post2(base, "{\"action\":\"create\",\"title\":\"first task\"}");
@@ -355,7 +384,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, meter, null));
+                new AppWiring.Governance(null, null, null, null, null, null, meter, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/usage"))
@@ -386,7 +415,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, mgr, null, null));
+                new AppWiring.Governance(null, null, null, null, null, mgr, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             HttpResponse<String> before = client.send(
@@ -438,7 +467,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, checker, null, null, null));
+                new AppWiring.Governance(null, null, null, null, checker, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/update"))
@@ -482,7 +511,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, plugins, null, null, null, null, null, null));
+                new AppWiring.Governance(null, plugins, null, null, null, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/tools"))
@@ -513,7 +542,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/audit"))
@@ -544,7 +573,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port() + "/audit";
             HttpResponse<String> all = client.send(
