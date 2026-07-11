@@ -13,7 +13,17 @@
   body { background:
            radial-gradient(1100px 700px at 50% 42%, #0a1d33 0%, #05101d 45%, var(--bg) 100%);
          color:var(--text); font:14px/1.5 "Segoe UI", system-ui, sans-serif; overflow:hidden; }
-  #app { display:grid; grid-template-rows:auto 1fr auto; height:100vh; }
+  #app { display:grid; grid-template-rows:auto 1fr auto; height:100vh; padding-left:var(--navw); }
+  :root { --navw:210px; }
+  #sidenav { position:fixed; left:0; top:0; bottom:0; width:var(--navw); z-index:30;
+    background:linear-gradient(180deg,#061223,#040c17); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; padding:14px 0; overflow-y:auto; }
+  #sidenav .brand { padding:4px 18px 16px; color:var(--cyan); font-size:11px; letter-spacing:3px; font-weight:700; }
+  #sidenav .navitem { display:flex; align-items:center; gap:11px; padding:11px 18px; color:var(--dim);
+    cursor:pointer; font-size:13px; border-left:3px solid transparent; user-select:none; }
+  #sidenav .navitem:hover { color:var(--text); background:rgba(80,140,200,.06); }
+  #sidenav .navitem.active { color:#eaf7ff; border-left-color:var(--cyan); background:rgba(65,217,255,.08); }
+  #sidenav .navitem .ic { width:18px; text-align:center; font-size:15px; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -162,7 +172,7 @@
   .person button { background:none; border:none; color:#ff8ba0; cursor:pointer; font-size:16px; }
 
   /* Full page (People & About Me) */
-  .page { position:fixed; inset:0; z-index:25; background:
+  .page { position:fixed; top:0; right:0; bottom:0; left:var(--navw); z-index:25; background:
             radial-gradient(1100px 700px at 50% 0%, #0a1d33 0%, #05101d 55%, var(--bg) 100%);
           display:none; flex-direction:column; }
   .page.open { display:flex; }
@@ -260,6 +270,14 @@
 </style>
 </head>
 <body>
+<nav id="sidenav">
+  <div class="brand">◆ J.A.R.V.I.S.</div>
+  <div class="navitem" data-nav="home"><span class="ic">⬡</span> Command Center</div>
+  <div class="navitem" data-nav="memory"><span class="ic">🧠</span> Memory</div>
+  <div class="navitem" data-nav="conv"><span class="ic">💬</span> Conversations</div>
+  <div class="navitem" data-nav="tools"><span class="ic">🧩</span> Tools &amp; Skills</div>
+  <div class="navitem" data-nav="sysmon"><span class="ic">📈</span> System Monitor</div>
+</nav>
 <div id="app">
   <header>
     <div class="badge"></div>
@@ -378,6 +396,27 @@
     <span id="sbClock">--:--:--</span>
     <span>J.A.R.V.I.S. · v<span id="sbVersion">0.1.0</span></span>
   </div>
+</div>
+
+<div class="page cpage" id="cpage-memory">
+  <div class="page-head"><h2>🧠  MEMORY</h2><span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" id="memoryBody"><div class="hint">Loading…</div></div>
+</div>
+<div class="page cpage" id="cpage-conv">
+  <div class="page-head"><h2>💬  CONVERSATIONS</h2><span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" id="convBody"><div class="hint">Loading…</div></div>
+</div>
+<div class="page cpage" id="cpage-tools">
+  <div class="page-head"><h2>🧩  TOOLS &amp; SKILLS</h2><span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" id="toolsBody"><div class="hint">Loading…</div></div>
+</div>
+<div class="page cpage" id="cpage-sysmon">
+  <div class="page-head"><h2>📈  SYSTEM MONITOR</h2><span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" id="sysmonBody"><div class="hint">Loading…</div></div>
 </div>
 
 <div class="scrim" id="scrim"></div>
@@ -893,6 +932,18 @@
   // ---------- Settings drawer ----------
   const drawer=document.getElementById('drawer'), scrim=document.getElementById('scrim');
   const $=id=>document.getElementById(id);
+
+  // ---- Command Center shell: left-nav page switching ----
+  const pageLoaders={};
+  function navTo(id){
+    document.querySelectorAll('#sidenav .navitem').forEach(n=>n.classList.toggle('active', n.dataset.nav===id));
+    document.querySelectorAll('.cpage').forEach(p=>p.classList.remove('open'));
+    if(id!=='home'){ const p=$('cpage-'+id); if(p) p.classList.add('open'); }
+    if(pageLoaders[id]) pageLoaders[id]();
+  }
+  document.querySelectorAll('#sidenav .navitem').forEach(n=>n.addEventListener('click',()=>navTo(n.dataset.nav)));
+  document.querySelectorAll('.pgclose').forEach(b=>b.addEventListener('click',()=>navTo('home')));
+  navTo('home');
   function openSettings() {
     $('s_voiceOnStart').checked=S.voiceOnStart; $('s_autoSpeak').checked=S.autoSpeak;
     $('s_lang').value=S.lang; $('s_rate').value=S.rate; $('s_wake').value=S.wakeWord;
