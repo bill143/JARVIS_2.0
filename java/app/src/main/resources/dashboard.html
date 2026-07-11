@@ -80,6 +80,9 @@
   .wfrun .wfrh { display:flex; gap:8px; align-items:baseline; }
   .wfrun .wfrok { color:#7fe3b0; } .wfrun .wfrfail { color:#ff8ba0; }
   .wfrun .wfrt { color:var(--dim); font-size:10.5px; }
+  .wfdet { margin:6px 0 2px 4px; border-left:2px solid var(--line); padding-left:10px; }
+  .wfstep { color:var(--dim); font-size:11.5px; padding:2px 0; font-family:ui-monospace,Menlo,Consolas,monospace; word-break:break-word; }
+  .wfstep.bad { color:#ff8ba0; }
 
   /* Header */
   header { display:flex; align-items:center; gap:14px; padding:12px 22px;
@@ -1445,12 +1448,16 @@
     const rb=$('wfRuns'); rb.innerHTML='';
     if(!runs.length){ rb.innerHTML='<div class="hint">No runs yet.</div>'; }
     runs.forEach(r=>{ const d=document.createElement('div'); d.className='wfrun';
-      const h=document.createElement('div'); h.className='wfrh';
+      const h=document.createElement('div'); h.className='wfrh'; h.style.cursor='pointer';
       const nm=document.createElement('span'); nm.textContent=r.workflowName||'(workflow)';
       const st=document.createElement('span'); st.className=r.ok?'wfrok':'wfrfail'; st.textContent=r.ok?'✓ ok':'✕ failed';
-      const tm=document.createElement('span'); tm.className='wfrt'; tm.textContent=new Date(r.startedAtMillis).toLocaleString()+' · '+r.trigger;
+      const tm=document.createElement('span'); tm.className='wfrt'; tm.textContent=new Date(r.startedAtMillis).toLocaleString()+' · '+r.trigger+' · '+(r.steps||[]).length+' steps';
       h.appendChild(nm); h.appendChild(st); h.appendChild(tm); d.appendChild(h);
-      rb.appendChild(d);
+      const det=document.createElement('div'); det.className='wfdet'; det.hidden=true;
+      (r.steps||[]).forEach(s=>{ const sd=document.createElement('div'); sd.className='wfstep'+(s.ok?'':' bad');
+        sd.textContent=(s.ok?'✓ ':'✕ ')+s.step+' → '+String(s.output||'').slice(0,240); det.appendChild(sd); });
+      h.addEventListener('click',()=>{ det.hidden=!det.hidden; });
+      d.appendChild(det); rb.appendChild(d);
     });
   }
   $('wfSave').addEventListener('click',()=>{
