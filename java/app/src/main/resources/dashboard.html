@@ -345,6 +345,7 @@
   <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
   <div class="navitem" data-nav="kb"><span class="ic">📚</span> Knowledge</div>
   <div class="navitem" data-nav="intel"><span class="ic">✨</span> Intelligence</div>
+  <div class="navitem" data-nav="discussion"><span class="ic">🗣</span> Discussion</div>
   <div class="navitem" data-nav="agents"><span class="ic">🤖</span> Agents</div>
   <div class="navitem" data-nav="tools"><span class="ic">🧩</span> Tools &amp; Skills</div>
   <div class="navitem" data-nav="sysmon"><span class="ic">📈</span> System Monitor</div>
@@ -577,6 +578,21 @@
       <div id="intelResults" style="margin-top:10px;"></div>
     </div>
     <div class="pcard"><h4>All memories</h4><div id="intelList"><div class="hint">None yet.</div></div></div>
+  </div>
+</div>
+<div class="page cpage" id="cpage-discussion">
+  <div class="page-head"><h2>🗣  PROJECT DISCUSSION</h2>
+    <span id="discMode" style="margin-left:12px;font-size:11px;letter-spacing:1px;padding:2px 8px;border:1px solid var(--dim);border-radius:10px;color:var(--dim);">ADVISOR OFFLINE</span>
+    <span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" style="max-width:900px;">
+    <div class="hint" id="discBanner" style="margin-bottom:10px;">JARVIS chairs a bounded discussion and consults the OpenHuman advisor, then synthesizes an outcome. Read-only — the advisor is consulted, never asked to act. Connect it by running <b>openhuman-core serve</b> and setting JARVIS_OPENHUMAN_URL + OPENHUMAN_CORE_TOKEN.</div>
+    <div class="pcard"><h4>Start a discussion</h4>
+      <div style="display:flex;gap:8px;"><input id="discTopic" class="minput" style="flex:1;" placeholder="Topic or question about a project…">
+        <button class="hbtn" id="discRun" type="button">Discuss</button></div>
+      <div id="discOut" style="margin-top:12px;"></div>
+    </div>
+    <div class="pcard"><h4>Recent discussions</h4><div id="discList"><div class="hint">None yet.</div></div></div>
   </div>
 </div>
 <div class="page cpage" id="cpage-workflows">
@@ -1593,6 +1609,55 @@
   $('intelSearchBtn').addEventListener('click',intelSearch);
   $('intelQuery').addEventListener('keydown',e=>{ if(e.key==='Enter') intelSearch(); });
   pageLoaders.intel=loadIntel;
+
+  // ---- Project Discussion page (JARVIS chairs, OpenHuman advises) ----
+  function discSetAdvisor(online){
+    const b=$('discMode');
+    b.textContent = online ? 'ADVISOR ONLINE' : 'ADVISOR OFFLINE';
+    b.style.color = online ? 'var(--accent)' : 'var(--dim)';
+    b.style.borderColor = online ? 'var(--accent)' : 'var(--dim)';
+  }
+  function discRenderRounds(container, j){
+    container.innerHTML='';
+    const head=document.createElement('div'); head.className='agfinal';
+    const hr=document.createElement('div'); hr.className='agrole'; hr.textContent=(j.converged?'OUTCOME (converged)':'OUTCOME (bounded)');
+    const hc=document.createElement('div'); hc.className='agc'; hc.textContent=j.outcome||'';
+    head.appendChild(hr); head.appendChild(hc); container.appendChild(head);
+    (j.rounds||[]).forEach(r=>{
+      const d=document.createElement('div'); d.className='agmsg';
+      const role=document.createElement('div'); role.className='agrole'; role.textContent='ROUND '+r.index;
+      const q=document.createElement('div'); q.className='agc'; q.textContent='JARVIS: '+(r.question||'');
+      const a=document.createElement('div'); a.className='agc'; a.style.color=r.error?'var(--bad,#e66)':'';
+      a.textContent='OpenHuman: '+(r.error?('[error: '+r.error+']'):(r.answer||''));
+      d.appendChild(role); d.appendChild(q); d.appendChild(a); container.appendChild(d);
+    });
+  }
+  async function discRun(){
+    const topic=$('discTopic').value.trim(); if(!topic) return;
+    const out=$('discOut'); out.innerHTML='<div class="hint">Discussion in progress… (JARVIS chairs, OpenHuman advises)</div>';
+    try{
+      const j=await (await fetch('/discussion/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic})})).json();
+      discSetAdvisor(!!j.advisorAvailable);
+      discRenderRounds(out, j);
+      loadDiscussions();
+    }catch(e){ out.innerHTML='<div class="hint">Discussion failed. Is JARVIS online, and is the OpenHuman advisor connected?</div>'; }
+  }
+  async function loadDiscussions(){
+    let j={items:[],advisorAvailable:false}; try{ j=await (await fetch('/discussion')).json(); }catch(e){ return; }
+    discSetAdvisor(!!j.advisorAvailable);
+    const box=$('discList'); const items=j.items||[]; box.innerHTML='';
+    if(!items.length){ box.innerHTML='<div class="hint">None yet.</div>'; return; }
+    items.forEach(it=>{ const row=document.createElement('div'); row.className='memrow';
+      const s=document.createElement('span'); s.className='memval';
+      const b=document.createElement('b'); b.textContent=it.topic||'(untitled)';
+      const sn=document.createElement('span'); sn.style.color='var(--dim)'; sn.style.marginLeft='8px';
+      sn.textContent=(it.converged?'✓ ':'· ')+((it.outcome||'').slice(0,120));
+      s.appendChild(b); s.appendChild(sn); row.appendChild(s); box.appendChild(row);
+    });
+  }
+  $('discRun').addEventListener('click',discRun);
+  $('discTopic').addEventListener('keydown',e=>{ if(e.key==='Enter') discRun(); });
+  pageLoaders.discussion=loadDiscussions;
 
   // ---- Multi-agent page ----
   async function agRun(){

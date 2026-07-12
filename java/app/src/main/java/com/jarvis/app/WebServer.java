@@ -98,6 +98,7 @@ public final class WebServer {
         MultiAgentService agents = governance == null ? null : governance.agents();
         AutonomousService autonomous = governance == null ? null : governance.autonomous();
         SemanticMemoryService semantic = governance == null ? null : governance.semantic();
+        DiscussionService discussion = governance == null ? null : governance.discussion();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -590,6 +591,60 @@ public final class WebServer {
                 }
             }
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/discussion/run", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod()) || discussion == null) {
+                respond(exchange, discussion == null ? 503 : 405, "text/plain",
+                        (discussion == null ? "discussion unavailable" : "method not allowed")
+                                .getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String topic;
+            try (InputStream body = exchange.getRequestBody()) {
+                topic = MAPPER.readTree(body).path("topic").asText("").strip();
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (topic.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty topic".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            com.jarvis.discussion.DiscussionRunner.Discussion d = discussion.run(topic);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("topic", d.topic());
+            o.put("converged", d.converged());
+            o.put("outcome", d.outcome());
+            o.put("advisorAvailable", discussion.advisorAvailable());
+            ArrayNode rounds = o.putArray("rounds");
+            d.rounds().forEach(r -> {
+                ObjectNode ro = rounds.addObject();
+                ro.put("index", r.index());
+                ro.put("question", r.question());
+                ro.put("answer", r.failed() ? null : r.answer());
+                if (r.failed()) {
+                    ro.put("error", r.error());
+                }
+            });
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/discussion", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            root.put("advisorAvailable", discussion != null && discussion.advisorAvailable());
+            ArrayNode arr = root.putArray("items");
+            if (discussion != null) {
+                int limit = parseInt(param(exchange, "limit", "20"), 20);
+                for (String payload : discussion.recent(limit)) {
+                    try {
+                        arr.add(MAPPER.readTree(payload));
+                    } catch (IOException ignore) {
+                        // skip an unparseable record
+                    }
+                }
+            }
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/semantic/search", exchange -> {

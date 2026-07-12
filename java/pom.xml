@@ -27,6 +27,7 @@
     <module>knowledge-base</module>
     <module>multi-agent</module>
     <module>autonomous</module>
+    <module>discussion</module>
     <module>api</module>
     <module>ui</module>
     <module>app</module>

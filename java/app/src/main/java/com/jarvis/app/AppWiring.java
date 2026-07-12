@@ -78,12 +78,14 @@ final class AppWiring {
             PermissionBroker permissions, PermissionPolicy permissionPolicy,
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
-            AutonomousService autonomous, SemanticMemoryService semantic) {
+            AutonomousService autonomous, SemanticMemoryService semantic,
+            DiscussionService discussion) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
-                    updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic);
+                    updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
+                    discussion);
         }
     }
 
@@ -92,7 +94,7 @@ final class AppWiring {
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
-            SemanticMemoryService semantic) {
+            SemanticMemoryService semantic, DiscussionService discussion) {
     }
 
     private AppWiring() {
@@ -113,6 +115,12 @@ final class AppWiring {
         // a crash. MUTATING actions are gated by the permission layer via their manifest risk tier.
         plugins.install(new com.jarvis.integrations.github.GitHubPlugin(
                 com.jarvis.integrations.github.HttpGitHubTransport.fromEnvironment()));
+        // OpenHuman advisor (read-only). Dormant until 'openhuman-core serve' is running and
+        // JARVIS_OPENHUMAN_URL + OPENHUMAN_CORE_TOKEN are set. Arm's-length HTTP only (GPL-safe).
+        com.jarvis.integrations.openhuman.OpenHumanClient openhuman =
+                new com.jarvis.integrations.openhuman.OpenHumanClient(
+                        com.jarvis.integrations.openhuman.HttpOpenHumanTransport.fromEnvironment());
+        plugins.install(new com.jarvis.integrations.openhuman.OpenHumanPlugin(openhuman));
 
         GoogleAuth google = googleAuth(memory);
         boolean googleConnected = google != null && google.isConnected();
@@ -186,10 +194,14 @@ final class AppWiring {
         SemanticMemoryService semantic = new SemanticMemoryService(
                 new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "semantic")),
                 HttpEmbeddingProvider.fromEnvironment(), auditLog);
+        // Project Discussion: JARVIS chairs, OpenHuman advises. Bounded + audited; read-only.
+        DiscussionService discussion = new DiscussionService(api, openhuman, auditLog,
+                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "discussions")));
 
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license, usageMeter, tasks, workflows, knowledge, agents, autonomous, semantic);
+                updates, license, usageMeter, tasks, workflows, knowledge, agents, autonomous, semantic,
+                discussion);
     }
 
     /**
@@ -254,7 +266,8 @@ final class AppWiring {
     /** Loads built-in tool manifests (bundled resource) plus any user plugins in ~/.jarvis/plugins. */
     static PluginRegistry pluginRegistry() {
         List<ToolManifest> manifests = new ArrayList<>();
-        for (String resource : new String[] {"/manifests/builtin.json", "/manifests/github.json"}) {
+        for (String resource : new String[] {
+                "/manifests/builtin.json", "/manifests/github.json", "/manifests/openhuman.json"}) {
             try (InputStream in = AppWiring.class.getResourceAsStream(resource)) {
                 if (in != null) {
                     manifests.addAll(ManifestLoader.parseArray(

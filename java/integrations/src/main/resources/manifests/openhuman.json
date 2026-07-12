@@ -1,0 +1,10 @@
+[
+  {"name":"openhuman_status","description":"Check whether the OpenHuman advisor is connected","riskTier":"READ_ONLY"},
+  {"name":"openhuman_schema","description":"Fetch OpenHuman's capability schema","riskTier":"READ_ONLY"},
+  {"name":"openhuman_memory_search","description":"Search OpenHuman's Memory Tree by meaning","riskTier":"READ_ONLY",
+   "parameters":[{"name":"query","type":"string","required":true,"description":"What to recall"},
+                 {"name":"max","type":"number","required":false,"description":"How many results"}]},
+  {"name":"openhuman_consult","description":"Ask the OpenHuman advisor a question","riskTier":"READ_ONLY",
+   "parameters":[{"name":"question","type":"string","required":true,"description":"The question"},
+                 {"name":"context","type":"string","required":false,"description":"Extra context"}]}
+]
