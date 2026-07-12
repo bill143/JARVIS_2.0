@@ -115,12 +115,15 @@ final class AppWiring {
         // a crash. MUTATING actions are gated by the permission layer via their manifest risk tier.
         plugins.install(new com.jarvis.integrations.github.GitHubPlugin(
                 com.jarvis.integrations.github.HttpGitHubTransport.fromEnvironment()));
-        // OpenHuman advisor (read-only). Dormant until 'openhuman-core serve' is running and
+        // OpenHuman advisor + shared brain. Dormant until 'openhuman-core serve' is running and
         // JARVIS_OPENHUMAN_URL + OPENHUMAN_CORE_TOKEN are set. Arm's-length HTTP only (GPL-safe).
+        // Durable writes are deny-by-default (RFC 0001 §8) — enabled only via env, MUTATING-gated.
         com.jarvis.integrations.openhuman.OpenHumanClient openhuman =
                 new com.jarvis.integrations.openhuman.OpenHumanClient(
                         com.jarvis.integrations.openhuman.HttpOpenHumanTransport.fromEnvironment());
-        plugins.install(new com.jarvis.integrations.openhuman.OpenHumanPlugin(openhuman));
+        plugins.install(new com.jarvis.integrations.openhuman.OpenHumanPlugin(
+                openhuman, openHumanWritePolicy()));
+        assertOpenHumanPrivateMode(openhuman);
 
         GoogleAuth google = googleAuth(memory);
         boolean googleConnected = google != null && google.isConnected();
@@ -280,6 +283,51 @@ final class AppWiring {
         manifests.addAll(ManifestLoader.loadDirectory(
                 Path.of(System.getProperty("user.home"), ".jarvis", "plugins")));
         return new PluginRegistry(manifests);
+    }
+
+    /**
+     * The OpenHuman durable-write policy (RFC 0001 §8). Deny-by-default: writes are disabled unless
+     * {@code JARVIS_OPENHUMAN_WRITE_ENABLED=true}, and even then only for the conductor plus the
+     * comma-separated roles in {@code JARVIS_OPENHUMAN_WRITE_ROLES}.
+     */
+    static com.jarvis.integrations.openhuman.MemoryWritePolicy openHumanWritePolicy() {
+        boolean enabled = "true".equalsIgnoreCase(
+                String.valueOf(System.getenv("JARVIS_OPENHUMAN_WRITE_ENABLED")).strip());
+        if (!enabled) {
+            return com.jarvis.integrations.openhuman.MemoryWritePolicy.denyAll();
+        }
+        java.util.Set<String> roles = new java.util.HashSet<>();
+        String raw = System.getenv("JARVIS_OPENHUMAN_WRITE_ROLES");
+        if (raw != null) {
+            for (String r : raw.split(",")) {
+                if (!r.isBlank()) {
+                    roles.add(r.strip());
+                }
+            }
+        }
+        return new com.jarvis.integrations.openhuman.MemoryWritePolicy(true, roles);
+    }
+
+    /**
+     * Verifies OpenHuman's private-mode constraints at startup (RFC 0001 §6): fetches the core's
+     * {@code /schema} and logs a prominent warning if any public-network / payment / marketplace
+     * markers appear. Best-effort — OpenHuman's own config is the source of truth; JARVIS only
+     * verifies. Skipped silently when the core is dormant/unreachable.
+     */
+    static void assertOpenHumanPrivateMode(com.jarvis.integrations.openhuman.OpenHumanClient openhuman) {
+        if (openhuman == null || !openhuman.available()) {
+            return;
+        }
+        try {
+            java.util.List<String> concerns = openhuman.schemaConcerns();
+            if (!concerns.isEmpty()) {
+                System.err.println("  [WARNING] OpenHuman advertises private-mode-sensitive features: "
+                        + concerns + " — confirm tiny.place/x402/marketplace are OFF in its config.toml"
+                        + " (RFC 0001 §6).");
+            }
+        } catch (Exception ignore) {
+            // Verification is best-effort; a dormant/unreachable core is not an error here.
+        }
     }
 
     /** Lighter wiring with an injectable store (tests). No monitor, no vision. */
