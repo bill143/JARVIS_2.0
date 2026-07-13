@@ -79,13 +79,13 @@ final class AppWiring {
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
             AutonomousService autonomous, SemanticMemoryService semantic,
-            DiscussionService discussion) {
+            DiscussionService discussion, ProviderSettingsService providers) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion);
+                    discussion, providers);
         }
     }
 
@@ -94,7 +94,8 @@ final class AppWiring {
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
-            SemanticMemoryService semantic, DiscussionService discussion) {
+            SemanticMemoryService semantic, DiscussionService discussion,
+            ProviderSettingsService providers) {
     }
 
     private AppWiring() {
@@ -155,16 +156,44 @@ final class AppWiring {
         UsageMeter usageMeter = new UsageMeter(new FileRecordStore(
                 Path.of(System.getProperty("user.home"), ".jarvis", "usage")), PriceTable.defaults());
 
-        AgentPolicy policy = online
-                ? AnthropicPolicy.withApiKey(apiKey, model, governedTools)
-                        .withMemoryContext(() -> recall(memory, people))
-                        .withHistory(() -> conversationHistory(memory, "dashboard", 24))
-                        .withUsageSink((usedModel, in, out) -> {
-                            if (in > 0 || out > 0) {
-                                usageMeter.record("anthropic", usedModel, in, out);
-                            }
-                        })
-                : context -> new Decision.Respond(OFFLINE_HINT + context.input());
+        // Model provider selection (Settings → Models & Providers). An active configured provider
+        // (e.g. NVIDIA / OpenAI / a local model) overrides the ANTHROPIC_API_KEY default; it takes
+        // effect on (re)start. Keys live locally in the memory store and are never logged.
+        ProviderSettingsService providerSettings = new ProviderSettingsService(memory);
+        java.util.Optional<ProviderSettingsService.Active> chatProvider = providerSettings.active();
+        boolean brainOnline = chatProvider.isPresent() || online;
+        String effectiveModel = chatProvider.map(ProviderSettingsService.Active::model)
+                .filter(m -> !m.isBlank()).orElse(model);
+
+        AgentPolicy policy;
+        if (chatProvider.isPresent()) {
+            ProviderSettingsService.Active a = chatProvider.get();
+            com.jarvis.integrations.llm.LlmProvider prov = "anthropic".equals(a.kind())
+                    ? new com.jarvis.integrations.llm.AnthropicProvider(
+                            AnthropicPolicy.anthropicTransport(a.apiKey()))
+                    : new com.jarvis.integrations.llm.OpenAiCompatibleProvider(
+                            com.jarvis.integrations.llm.OpenAiCompatibleProvider.transport(
+                                    a.baseUrl(), a.apiKey()));
+            policy = AnthropicPolicy.withProvider(prov, effectiveModel, 1024, governedTools)
+                    .withMemoryContext(() -> recall(memory, people))
+                    .withHistory(() -> conversationHistory(memory, "dashboard", 24))
+                    .withUsageSink((usedModel, in, out) -> {
+                        if (in > 0 || out > 0) {
+                            usageMeter.record(a.name(), usedModel, in, out);
+                        }
+                    });
+        } else if (online) {
+            policy = AnthropicPolicy.withApiKey(apiKey, model, governedTools)
+                    .withMemoryContext(() -> recall(memory, people))
+                    .withHistory(() -> conversationHistory(memory, "dashboard", 24))
+                    .withUsageSink((usedModel, in, out) -> {
+                        if (in > 0 || out > 0) {
+                            usageMeter.record("anthropic", usedModel, in, out);
+                        }
+                    });
+        } else {
+            policy = context -> new Decision.Respond(OFFLINE_HINT + context.input());
+        }
 
         JarvisApi api = assemble(policy, governedTools, memory);
         HardwareMonitor monitor = new HardwareMonitor();
@@ -198,10 +227,10 @@ final class AppWiring {
         DiscussionService discussion = new DiscussionService(api, openhuman, auditLog,
                 new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "discussions")));
 
-        return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
-                memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license, usageMeter, tasks, workflows, knowledge, agents, autonomous, semantic,
-                discussion);
+        return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
+                googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
+                permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
+                autonomous, semantic, discussion, providerSettings);
     }
 
     /**

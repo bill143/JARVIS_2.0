@@ -710,6 +710,20 @@
     <div class="hint" style="padding:0 2px 4px;">JARVIS asks before running risky tools (send/delete mail, power off). Denied actions never run.</div>
   </div>
   <div class="sect">
+    <h4>🤖 Models &amp; Providers</h4>
+    <div class="hint" style="padding:0 2px 6px;">Pick a chat brain by adding an API key. Anthropic is native; every other option is an OpenAI-compatible endpoint (NVIDIA, OpenAI, OpenRouter, Groq, Mistral, DeepSeek, xAI, or a local Ollama). Keys stay on this PC and are never shown back. Changes apply on the next restart.</div>
+    <div class="row"><label for="s_provPreset">Provider</label>
+      <select id="s_provPreset"></select></div>
+    <div class="row"><label for="s_provBase">Base URL</label><input type="text" id="s_provBase" placeholder="https://…/v1"></div>
+    <div class="row"><label for="s_provKey">API key</label><input type="password" id="s_provKey" placeholder="paste key (leave blank to keep existing)"></div>
+    <div class="row"><label for="s_provModel">Model</label>
+      <select id="s_provModel"><option value="">—</option></select>
+      <button class="hbtn" id="s_provFetch" type="button" title="List this provider's models" style="margin-left:6px;">Fetch</button></div>
+    <div class="row"><label for="s_provActive">Use as active brain</label><input type="checkbox" id="s_provActive"></div>
+    <div style="margin:6px 2px;"><button class="hbtn" id="s_provSave" type="button">Save provider</button></div>
+    <div id="s_provList" class="hint">None configured — Anthropic env key (if set) is used.</div>
+  </div>
+  <div class="sect">
     <h4>🧠 Session</h4>
     <div class="row"><label>Model</label><span id="s_model" class="hint"></span></div>
     <div class="row"><label>Conversation</label><button id="s_clearChat" type="button">Clear</button></div>
@@ -1355,6 +1369,52 @@
   $('s_perm').addEventListener('change',e=>{ fetch('/permissions/config',{method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify({level:e.target.value})}).catch(()=>{}); });
   fetch('/permissions/config').then(r=>r.json()).then(j=>{ if(j.level) $('s_perm').value=j.level; }).catch(()=>{});
+
+  // ---- Models & Providers ----
+  let provPresets=[];
+  function provApplyPreset(){
+    const p=provPresets.find(x=>x.name===$('s_provPreset').value);
+    if(p){ $('s_provBase').value=p.baseUrl||''; }
+  }
+  async function provFetchModels(){
+    const name=$('s_provPreset').value; const sel=$('s_provModel'); const cur=sel.value;
+    // Save first so the server has the base URL + key for this provider, then list its models.
+    await provSave(false);
+    let ids=[];
+    try{ ids=(await (await fetch('/providers/models?name='+encodeURIComponent(name))).json()).models||[]; }catch(e){}
+    sel.innerHTML='<option value="">—</option>'+ids.map(id=>'<option>'+id+'</option>').join('');
+    if(ids.includes(cur)) sel.value=cur;
+  }
+  async function provSave(makeActive){
+    const name=$('s_provPreset').value;
+    const preset=provPresets.find(x=>x.name===name);
+    const body={name, kind:(preset?preset.kind:'openai'), baseUrl:$('s_provBase').value.trim(),
+      apiKey:$('s_provKey').value, model:$('s_provModel').value, active:makeActive};
+    await fetch('/providers',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)}).catch(()=>{});
+    $('s_provKey').value='';   // never keep the key in the field
+    await provLoad();
+  }
+  async function provLoad(){
+    let j={presets:[],configured:[]};
+    try{ j=await (await fetch('/providers')).json(); }catch(e){ return; }
+    provPresets=j.presets||[];
+    const psel=$('s_provPreset'); const cur=psel.value;
+    psel.innerHTML=provPresets.map(p=>'<option>'+p.name+'</option>').join('');
+    if(provPresets.some(p=>p.name===cur)) psel.value=cur; else provApplyPreset();
+    const box=$('s_provList'); const cfg=j.configured||[];
+    if(!cfg.length){ box.innerHTML='None configured — Anthropic env key (if set) is used.'; return; }
+    box.innerHTML=cfg.map(c=>{
+      const tag=c.active?' <b style="color:var(--cyan)">● ACTIVE</b>':'';
+      const key=c.hasKey?'key set':'no key';
+      const model=c.model?(' · '+c.model):'';
+      return '<div style="padding:3px 0;">'+c.name+tag+' <span class="hint">('+key+model+')</span></div>';
+    }).join('');
+  }
+  $('s_provPreset').addEventListener('change',provApplyPreset);
+  $('s_provFetch').addEventListener('click',provFetchModels);
+  $('s_provSave').addEventListener('click',()=>provSave($('s_provActive').checked));
+  provLoad();
 
   // ---- HUD Activity feed (sourced from the audit log — single source of truth) ----
   function actClass(e){

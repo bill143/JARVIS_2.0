@@ -99,6 +99,7 @@ public final class WebServer {
         AutonomousService autonomous = governance == null ? null : governance.autonomous();
         SemanticMemoryService semantic = governance == null ? null : governance.semantic();
         DiscussionService discussion = governance == null ? null : governance.discussion();
+        ProviderSettingsService providers = governance == null ? null : governance.providers();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -591,6 +592,55 @@ public final class WebServer {
                 }
             }
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/providers/models", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode arr = root.putArray("models");
+            if (providers != null) {
+                providers.models(param(exchange, "name", "")).forEach(arr::add);
+            }
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/providers", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod()) && providers != null) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String name = j.path("name").asText("").strip();
+                    if (name.isBlank()) {
+                        respond(exchange, 400, "text/plain", "name required".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                    providers.save(name, j.path("kind").asText("openai"), j.path("baseUrl").asText(""),
+                            j.path("apiKey").asText(""), j.path("model").asText(""),
+                            j.path("active").asBoolean(false));
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode presets = root.putArray("presets");
+            for (ProviderSettingsService.Preset p : ProviderSettingsService.PRESETS) {
+                ObjectNode po = presets.addObject();
+                po.put("name", p.name());
+                po.put("kind", p.kind());
+                po.put("baseUrl", p.baseUrl());
+            }
+            ArrayNode configured = root.putArray("configured");
+            if (providers != null) {
+                for (ProviderSettingsService.ProviderView v : providers.list()) {
+                    ObjectNode vo = configured.addObject();
+                    vo.put("name", v.name());
+                    vo.put("kind", v.kind());
+                    vo.put("baseUrl", v.baseUrl());
+                    vo.put("model", v.model());
+                    vo.put("hasKey", v.hasKey());   // never the key itself
+                    vo.put("active", v.active());
+                }
+            }
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/discussion/run", exchange -> {
