@@ -28,6 +28,7 @@
     <module>multi-agent</module>
     <module>autonomous</module>
     <module>discussion</module>
+    <module>solicitations</module>
     <module>api</module>
     <module>ui</module>
     <module>app</module>
