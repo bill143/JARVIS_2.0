@@ -86,6 +86,26 @@
   .kbhit { padding:8px 2px; border-bottom:1px solid rgba(120,160,200,.12); }
   .kbhit .kbt { color:#eaf7ff; font-size:13px; }
   .kbhit .kbs { color:var(--dim); font-size:11.5px; }
+  .solbar { display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px; }
+  .solviews { display:flex;gap:4px; }
+  .solview.active { color:#eaf7ff;border-color:var(--cyan); }
+  .solkpis { display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px; }
+  .solkpi { background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 16px;min-width:110px; }
+  .solkpi b { display:block;font-size:22px;color:#eaf7ff; }
+  .solkpi span { font-size:11px;letter-spacing:1px;color:var(--dim); }
+  .solcards { display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px; }
+  .solcard { background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;cursor:pointer;transition:border-color .15s; }
+  .solcard:hover { border-color:var(--cyan); }
+  .solcard h5 { color:#eaf7ff;font-size:14px;margin-bottom:6px; }
+  .solcard .meta { font-size:11.5px;color:var(--dim);line-height:1.7; }
+  .solcard .badge { display:inline-block;background:rgba(65,217,255,.12);color:var(--cyan);border-radius:5px;padding:1px 7px;font-size:10.5px;margin-right:5px; }
+  .soltable { width:100%;border-collapse:collapse;font-size:12px; }
+  .soltable th { text-align:left;color:var(--cyan);padding:7px 10px;border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap; }
+  .soltable td { padding:7px 10px;border-bottom:1px solid rgba(120,160,200,.12);color:var(--text); }
+  .soltable tr:hover td { background:rgba(80,140,200,.06);cursor:pointer; }
+  .solmap svg { width:100%;height:auto;background:rgba(8,18,30,.5);border:1px solid var(--line);border-radius:12px; }
+  .solmap .dot { fill:var(--cyan);opacity:.85; }
+  .soldetail-doc { display:block;color:var(--cyan);font-size:12px;padding:3px 0;word-break:break-all; }
   .agmsg,.agfinal { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
   .agfinal { border-color:var(--cyan); background:rgba(65,217,255,.05); }
   .agrole { color:var(--cyan); font-size:10px; letter-spacing:2px; margin-bottom:5px; }
@@ -344,6 +364,7 @@
   <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
   <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
   <div class="navitem" data-nav="kb"><span class="ic">📚</span> Knowledge</div>
+  <div class="navitem" data-nav="solicitations"><span class="ic">📑</span> Solicitations</div>
   <div class="navitem" data-nav="intel"><span class="ic">✨</span> Intelligence</div>
   <div class="navitem" data-nav="discussion"><span class="ic">🗣</span> Discussion</div>
   <div class="navitem" data-nav="agents"><span class="ic">🤖</span> Agents</div>
@@ -560,6 +581,44 @@
     <div class="pcard"><h4>All documents</h4><div id="kbList"><div class="hint">None yet.</div></div></div>
   </div>
 </div>
+<div class="page cpage" id="cpage-solicitations">
+  <div class="page-head"><h2>📑  SOLICITATIONS COMMAND CENTER</h2>
+    <span id="solStat" class="hint" style="margin-left:14px;"></span>
+    <span style="margin-left:auto;"></span>
+    <button class="hbtn" id="solRefresh" type="button" title="Pull fresh opportunities from configured sources">⟳ REFRESH</button>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body">
+    <div class="solkpis" id="solKpis"></div>
+    <div class="pcard" id="solSetup" style="display:none;">
+      <h4>No source connected</h4>
+      <div class="hint">Set <b>SAMGOV_API_KEY</b> (api.sam.gov) to pull live opportunities, then press REFRESH. GovTribe and Drive/OneDrive connectors are read-only and dormant until configured — see <code>/connectors/status</code>.</div>
+    </div>
+    <div class="solbar" id="solBar">
+      <input id="solQ" class="minput" placeholder="Search text…" style="min-width:150px;">
+      <input id="solSetAside" class="minput" placeholder="Set-aside (SDVOSB…)" style="width:150px;">
+      <input id="solState" class="minput" placeholder="State (VA)" style="width:90px;">
+      <input id="solNaics" class="minput" placeholder="NAICS (236,237,238)" style="width:150px;">
+      <input id="solMin" class="minput" placeholder="Min $" style="width:90px;">
+      <input id="solMax" class="minput" placeholder="Max $" style="width:100px;">
+      <select id="solDue"><option value="">Any due</option><option value="&lt;28d">&lt; 28 days</option>
+        <option value="28-45d">28–45 days</option><option value="45+d">45+ days</option></select>
+      <button class="hbtn" id="solApply" type="button">Filter</button>
+      <span style="margin-left:auto;"></span>
+      <div class="solviews">
+        <button class="hbtn solview active" data-view="cards" type="button">▤ Cards</button>
+        <button class="hbtn solview" data-view="rows" type="button">▦ Rows</button>
+        <button class="hbtn solview" data-view="map" type="button">🗺 Map</button>
+      </div>
+    </div>
+    <div id="solCards" class="solcards"></div>
+    <div id="solRows" style="display:none;overflow:auto;"></div>
+    <div id="solMap" style="display:none;"></div>
+  </div>
+</div>
+<aside class="drawer" id="solDrawer" aria-label="Solicitation detail" style="width:480px;">
+  <div class="sect"><h2>SOLICITATION</h2><button class="hbtn" id="solDetailClose" type="button" style="margin-left:auto;">CLOSE</button></div>
+  <div id="solDetail" style="padding:0 16px 24px;"></div>
+</aside>
 <div class="page cpage" id="cpage-intel">
   <div class="page-head"><h2>✨  PERSONAL INTELLIGENCE</h2>
     <span id="intelMode" style="margin-left:12px;font-size:11px;letter-spacing:1px;padding:2px 8px;border:1px solid var(--dim);border-radius:10px;color:var(--dim);">KEYWORD</span>
@@ -1571,6 +1630,128 @@
   $('kbSearchBtn').addEventListener('click',kbSearch);
   $('kbQuery').addEventListener('keydown',e=>{ if(e.key==='Enter') kbSearch(); });
   pageLoaders.kb=loadKB;
+
+  // ---- Solicitations Command Center ----
+  let solView='cards', solItems=[], solSort={col:'dueDate',dir:1};
+  function solEsc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function solMoney(n){ return (n==null||n==='')?'—':('$'+Number(n).toLocaleString()); }
+  function solFilterQS(){
+    const p=new URLSearchParams();
+    const add=(k,v)=>{ if(v&&v.trim()) p.set(k,v.trim()); };
+    add('query',$('solQ').value); add('setAside',$('solSetAside').value); add('state',$('solState').value);
+    add('naics',$('solNaics').value); add('valueMin',$('solMin').value); add('valueMax',$('solMax').value);
+    add('due',$('solDue').value);
+    return p.toString();
+  }
+  async function loadSolicitations(){
+    let j={configured:false,items:[],count:0,lastRefresh:''};
+    try{ j=await (await fetch('/solicitations?'+solFilterQS())).json(); }catch(e){}
+    solItems=j.items||[];
+    $('solSetup').style.display=j.configured?'none':'';
+    $('solStat').textContent=j.configured?((j.lastRefresh?('last refresh '+new Date(j.lastRefresh).toLocaleString()):'not refreshed yet')):'no source configured';
+    renderSolKpis(); renderSolView();
+  }
+  function renderSolKpis(){
+    const total=solItems.length;
+    const soon=solItems.filter(s=>{ const d=solDays(s.dueDate); return d!=null&&d>=0&&d<28; }).length;
+    const sdvosb=solItems.filter(s=>(s.setAside||'').toUpperCase().includes('SDVOSB')).length;
+    const states=new Set(solItems.map(s=>(s.placeOfPerformance||{}).state).filter(Boolean)).size;
+    $('solKpis').innerHTML=[['Opportunities',total],['Closing < 28d',soon],['SDVOSB',sdvosb],['States',states]]
+      .map(k=>'<div class="solkpi"><b>'+k[1]+'</b><span>'+k[0]+'</span></div>').join('');
+  }
+  function solDays(due){ if(!due) return null; const d=new Date(due); if(isNaN(d)) return null;
+    return Math.round((d-new Date())/86400000); }
+  function setSolView(v){ solView=v;
+    document.querySelectorAll('.solview').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+    $('solCards').style.display=v==='cards'?'':'none';
+    $('solRows').style.display=v==='rows'?'':'none';
+    $('solMap').style.display=v==='map'?'':'none';
+    renderSolView();
+  }
+  function renderSolView(){ if(solView==='cards') renderSolCards(); else if(solView==='rows') renderSolRows(); else renderSolMap(); }
+  function renderSolCards(){
+    const box=$('solCards');
+    if(!solItems.length){ box.innerHTML='<div class="hint">No solicitations. Configure a source and press REFRESH.</div>'; return; }
+    box.innerHTML=solItems.map(s=>{
+      const pop=s.placeOfPerformance||{};
+      return '<div class="solcard" data-id="'+solEsc(s.id)+'">'
+        +'<h5>'+solEsc(s.title||'(untitled)')+'</h5>'
+        +'<div class="meta">'
+        +(s.setAside?'<span class="badge">'+solEsc(s.setAside)+'</span>':'')
+        +'<span class="badge">'+solEsc(s.source)+'</span><br>'
+        +'<b>'+solEsc(s.agency||'')+'</b><br>'
+        +'Sol #: '+solEsc(s.solicitationNumber||'—')+'<br>'
+        +'Location: '+solEsc((pop.city||'')+(pop.state?(', '+pop.state):''))+'<br>'
+        +'Value: '+solMoney(s.estValueMin)+' – '+solMoney(s.estValueMax)+'<br>'
+        +'Due: '+solEsc(s.dueDate||'—')
+        +'</div></div>';
+    }).join('');
+    box.querySelectorAll('.solcard').forEach(c=>c.addEventListener('click',()=>openSolDetail(c.dataset.id)));
+  }
+  function renderSolRows(){
+    const box=$('solRows');
+    if(!solItems.length){ box.innerHTML='<div class="hint">No solicitations.</div>'; return; }
+    const cols=[['title','Title'],['agency','Agency'],['setAside','Set-aside'],['dueDate','Due'],['estValueMax','Value'],['source','Source']];
+    const rows=[...solItems].sort((a,b)=>{
+      let x=a[solSort.col],y=b[solSort.col]; x=x==null?'':x; y=y==null?'':y;
+      return (x>y?1:x<y?-1:0)*solSort.dir; });
+    box.innerHTML='<table class="soltable"><thead><tr>'
+      +cols.map(c=>'<th data-col="'+c[0]+'">'+c[1]+'</th>').join('')+'</tr></thead><tbody>'
+      +rows.map(s=>'<tr data-id="'+solEsc(s.id)+'"><td>'+solEsc(s.title)+'</td><td>'+solEsc(s.agency)
+        +'</td><td>'+solEsc(s.setAside||'—')+'</td><td>'+solEsc(s.dueDate||'—')+'</td><td>'
+        +solMoney(s.estValueMax)+'</td><td>'+solEsc(s.source)+'</td></tr>').join('')
+      +'</tbody></table>';
+    box.querySelectorAll('th').forEach(th=>th.addEventListener('click',()=>{
+      const c=th.dataset.col; solSort.dir=(solSort.col===c)?-solSort.dir:1; solSort.col=c; renderSolRows(); }));
+    box.querySelectorAll('tr[data-id]').forEach(tr=>tr.addEventListener('click',()=>openSolDetail(tr.dataset.id)));
+  }
+  // Self-contained map: equirectangular projection of the continental US (no external tiles).
+  function solProject(lat,lng){ const x=((lng+125)/(59))*940+10, y=((50-lat)/(26))*560+10; return [x,y]; }
+  async function renderSolMap(){
+    let m={points:[],groups:[],plotted:0,unplotted:0};
+    try{ m=await (await fetch('/solicitations/map')).json(); }catch(e){}
+    const dots=(m.points||[]).map(p=>{ const xy=solProject(p.lat,p.lng);
+      return '<circle class="dot" cx="'+xy[0].toFixed(1)+'" cy="'+xy[1].toFixed(1)+'" r="6"><title>'
+        +solEsc(p.title)+' ('+solEsc(p.state)+')</title></circle>'; }).join('');
+    const groups=(m.groups||[]).map(g=>'<div class="meta">'+solEsc(g.state)+': <b>'+g.count+'</b></div>').join('');
+    $('solMap').innerHTML='<div class="solmap"><svg viewBox="0 0 960 580" preserveAspectRatio="xMidYMid meet">'
+      +'<rect x="1" y="1" width="958" height="578" rx="12" fill="none" stroke="rgba(65,217,255,.18)"/>'
+      +dots+'</svg></div>'
+      +'<div class="hint" style="margin-top:8px;">'+m.plotted+' of '+(m.plotted+m.unplotted)
+      +' plotted (records without coordinates are counted by state below; SAM.gov omits lat/lng — geocoding is v2).</div>'
+      +'<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;">'+groups+'</div>';
+  }
+  async function openSolDetail(id){
+    let s=null; try{ s=await (await fetch('/solicitations/detail?id='+encodeURIComponent(id))).json(); }catch(e){}
+    if(!s){ return; }
+    const pop=s.placeOfPerformance||{};
+    const row=(k,v)=>'<div class="meta"><b>'+k+':</b> '+solEsc(v||'—')+'</div>';
+    const docs=(s.documents||[]).map(d=>'<a class="soldetail-doc" href="'+solEsc(d.url)+'" target="_blank" rel="noopener">📎 '+solEsc(d.name)+' ['+solEsc(d.source)+']</a>').join('')||'<div class="hint">No documents provided by the source.</div>';
+    const amends=(s.amendments||[]).map(a=>'<div class="meta">• '+solEsc(a.date)+' — '+solEsc(a.title)+'</div>').join('')||'<div class="hint">No amendments listed.</div>';
+    $('solDetail').innerHTML='<h3 style="color:#eaf7ff;margin:10px 0;">'+solEsc(s.title)+'</h3>'
+      +row('Agency',s.agency)+row('Sub-agency',s.subAgency)+row('Solicitation #',s.solicitationNumber)
+      +row('Set-aside',s.setAside)+row('NAICS',(s.naics||[]).join(', '))
+      +row('Location',(pop.city||'')+(pop.state?(', '+pop.state):''))
+      +row('Status',s.status)+row('Posted',s.postedDate)+row('Due',s.dueDate)
+      +row('Value',solMoney(s.estValueMin)+' – '+solMoney(s.estValueMax))
+      +'<h4 style="color:var(--cyan);margin:14px 0 6px;">Description</h4><div class="meta">'+solEsc(s.description||'—')+'</div>'
+      +'<h4 style="color:var(--cyan);margin:14px 0 6px;">Documents</h4>'+docs
+      +'<h4 style="color:var(--cyan);margin:14px 0 6px;">Amendments</h4>'+amends
+      +'<div style="margin-top:16px;"><a class="hbtn" href="'+solEsc(s.sourceUrl)+'" target="_blank" rel="noopener" style="text-decoration:none;">↗ Open source ad</a></div>';
+    $('solDrawer').classList.add('open'); scrim.classList.add('open');
+  }
+  async function refreshSolicitations(){
+    $('solStat').textContent='refreshing…';
+    try{ await fetch('/solicitations/refresh',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({query:$('solQ').value,setAside:$('solSetAside').value,state:$('solState').value,
+        naics:$('solNaics').value,due:$('solDue').value})}); }catch(e){}
+    loadSolicitations();
+  }
+  document.querySelectorAll('.solview').forEach(b=>b.addEventListener('click',()=>setSolView(b.dataset.view)));
+  $('solApply').addEventListener('click',loadSolicitations);
+  $('solRefresh').addEventListener('click',refreshSolicitations);
+  $('solDetailClose').addEventListener('click',()=>{ $('solDrawer').classList.remove('open'); scrim.classList.remove('open'); });
+  pageLoaders.solicitations=loadSolicitations;
 
   // ---- Personal Intelligence (semantic recall) page ----
   function intelSetMode(mode){
