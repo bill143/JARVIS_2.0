@@ -745,7 +745,8 @@
         <select id="s_provModel"><option value="">—</option></select>
         <button class="hbtn" id="s_provFetch" type="button" title="List this provider's models from its /v1/models endpoint" style="margin-left:6px;">Fetch live models</button></div>
       <div class="row"><label for="s_provActive">Use as active brain</label><input type="checkbox" id="s_provActive"></div>
-      <div style="margin:6px 2px;"><button class="hbtn" id="s_provSave" type="button">Save provider</button></div>
+      <div style="margin:6px 2px;"><button class="hbtn" id="s_provSave" type="button">Save provider</button>
+        <span id="s_provMsg" style="margin-left:10px;font-size:12.5px;"></span></div>
       <div id="s_provList" class="hint">None configured — Anthropic env key (if set) is used.</div>
     </div>
     <div class="pcard">
@@ -2234,38 +2235,62 @@
   }
   async function provFetchModels(){
     const name=$('s_provPreset').value; const sel=$('s_provModel'); const cur=sel.value;
+    const msg=$('s_provMsg'); if(msg){ msg.style.color='var(--dim)'; msg.textContent='Fetching models…'; }
     // Save first so the server has the base URL + key for this provider, then list its models.
-    await provSave(false);
+    await provSave(false, true);
     let ids=[];
     try{ ids=(await (await fetch('/providers/models?name='+encodeURIComponent(name))).json()).models||[]; }catch(e){}
     sel.innerHTML='<option value="">—</option>'+ids.map(id=>'<option>'+id+'</option>').join('');
     if(ids.includes(cur)) sel.value=cur;
+    if(msg){ if(ids.length){ msg.style.color='#8ef0b4'; msg.textContent=ids.length+' models loaded — pick one, tick “active”, Save.'; }
+      else { msg.style.color='#f3c67a'; msg.textContent='No models returned — check the base URL and key.'; }
+      clearTimeout(window._provMsgT); window._provMsgT=setTimeout(()=>{ msg.textContent=''; }, 8000); }
   }
-  async function provSave(makeActive){
+  let provConfigured=[];
+  async function provSave(makeActive, quiet){
     const name=$('s_provPreset').value;
     const preset=provPresets.find(x=>x.name===name);
     const body={name, kind:(preset?preset.kind:'openai'), baseUrl:$('s_provBase').value.trim(),
       apiKey:$('s_provKey').value, model:$('s_provModel').value, active:makeActive};
-    await fetch('/providers',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(body)}).catch(()=>{});
+    let ok=false;
+    try{ const r=await fetch('/providers',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)}); ok=r.ok; }catch(e){}
     $('s_provKey').value='';   // never keep the key in the field
-    await provLoad();
+    await provLoad(name);
+    if(!quiet){ const m=$('s_provMsg'); if(m){
+      if(ok){ m.style.color='#8ef0b4'; m.textContent='Saved ✓ — '+(makeActive?'restart JARVIS to start using this brain.':'saved. Tick “active” to use it, then restart.'); }
+      else { m.style.color='#f6a3a3'; m.textContent='Save failed — is JARVIS still running?'; }
+      clearTimeout(window._provMsgT); window._provMsgT=setTimeout(()=>{ m.textContent=''; }, 8000);
+    } }
   }
-  async function provLoad(){
+  function provFill(c){
+    if(!c) return;
+    const psel=$('s_provPreset'); if([...psel.options].some(o=>o.value===c.name)) psel.value=c.name;
+    $('s_provBase').value=c.baseUrl||'';
+    const msel=$('s_provModel');
+    if(c.model && ![...msel.options].some(o=>o.value===c.model)){ const o=document.createElement('option'); o.value=c.model; o.textContent=c.model; msel.appendChild(o); }
+    if(c.model) msel.value=c.model;
+    $('s_provActive').checked=!!c.active;
+    $('s_provKey').placeholder=c.hasKey?'•••••• saved — leave blank to keep':'paste key';
+  }
+  async function provLoad(focusName){
     let j={presets:[],configured:[]};
     try{ j=await (await fetch('/providers')).json(); }catch(e){ return; }
-    provPresets=j.presets||[];
+    provPresets=j.presets||[]; provConfigured=j.configured||[];
     const psel=$('s_provPreset'); const cur=psel.value;
     psel.innerHTML=provPresets.map(p=>'<option>'+p.name+'</option>').join('');
     if(provPresets.some(p=>p.name===cur)) psel.value=cur; else provApplyPreset();
-    const box=$('s_provList'); const cfg=j.configured||[];
-    if(!cfg.length){ box.innerHTML='None configured — Anthropic env key (if set) is used.'; return; }
-    box.innerHTML=cfg.map(c=>{
+    const box=$('s_provList'); const cfg=provConfigured;
+    if(!cfg.length){ box.innerHTML='None configured — Anthropic env key (if set) is used.'; }
+    else { box.innerHTML='<div style="margin-bottom:4px;color:var(--dim);">Configured providers</div>'+cfg.map(c=>{
       const tag=c.active?' <b style="color:var(--cyan)">● ACTIVE</b>':'';
       const key=c.hasKey?'key set':'no key';
       const model=c.model?(' · '+c.model):'';
       return '<div style="padding:3px 0;">'+c.name+tag+' <span class="hint">('+key+model+')</span></div>';
-    }).join('');
+    }).join(''); }
+    // Reflect the saved config in the form so a successful save doesn't look empty.
+    const pick=cfg.find(c=>c.name===focusName) || cfg.find(c=>c.active) || cfg[0];
+    provFill(pick);
   }
   $('s_provPreset').addEventListener('change',provApplyPreset);
   $('s_provFetch').addEventListener('click',provFetchModels);
