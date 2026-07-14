@@ -79,13 +79,13 @@ final class AppWiring {
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
             AutonomousService autonomous, SemanticMemoryService semantic,
-            DiscussionService discussion, ProviderSettingsService providers) {
+            DiscussionService discussion, ProviderSettingsService providers, BrainVault brain) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion, providers);
+                    discussion, providers, brain);
         }
     }
 
@@ -95,7 +95,7 @@ final class AppWiring {
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
             SemanticMemoryService semantic, DiscussionService discussion,
-            ProviderSettingsService providers) {
+            ProviderSettingsService providers, BrainVault brain) {
     }
 
     private AppWiring() {
@@ -226,11 +226,14 @@ final class AppWiring {
         // Project Discussion: JARVIS chairs, OpenHuman advises. Bounded + audited; read-only.
         DiscussionService discussion = new DiscussionService(api, openhuman, auditLog,
                 new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "discussions")));
+        // BRAIN (Obsidian): read-only mirror of a local vault. Dormant unless OBSIDIAN_VAULT_PATH is
+        // set; the memory backend stays the source of truth. No writes to the vault in Phase 1.
+        BrainVault brain = BrainVault.fromEnvironment(auditLog);
 
         return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
                 permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
-                autonomous, semantic, discussion, providerSettings);
+                autonomous, semantic, discussion, providerSettings, brain);
     }
 
     /**

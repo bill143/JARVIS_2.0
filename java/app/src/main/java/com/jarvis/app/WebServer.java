@@ -100,6 +100,7 @@ public final class WebServer {
         SemanticMemoryService semantic = governance == null ? null : governance.semantic();
         DiscussionService discussion = governance == null ? null : governance.discussion();
         ProviderSettingsService providers = governance == null ? null : governance.providers();
+        BrainVault brain = governance == null ? null : governance.brain();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -638,6 +639,82 @@ public final class WebServer {
                     vo.put("model", v.model());
                     vo.put("hasKey", v.hasKey());   // never the key itself
                     vo.put("active", v.active());
+                }
+            }
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- BRAIN (Obsidian vault, read-only) ----
+        server.createContext("/brain/search", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (brain != null) {
+                int k = parseInt(param(exchange, "k", "8"), 8);
+                for (BrainVault.Hit h : brain.search(param(exchange, "q", ""), k)) {
+                    ObjectNode o = arr.addObject();
+                    o.put("path", h.path());
+                    o.put("title", h.title());
+                    o.put("score", h.score());
+                    o.put("snippet", h.snippet());
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/brain/cite", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (brain != null) {
+                int k = parseInt(param(exchange, "k", "3"), 3);
+                for (BrainVault.Hit h : brain.cite(param(exchange, "q", ""), k)) {
+                    ObjectNode o = arr.addObject();
+                    o.put("source", h.title().isBlank() ? h.path() : h.title());
+                    o.put("path", h.path());
+                    o.put("snippet", h.snippet());
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/brain/note", exchange -> {
+            if (brain == null || !brain.configured()) {
+                respond(exchange, 503, "text/plain", "brain unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String path = param(exchange, "path", "");
+            try {
+                String[] note = brain.readNote(path);
+                ObjectNode o = MAPPER.createObjectNode();
+                o.put("path", path);
+                o.put("title", note[0]);
+                o.put("markdown", note[1]);   // raw; the client escapes before rendering
+                respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+            } catch (BrainVault.VaultAccessException e) {
+                String msg = e.getMessage() == null ? "invalid path" : e.getMessage();
+                int code;
+                if (msg.contains("no such")) {
+                    code = 404;                                   // note doesn't exist
+                } else if (msg.contains("escape") || msg.contains("traversal")
+                        || msg.contains("absolute")) {
+                    code = 403;                                   // access forbidden outside the vault
+                } else {
+                    code = 400;                                   // malformed request
+                }
+                respond(exchange, code, "text/plain", msg.getBytes(StandardCharsets.UTF_8));
+            }
+        });
+
+        server.createContext("/brain", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            boolean on = brain != null && brain.configured();
+            root.put("configured", on);
+            root.put("readOnly", brain == null || brain.readOnly());
+            root.put("root", on ? brain.rootDisplay() : "");
+            root.put("count", on ? brain.count() : 0);
+            ArrayNode notes = root.putArray("notes");
+            if (on) {
+                for (BrainVault.Note n : brain.notes()) {
+                    ObjectNode o = notes.addObject();
+                    o.put("path", n.path());
+                    o.put("title", n.title());
                 }
             }
             respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
