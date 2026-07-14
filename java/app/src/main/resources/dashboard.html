@@ -481,6 +481,41 @@
   .ap-swatch.active{ border-color:#eaf7ff; }
   .ap-toggle{ width:38px; height:20px; }
   .ap-preset-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
+  /* ===== Platform panels (Capabilities / Connectors / Skills / Plugins) ===== */
+  .pf-body{ display:flex; flex-direction:column; gap:9px; }
+  .pf-search{ margin:0 2px 8px; } .pf-search input{ width:100%; padding:7px 10px; font:inherit; font-size:13px;
+    border-radius:7px; background:rgba(8,18,30,.8); color:var(--text); border:1px solid var(--line); }
+  .pf-card{ border:1px solid var(--line); border-radius:var(--radius); background:rgba(10,22,36,calc(.5*var(--panel-alpha)));
+    padding:11px 13px; }
+  .pf-card-head{ display:flex; align-items:center; gap:10px; }
+  .pf-ic{ font-size:17px; width:22px; text-align:center; flex:0 0 auto; }
+  .pf-name{ font-weight:600; color:var(--text); font-size:13.5px; }
+  .pf-sub{ color:var(--dim); font-size:12px; margin-top:2px; }
+  .pf-head-r{ margin-left:auto; display:flex; align-items:center; gap:7px; flex:0 0 auto; }
+  .pf-badge{ font-size:10.5px; letter-spacing:.4px; padding:2px 8px; border-radius:999px; border:1px solid var(--line);
+    text-transform:uppercase; white-space:nowrap; }
+  .pf-badge.on{ color:#8ef0b4; border-color:rgba(56,226,142,.5); background:rgba(56,226,142,.10); }
+  .pf-badge.off{ color:#9fb3c6; border-color:var(--line); background:rgba(120,150,180,.06); }
+  .pf-badge.warn{ color:#f3c67a; border-color:rgba(245,158,11,.5); background:rgba(245,158,11,.10); }
+  .pf-badge.err{ color:#f6a3a3; border-color:rgba(239,68,68,.5); background:rgba(239,68,68,.10); }
+  .pf-tier{ font-size:10px; letter-spacing:.5px; padding:1px 6px; border-radius:5px; text-transform:uppercase; border:1px solid var(--line); }
+  .pf-tier.read{ color:#8ef0b4; border-color:rgba(56,226,142,.4); }
+  .pf-tier.mut{ color:#f3c67a; border-color:rgba(245,158,11,.4); }
+  .pf-tier.dest{ color:#f6a3a3; border-color:rgba(239,68,68,.4); }
+  .pf-tier.unk{ color:#9fb3c6; }
+  .pf-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; flex:0 0 auto; }
+  .pf-dot.ok{ background:#38e28e; } .pf-dot.dorm{ background:#5c7691; } .pf-dot.deg{ background:#f59e0b; } .pf-dot.brk{ background:#ef4444; }
+  .pf-tools{ margin-top:9px; border-top:1px dashed var(--line); padding-top:8px; display:none; }
+  .pf-card.open .pf-tools{ display:block; }
+  .pf-tool{ display:flex; align-items:center; gap:8px; padding:4px 0; font-size:12.5px; }
+  .pf-tool .pf-tn{ font-family:var(--font-mono); color:var(--text); }
+  .pf-tool .pf-td{ color:var(--dim); font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pf-tool .pf-tr{ margin-left:auto; display:flex; align-items:center; gap:7px; flex:0 0 auto; }
+  .pf-toggle{ margin-left:6px; color:var(--cyan); font-size:11px; cursor:pointer; user-select:none; }
+  .pf-grouphdr{ font-size:10.5px; letter-spacing:2px; color:var(--dim); text-transform:uppercase; margin:6px 2px 2px; }
+  .pf-metrics{ display:flex; gap:6px; flex-wrap:wrap; margin:0 2px 6px; }
+  .pf-metric{ flex:1 1 92px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:rgba(10,22,36,calc(.5*var(--panel-alpha))); }
+  .pf-metric .n{ font-size:18px; font-weight:600; color:var(--cyan); } .pf-metric .k{ font-size:11px; color:var(--dim); }
 
 </style>
 </head>
@@ -901,6 +936,11 @@
     <div class="set-item" data-set="briefing"><span class="ic">🌅</span> Briefing</div>
     <div class="set-item" data-set="alerts"><span class="ic">📊</span> Alerts</div>
     <div class="set-item" data-set="security"><span class="ic">🛡</span> Security</div>
+    <div class="set-nav-group">Platform</div>
+    <div class="set-item" data-set="capabilities"><span class="ic">✨</span> Capabilities</div>
+    <div class="set-item" data-set="connectors"><span class="ic">🔌</span> Connectors</div>
+    <div class="set-item" data-set="skills"><span class="ic">🧩</span> Skills</div>
+    <div class="set-item" data-set="plugins"><span class="ic">📦</span> Plugins</div>
     <div class="set-nav-group">Session</div>
     <div class="set-item" data-set="session"><span class="ic">🧠</span> Session</div>
     <div class="set-item" data-set="about"><span class="ic">ℹ️</span> About</div>
@@ -940,6 +980,31 @@
     <div class="set-pane" data-pane="appearance">
       <h4>🎨 Appearance</h4>
       <div id="appearancePane"></div>
+    </div>
+
+    <div class="set-pane" data-pane="capabilities">
+      <h4>✨ Capabilities</h4>
+      <div class="hint" style="padding:0 2px 8px;">What JARVIS can do on this machine — a live health check of each subsystem. Read-only; capabilities light up as their env keys / connectors are configured.</div>
+      <div id="capPane" class="pf-body"><div class="hint">Loading…</div></div>
+    </div>
+
+    <div class="set-pane" data-pane="connectors">
+      <h4>🔌 Connectors</h4>
+      <div class="hint" style="padding:0 2px 8px;">External systems JARVIS links to. Status is live; to connect a provider use Models &amp; Providers, or set the matching env var / run the connect command. Nothing here writes without a governed, audited tool call.</div>
+      <div id="connPane" class="pf-body"><div class="hint">Loading…</div></div>
+    </div>
+
+    <div class="set-pane" data-pane="skills">
+      <h4>🧩 Skills</h4>
+      <div class="hint" style="padding:0 2px 8px;">Every individual tool the AI can call, straight from the live registry — with its risk tier, circuit-breaker health and call counts. Dormant tools are registered but need a key/connector before they run.</div>
+      <div class="pf-search"><input type="text" id="skillSearch" placeholder="Filter skills…"></div>
+      <div id="skillsPane" class="pf-body"><div class="hint">Loading…</div></div>
+    </div>
+
+    <div class="set-pane" data-pane="plugins">
+      <h4>📦 Plugins</h4>
+      <div class="hint" style="padding:0 2px 8px;">The plugin packages that contribute those skills. Each is installed through the same manifest + risk-tier + permission-gate contract; grouping reflects the real plugin that owns each tool.</div>
+      <div id="pluginsPane" class="pf-body"><div class="hint">Loading…</div></div>
     </div>
 
     <div class="set-pane" data-pane="voice">
@@ -1626,8 +1691,157 @@
   function setSettingsPane(id){
     document.querySelectorAll('.set-item').forEach(n=>n.classList.toggle('active', n.dataset.set===id));
     document.querySelectorAll('.set-pane').forEach(p=>p.classList.toggle('active', p.dataset.pane===id));
+    if(PLATFORM_LOADERS[id]) PLATFORM_LOADERS[id]();
   }
   document.querySelectorAll('.set-item').forEach(n=>n.addEventListener('click',()=>setSettingsPane(n.dataset.set)));
+  // ---- Platform panels: Capabilities / Connectors / Skills / Plugins (live registry) ----
+  const PLATFORM_LOADERS={ capabilities:renderCapabilities, connectors:renderConnectors,
+                           skills:renderSkills, plugins:renderPlugins };
+  if($('skillSearch')) $('skillSearch').addEventListener('input',()=>renderSkills());
+  // Verified tool->plugin ownership (mirrors the real AppWiring plugin installs).
+  const PLUGIN_MAP=[
+    {name:'Notes & Reminders', ic:'📝', tools:['clock','remember','reminder_set','reminder_list','open_url'],
+     desc:'Durable memory, reminders and quick actions (Mark Tools).'},
+    {name:'System Control', ic:'🖥️', tools:['volume','brightness','wifi','hotkey','lock_screen','power','app_launch'],
+     desc:'Local machine control — volume, display, power, apps.'},
+    {name:'Google Workspace', ic:'📧', tools:['email_list','email_send','email_archive','email_trash','email_unsubscribe','calendar_list','calendar_create'],
+     desc:'Gmail and Calendar — connect with --connect-google.'},
+    {name:'GitHub', ic:'🐙', prefix:'github_', desc:'Repos, issues and pull requests. Set GITHUB_TOKEN to enable.'},
+    {name:'OpenHuman', ic:'🧠', prefix:'openhuman_', desc:"Shared-memory advisor (arm's-length, read-only)."},
+    {name:'Solicitations', ic:'📑', prefix:'solicitations_', desc:'Federal opportunity search (SAM.gov / GovTribe).'},
+    {name:'Core Assistant', ic:'⚙️', tools:['weather','news_search','web_search','hardware_status','file_read','screen_look'],
+     desc:'Built-in knowledge, web search and telemetry tools.'}
+  ];
+  function pluginFor(tool){
+    for(const p of PLUGIN_MAP){
+      if(p.tools && p.tools.includes(tool)) return p.name;
+      if(p.prefix && tool.startsWith(p.prefix)) return p.name;
+    }
+    return 'Other';
+  }
+  function tierChip(t){ const m={READ_ONLY:['read','read-only'],MUTATING:['mut','mutating'],DESTRUCTIVE:['dest','destructive']};
+    const c=m[t]||['unk',(t||'unknown').toLowerCase()]; return '<span class="pf-tier '+c[0]+'">'+c[1]+'</span>'; }
+  function healthDot(h){ const m={OK:'ok',HEALTHY:'ok',DEGRADED:'deg',OPEN:'brk',TRIPPED:'brk',BROKEN:'brk'};
+    return '<span class="pf-dot '+(m[h]||'dorm')+'" title="'+(h||'idle')+'"></span>'; }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  async function getJSON(u){ try{ const r=await fetch(u); if(!r.ok) return null; return await r.json(); }catch(e){ return null; } }
+
+  let _pfToolsCache=null;
+  async function pfTools(force){ if(_pfToolsCache&&!force) return _pfToolsCache; _pfToolsCache=(await getJSON('/tools'))||[]; return _pfToolsCache; }
+
+  async function renderSkills(){
+    const box=$('skillsPane'); const tools=await pfTools();
+    if(!tools.length){ box.innerHTML='<div class="hint">No tools registered.</div>'; return; }
+    const order=['READ_ONLY','MUTATING','DESTRUCTIVE','UNKNOWN'];
+    const q=($('skillSearch').value||'').toLowerCase();
+    const groups={}; tools.forEach(t=>{ (groups[t.riskTier]=groups[t.riskTier]||[]).push(t); });
+    let html='';
+    order.forEach(tier=>{ const list=(groups[tier]||[]).filter(t=>!q||t.name.toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q));
+      if(!list.length) return;
+      html+='<div class="pf-grouphdr">'+tierChip(tier)+' &nbsp;'+list.length+'</div>';
+      list.sort((a,b)=>a.name.localeCompare(b.name)).forEach(t=>{
+        html+='<div class="pf-tool"><span>'+healthDot(t.health)+'</span>'
+          +'<span class="pf-tn">'+esc(t.name)+'</span>'
+          +'<span class="pf-td">'+esc(t.description||'')+'</span>'
+          +'<span class="pf-tr">'+(t.totalCalls?('<span class="pf-sub">'+t.totalCalls+' call'+(t.totalCalls==1?'':'s')
+            +(t.failures?(' · '+t.failures+' fail'):'')+'</span>'):'')+'</span></div>';
+      });
+    });
+    box.innerHTML=html||'<div class="hint">No skills match “'+esc(q)+'”.</div>';
+  }
+
+  async function renderPlugins(){
+    const box=$('pluginsPane'); const tools=await pfTools();
+    if(!tools.length){ box.innerHTML='<div class="hint">No plugins installed.</div>'; return; }
+    const byPlugin={}; tools.forEach(t=>{ const p=pluginFor(t.name); (byPlugin[p]=byPlugin[p]||[]).push(t); });
+    const worst={OK:0,HEALTHY:0,DEGRADED:1,OPEN:2,TRIPPED:2,BROKEN:2};
+    let html='';
+    PLUGIN_MAP.concat([{name:'Other',ic:'🔧',desc:'Additional registered tools.'}]).forEach(p=>{
+      const list=byPlugin[p.name]; if(!list||!list.length) return;
+      const tiers=[...new Set(list.map(t=>t.riskTier))];
+      const anyUsed=list.some(t=>t.totalCalls>0);
+      const w=Math.max(...list.map(t=>worst[t.health]||0));
+      const badge=w>=2?'<span class="pf-badge err">degraded</span>':w===1?'<span class="pf-badge warn">degraded</span>'
+        :anyUsed?'<span class="pf-badge on">active</span>':'<span class="pf-badge off">ready</span>';
+      html+='<div class="pf-card" data-plug="'+esc(p.name)+'"><div class="pf-card-head">'
+        +'<span class="pf-ic">'+p.ic+'</span><div><div class="pf-name">'+esc(p.name)
+        +' <span class="pf-sub">· '+list.length+' skill'+(list.length==1?'':'s')+'</span></div>'
+        +'<div class="pf-sub">'+esc(p.desc||'')+'</div></div>'
+        +'<div class="pf-head-r">'+tiers.map(tierChip).join('')+badge
+        +'<span class="pf-toggle" data-tgl>tools ▾</span></div></div>'
+        +'<div class="pf-tools">'+list.sort((a,b)=>a.name.localeCompare(b.name)).map(t=>
+          '<div class="pf-tool"><span>'+healthDot(t.health)+'</span><span class="pf-tn">'+esc(t.name)+'</span>'
+          +'<span class="pf-td">'+esc(t.description||'')+'</span><span class="pf-tr">'+tierChip(t.riskTier)+'</span></div>').join('')
+        +'</div></div>';
+    });
+    box.innerHTML=html;
+    box.querySelectorAll('[data-tgl]').forEach(b=>b.addEventListener('click',e=>{
+      const card=e.target.closest('.pf-card'); card.classList.toggle('open');
+      e.target.textContent=card.classList.contains('open')?'tools ▴':'tools ▾'; }));
+  }
+
+  async function renderConnectors(){
+    const box=$('connPane');
+    const [st,provs,brain,conns]=await Promise.all([getJSON('/status'),getJSON('/providers'),getJSON('/brain'),getJSON('/connectors/status')]);
+    const rows=[];
+    // LLM providers (configured); active brain is the one flagged active
+    const plist=(provs&&provs.configured)||[];
+    const active=(plist.find(p=>p.active)||{}).name||''; const model=(st&&st.model)||'offline';
+    rows.push({ic:'💠',name:'Chat brain',sub:active?('Active provider: '+esc(active)):('Model: '+esc(model)),
+      state: (st&&st.online)?'on':'off', label:(st&&st.online)?'online':'offline'});
+    plist.forEach(p=>{ rows.push({ic:'🤖',name:esc(p.name||'provider'),
+      sub:(p.baseUrl?esc(p.baseUrl):('OpenAI-compatible ('+esc(p.kind||'')+')'))+(p.active?' · active brain':'')+(p.model?(' · '+esc(p.model)):''),
+      state:p.hasKey?'on':'off', label:p.hasKey?'key set':'no key'}); });
+    // Google
+    rows.push({ic:'📧',name:'Google Workspace',sub:'Gmail &amp; Calendar',
+      state:(st&&st.google)?'on':'off', label:(st&&st.google)?'connected':'run --connect-google'});
+    // Obsidian brain
+    if(brain){ rows.push({ic:'🧠',name:'Obsidian vault (Brain)',
+      sub:brain.configured?(esc(brain.root||'')+' · '+(brain.count||0)+' notes'+(brain.readOnly?' · read-only':'')):'Set OBSIDIAN_VAULT_PATH',
+      state:brain.configured?'on':'off', label:brain.configured?'connected':'not set'}); }
+    // Document connectors (Drive / OneDrive)
+    (conns||[]).forEach(c=>{ rows.push({ic:'🗂️',name:esc(c.name),sub:'Read-only document source',
+      state:c.available?'on':'off', label:c.available?(esc(c.health)||'available'):'not configured'}); });
+    box.innerHTML=rows.map(r=>'<div class="pf-card"><div class="pf-card-head"><span class="pf-ic">'+r.ic+'</span>'
+      +'<div><div class="pf-name">'+r.name+'</div><div class="pf-sub">'+r.sub+'</div></div>'
+      +'<div class="pf-head-r"><span class="pf-badge '+r.state+'">'+r.label+'</span></div></div></div>').join('');
+  }
+
+  async function renderCapabilities(){
+    const box=$('capPane');
+    const probes=[
+      {ic:'💬',name:'Chat & reasoning',get:async()=>{const s=await getJSON('/status');
+        return s&&s.online?{s:'on',l:'online — '+esc(s.model)}:{s:'off',l:'offline echo'};}},
+      {ic:'🧩',name:'Tools & skills',get:async()=>{const t=await pfTools();
+        return {s:t.length?'on':'off',l:t.length+' tools / '+new Set(t.map(x=>pluginFor(x.name))).size+' plugins'};}},
+      {ic:'🧠',name:'Memory',get:async()=>{const m=await getJSON('/memory');
+        return m?{s:'on',l:(Array.isArray(m)?m.length:(m.count||0))+' items'}:{s:'off',l:'unavailable'};}},
+      {ic:'📚',name:'Knowledge base',get:async()=>{const k=await getJSON('/kb');
+        return k?{s:'on',l:((k.count!=null?k.count:(Array.isArray(k)?k.length:0)))+' documents'}:{s:'off',l:'empty'};}},
+      {ic:'🔎',name:'Semantic search',get:async()=>{const s=await getJSON('/semantic');
+        return s&&(s.enabled||s.available||s.count)?{s:'on',l:'ready'}:{s:'off',l:'set embeddings endpoint'};}},
+      {ic:'⚙️',name:'Workflows',get:async()=>{const w=await getJSON('/workflows');
+        return {s:'on',l:((w&&(w.count!=null?w.count:(Array.isArray(w)?w.length:0)))||0)+' defined'};}},
+      {ic:'📑',name:'Solicitations',get:async()=>{const s=await getJSON('/solicitations');
+        return s&&s.configured?{s:'on',l:(s.count||0)+' tracked'}:{s:'off',l:'add SAM.gov key'};}},
+      {ic:'🧠',name:'Brain (Obsidian)',get:async()=>{const b=await getJSON('/brain');
+        return b&&b.configured?{s:'on',l:(b.count||0)+' notes'}:{s:'off',l:'set vault path'};}},
+      {ic:'🗣️',name:'Voice',get:async()=>({s:(window.speechSynthesis?'on':'off'),l:window.speechSynthesis?'browser TTS ready':'unsupported'})}
+    ];
+    box.innerHTML='<div class="pf-metrics" id="capMetrics"></div>'+probes.map((p,i)=>
+      '<div class="pf-card" id="cap'+i+'"><div class="pf-card-head"><span class="pf-ic">'+p.ic+'</span>'
+      +'<div><div class="pf-name">'+esc(p.name)+'</div><div class="pf-sub" id="capL'+i+'">checking…</div></div>'
+      +'<div class="pf-head-r"><span class="pf-badge off" id="capB'+i+'">…</span></div></div></div>').join('');
+    let onCount=0, done=0;
+    await Promise.all(probes.map(async(p,i)=>{ let r; try{ r=await p.get(); }catch(e){ r={s:'off',l:'error'}; }
+      if(r.s==='on') onCount++; done++;
+      const b=$('capB'+i), l=$('capL'+i); if(b){ b.className='pf-badge '+r.s; b.textContent=r.s==='on'?'active':'dormant'; }
+      if(l) l.textContent=r.l; }));
+    const mm=$('capMetrics'); if(mm) mm.innerHTML=
+      '<div class="pf-metric"><div class="n">'+onCount+'</div><div class="k">active</div></div>'
+      +'<div class="pf-metric"><div class="n">'+(done-onCount)+'</div><div class="k">dormant</div></div>'
+      +'<div class="pf-metric"><div class="n">'+done+'</div><div class="k">subsystems</div></div>';
+  }
   // ---- Appearance pane: schema-driven control renderer (every field → A + applyAppearance) ----
   const AP_ACCENTS=['#41d9ff','#3b82f6','#8b5cf6','#f0883e','#22c55e','#e11d48','#eab308','#94a3b8'];
   const AP_SPEC=[
