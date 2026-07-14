@@ -79,13 +79,14 @@ final class AppWiring {
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
             AutonomousService autonomous, SemanticMemoryService semantic,
-            DiscussionService discussion, ProviderSettingsService providers, BrainVault brain) {
+            DiscussionService discussion, ProviderSettingsService providers, BrainVault brain,
+            SolicitationsService solicitations) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion, providers, brain);
+                    discussion, providers, brain, solicitations);
         }
     }
 
@@ -95,7 +96,7 @@ final class AppWiring {
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
             SemanticMemoryService semantic, DiscussionService discussion,
-            ProviderSettingsService providers, BrainVault brain) {
+            ProviderSettingsService providers, BrainVault brain, SolicitationsService solicitations) {
     }
 
     private AppWiring() {
@@ -149,6 +150,13 @@ final class AppWiring {
                 Path.of(System.getProperty("user.home"), ".jarvis", "audit")));
         PermissionPolicy permissionPolicy = new PermissionPolicy();   // prompt on destructive
         PermissionBroker permissions = new PermissionBroker();
+
+        // Solicitations Command Center. Sources + document connectors are dormant-by-default (env
+        // gated); the AI tools register here (before governance wraps the registry) so they are
+        // manifest-tiered READ_ONLY. Every source query / open / refresh is audited by the service.
+        SolicitationsService solicitations = buildSolicitations(auditLog);
+        plugins.install(new SolicitationsPlugin(solicitations));
+
         ToolRegistry governedTools = governedRegistry(
                 tools, pluginRegistry, auditLog, permissionPolicy, permissions);
 
@@ -233,7 +241,24 @@ final class AppWiring {
         return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
                 permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
-                autonomous, semantic, discussion, providerSettings, brain);
+                autonomous, semantic, discussion, providerSettings, brain, solicitations);
+    }
+
+    /**
+     * Builds the solicitations service. SAM.gov is the live source when {@code SAMGOV_API_KEY} is set
+     * (dormant otherwise); GovTribe is a dormant MCP-bridge seam (the runtime has no MCP client of its
+     * own). Drive/OneDrive connectors are read-only and dormant until credentials + folder scope are
+     * configured. No autonomous polling — the cache refreshes only on explicit request.
+     */
+    private static SolicitationsService buildSolicitations(AuditLog auditLog) {
+        List<com.jarvis.solicitations.SolicitationSourceAdapter> sources = List.of(
+                new com.jarvis.solicitations.SamGovAdapter(
+                        com.jarvis.solicitations.HttpSamGovTransport.fromEnvironment()),
+                com.jarvis.solicitations.GovTribeMcpAdapter.dormant());
+        List<com.jarvis.solicitations.DocumentConnector> connectors = List.of(
+                GoogleDriveConnector.fromEnvironment(null),
+                OneDriveConnector.fromEnvironment(null));
+        return new SolicitationsService(sources, connectors, auditLog);
     }
 
     /**
@@ -299,7 +324,8 @@ final class AppWiring {
     static PluginRegistry pluginRegistry() {
         List<ToolManifest> manifests = new ArrayList<>();
         for (String resource : new String[] {
-                "/manifests/builtin.json", "/manifests/github.json", "/manifests/openhuman.json"}) {
+                "/manifests/builtin.json", "/manifests/github.json", "/manifests/openhuman.json",
+                "/manifests/solicitations.json"}) {
             try (InputStream in = AppWiring.class.getResourceAsStream(resource)) {
                 if (in != null) {
                     manifests.addAll(ManifestLoader.parseArray(

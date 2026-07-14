@@ -101,6 +101,7 @@ public final class WebServer {
         DiscussionService discussion = governance == null ? null : governance.discussion();
         ProviderSettingsService providers = governance == null ? null : governance.providers();
         BrainVault brain = governance == null ? null : governance.brain();
+        SolicitationsService solicitations = governance == null ? null : governance.solicitations();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -720,6 +721,102 @@ public final class WebServer {
             respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // ---- Solicitations Command Center ----
+        server.createContext("/solicitations/refresh", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod()) || solicitations == null) {
+                respond(exchange, solicitations == null ? 503 : 405, "text/plain",
+                        (solicitations == null ? "solicitations unavailable" : "method not allowed")
+                                .getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            com.jarvis.solicitations.SolicitationFilters filters;
+            try (InputStream body = exchange.getRequestBody()) {
+                filters = solicitationFilters(MAPPER.readTree(body));
+            } catch (IOException e) {
+                filters = com.jarvis.solicitations.SolicitationFilters.none();
+            }
+            SolicitationsService.RefreshResult r =
+                    solicitations.refresh(filters, com.jarvis.audit.AuditTrigger.USER);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("correlationId", r.correlationId());
+            o.put("total", r.total());
+            ObjectNode per = o.putObject("perSource");
+            r.perSource().forEach(per::put);
+            ArrayNode errs = o.putArray("errors");
+            r.errors().forEach(errs::add);
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/solicitations/detail", exchange -> {
+            if (solicitations == null) {
+                respond(exchange, 503, "text/plain", "unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            var found = solicitations.get(param(exchange, "id", ""));
+            if (found.isEmpty()) {
+                respond(exchange, 404, "text/plain", "not found".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            respond(exchange, 200, "application/json",
+                    solicitationJson(found.get()).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/solicitations/map", exchange -> {
+            ObjectNode o = MAPPER.createObjectNode();
+            if (solicitations != null) {
+                com.jarvis.solicitations.MapPayload m =
+                        solicitations.map(com.jarvis.solicitations.SolicitationFilters.none());
+                o.put("plotted", m.plotted());
+                o.put("unplotted", m.unplotted());
+                ArrayNode pts = o.putArray("points");
+                for (com.jarvis.solicitations.MapPayload.MapPoint p : m.points()) {
+                    ObjectNode po = pts.addObject();
+                    po.put("id", p.id());
+                    po.put("title", p.title());
+                    po.put("lat", p.lat());
+                    po.put("lng", p.lng());
+                    po.put("state", p.state());
+                    po.put("dueDate", p.dueDate());
+                    po.put("source", p.source());
+                }
+                ArrayNode groups = o.putArray("groups");
+                for (com.jarvis.solicitations.MapPayload.StateGroup g : m.groups()) {
+                    ObjectNode go = groups.addObject();
+                    go.put("state", g.state());
+                    go.put("count", g.count());
+                }
+            }
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/connectors/status", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (solicitations != null) {
+                for (java.util.Map<String, Object> c : solicitations.connectorStatus()) {
+                    ObjectNode o = arr.addObject();
+                    o.put("name", String.valueOf(c.get("name")));
+                    o.put("available", Boolean.TRUE.equals(c.get("available")));
+                    o.put("health", String.valueOf(c.get("health")));
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/solicitations", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            root.put("configured", solicitations != null && solicitations.anySourceAvailable());
+            root.put("lastRefresh", solicitations == null ? "" : solicitations.lastRefresh());
+            ArrayNode arr = root.putArray("items");
+            if (solicitations != null) {
+                com.jarvis.solicitations.SolicitationFilters f = solicitationFiltersFromQuery(exchange);
+                for (com.jarvis.solicitations.Solicitation s : solicitations.list(f)) {
+                    arr.add(solicitationJson(s));
+                }
+            }
+            root.put("count", arr.size());
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/discussion/run", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod()) || discussion == null) {
                 respond(exchange, discussion == null ? 503 : 405, "text/plain",
@@ -1125,6 +1222,112 @@ public final class WebServer {
         } catch (NumberFormatException e) {
             return dflt;
         }
+    }
+
+    // ---- Solicitations helpers ----
+
+    /** Serializes a canonical solicitation (including documents, amendments, and source link). */
+    private static ObjectNode solicitationJson(com.jarvis.solicitations.Solicitation s) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("id", s.id());
+        o.put("source", s.source());
+        o.put("title", s.title());
+        o.put("solicitationNumber", s.solicitationNumber());
+        o.put("agency", s.agency());
+        o.put("subAgency", s.subAgency());
+        o.put("setAside", s.setAside());
+        ArrayNode naics = o.putArray("naics");
+        s.naics().forEach(naics::add);
+        ObjectNode pop = o.putObject("placeOfPerformance");
+        pop.put("city", s.placeOfPerformance().city());
+        pop.put("state", s.placeOfPerformance().state());
+        if (s.placeOfPerformance().hasCoordinates()) {
+            pop.put("lat", s.placeOfPerformance().lat());
+            pop.put("lng", s.placeOfPerformance().lng());
+        }
+        o.put("postedDate", s.postedDate());
+        o.put("dueDate", s.dueDate());
+        if (s.estValueMin() != null) {
+            o.put("estValueMin", s.estValueMin());
+        }
+        if (s.estValueMax() != null) {
+            o.put("estValueMax", s.estValueMax());
+        }
+        o.put("status", s.status());
+        o.put("description", s.description());
+        ArrayNode docs = o.putArray("documents");
+        for (com.jarvis.solicitations.SolicitationDocument d : s.documents()) {
+            ObjectNode doc = docs.addObject();
+            doc.put("name", d.name());
+            doc.put("url", d.url());
+            doc.put("type", d.type());
+            doc.put("source", d.source());
+        }
+        ArrayNode amends = o.putArray("amendments");
+        for (com.jarvis.solicitations.Amendment a : s.amendments()) {
+            ObjectNode am = amends.addObject();
+            am.put("id", a.id());
+            am.put("title", a.title());
+            am.put("date", a.date());
+            am.put("summary", a.summary());
+            am.put("url", a.url());
+        }
+        o.put("sourceUrl", s.sourceUrl());
+        o.put("fetchedAt", s.fetchedAt());
+        return o;
+    }
+
+    /** Builds filters from a JSON body (refresh). Lenient — every field optional. */
+    private static com.jarvis.solicitations.SolicitationFilters solicitationFilters(JsonNode j) {
+        if (j == null) {
+            return com.jarvis.solicitations.SolicitationFilters.none();
+        }
+        java.util.List<String> naics = new java.util.ArrayList<>();
+        for (String p : j.path("naics").asText("").split(",")) {
+            if (!p.isBlank()) {
+                naics.add(p.strip());
+            }
+        }
+        return new com.jarvis.solicitations.SolicitationFilters(
+                blank(j.path("setAside").asText("")),
+                j.path("valueMin").isNumber() ? j.path("valueMin").asLong() : null,
+                j.path("valueMax").isNumber() ? j.path("valueMax").asLong() : null,
+                naics,
+                com.jarvis.solicitations.DueWindow.parse(j.path("due").asText("")),
+                blank(j.path("agency").asText("")), blank(j.path("state").asText("")),
+                blank(j.path("status").asText("")), blank(j.path("source").asText("")),
+                blank(j.path("query").asText("")));
+    }
+
+    /** Builds filters from query params (list). */
+    private static com.jarvis.solicitations.SolicitationFilters solicitationFiltersFromQuery(
+            HttpExchange exchange) {
+        java.util.List<String> naics = new java.util.ArrayList<>();
+        for (String p : param(exchange, "naics", "").split(",")) {
+            if (!p.isBlank()) {
+                naics.add(p.strip());
+            }
+        }
+        Long vMin = parseLongOrNull(param(exchange, "valueMin", ""));
+        Long vMax = parseLongOrNull(param(exchange, "valueMax", ""));
+        return new com.jarvis.solicitations.SolicitationFilters(
+                blank(param(exchange, "setAside", "")), vMin, vMax, naics,
+                com.jarvis.solicitations.DueWindow.parse(param(exchange, "due", "")),
+                blank(param(exchange, "agency", "")), blank(param(exchange, "state", "")),
+                blank(param(exchange, "status", "")), blank(param(exchange, "source", "")),
+                blank(param(exchange, "query", "")));
+    }
+
+    private static Long parseLongOrNull(String s) {
+        try {
+            return s == null || s.isBlank() ? null : Long.parseLong(s.strip());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String blank(String s) {
+        return s == null || s.isBlank() ? null : s;
     }
 
     /** Maps a Conversations chat mode to an instruction prepended to the user's message. */
