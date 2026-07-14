@@ -28,6 +28,8 @@
     <module>multi-agent</module>
     <module>autonomous</module>
     <module>discussion</module>
+    <module>presence</module>
+    <module>research</module>
     <module>api</module>
     <module>ui</module>
     <module>app</module>

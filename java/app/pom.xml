@@ -90,6 +90,16 @@
     </dependency>
     <dependency>
       <groupId>com.jarvis</groupId>
+      <artifactId>presence</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.jarvis</groupId>
+      <artifactId>research</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.jarvis</groupId>
       <artifactId>ui</artifactId>
       <version>${project.version}</version>
     </dependency>
