@@ -102,6 +102,7 @@ public final class WebServer {
         ProviderSettingsService providers = governance == null ? null : governance.providers();
         BrainVault brain = governance == null ? null : governance.brain();
         SolicitationsService solicitations = governance == null ? null : governance.solicitations();
+        UploadedDocsService uploads = governance == null ? null : governance.uploads();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -802,6 +803,51 @@ public final class WebServer {
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // ---- Uploaded documents the assistant can read ----
+        server.createContext("/upload", exchange -> {
+            if (uploads == null) {
+                respond(exchange, 503, "text/plain", "uploads unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String filename;
+            byte[] data;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                filename = j.path("filename").asText("upload");
+                String b64 = j.path("content").asText("");
+                data = java.util.Base64.getDecoder().decode(b64);
+            } catch (IOException | IllegalArgumentException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            UploadedDocsService.Doc doc = uploads.add(filename, data);
+            respond(exchange, 200, "application/json", docJson(doc).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/uploads", exchange -> {
+            if (uploads == null) {
+                respond(exchange, 503, "text/plain", "uploads unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("DELETE".equals(exchange.getRequestMethod())) {
+                boolean removed = uploads.remove(param(exchange, "id", ""));
+                respond(exchange, removed ? 200 : 404, "application/json",
+                        ("{\"removed\":" + removed + "}").getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode arr = root.putArray("items");
+            for (UploadedDocsService.Doc d : uploads.list()) {
+                arr.add(docJson(d));
+            }
+            root.put("count", arr.size());
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/solicitations", exchange -> {
             ObjectNode root = MAPPER.createObjectNode();
             root.put("configured", solicitations != null && solicitations.anySourceAvailable());
@@ -1153,10 +1199,15 @@ public final class WebServer {
             }
             String prompt;
             String mode;
+            java.util.List<String> docIds = new java.util.ArrayList<>();
             try (InputStream body = exchange.getRequestBody()) {
                 JsonNode json = MAPPER.readTree(body);
                 prompt = json.path("prompt").asText("");
                 mode = json.path("mode").asText("");
+                JsonNode docs = json.path("docs");
+                if (docs.isArray()) {
+                    docs.forEach(d -> docIds.add(d.asText()));
+                }
             } catch (IOException e) {
                 respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
                 return;
@@ -1167,6 +1218,14 @@ public final class WebServer {
             }
             String preamble = modePreamble(mode);
             String effective = preamble.isEmpty() ? prompt.strip() : preamble + "\n\n" + prompt.strip();
+            // Prepend the text of any attached uploads so the assistant can read them.
+            if (uploads != null && !docIds.isEmpty()) {
+                String context = uploads.contextFor(docIds, UploadedDocsService.DEFAULT_CONTEXT_BUDGET);
+                if (!context.isBlank()) {
+                    effective = "The user attached the following file(s); use them to answer.\n"
+                            + context + "\n\n" + effective;
+                }
+            }
             ChatResponse chat = api.chat(new ChatRequest("dashboard", effective));
             ObjectNode reply = MAPPER.createObjectNode();
             reply.put("completed", chat.completed());
@@ -1222,6 +1281,20 @@ public final class WebServer {
         } catch (NumberFormatException e) {
             return dflt;
         }
+    }
+
+    /** Serializes uploaded-document metadata (never the extracted text itself). */
+    private static ObjectNode docJson(UploadedDocsService.Doc d) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("id", d.id());
+        o.put("filename", d.filename());
+        o.put("kind", d.kind());
+        o.put("chars", d.chars());
+        o.put("truncated", d.truncated());
+        o.put("note", d.note());
+        o.put("uploadedAt", d.uploadedAt());
+        o.put("readable", !"unsupported".equals(d.kind()) && d.chars() > 0);
+        return o;
     }
 
     // ---- Solicitations helpers ----

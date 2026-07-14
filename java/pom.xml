@@ -29,6 +29,7 @@
     <module>autonomous</module>
     <module>discussion</module>
     <module>solicitations</module>
+    <module>documents</module>
     <module>api</module>
     <module>ui</module>
     <module>app</module>
@@ -39,6 +40,9 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <jackson.version>2.18.2</jackson.version>
     <junit.jupiter.version>5.11.4</junit.jupiter.version>
+    <!-- Approved exception to the Jackson+JUnit whitelist: PDF text extraction
+         (Apache-2.0). Office formats stay JDK-only; all other readers are native. -->
+    <pdfbox.version>3.0.3</pdfbox.version>
     <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
     <maven.surefire.plugin.version>3.5.2</maven.surefire.plugin.version>
   </properties>
@@ -55,6 +59,11 @@
         <artifactId>junit-jupiter</artifactId>
         <version>${junit.jupiter.version}</version>
         <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.pdfbox</groupId>
+        <artifactId>pdfbox</artifactId>
+        <version>${pdfbox.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

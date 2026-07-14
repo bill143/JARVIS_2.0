@@ -80,13 +80,13 @@ final class AppWiring {
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
             AutonomousService autonomous, SemanticMemoryService semantic,
             DiscussionService discussion, ProviderSettingsService providers, BrainVault brain,
-            SolicitationsService solicitations) {
+            SolicitationsService solicitations, UploadedDocsService uploads) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion, providers, brain, solicitations);
+                    discussion, providers, brain, solicitations, uploads);
         }
     }
 
@@ -96,7 +96,8 @@ final class AppWiring {
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
             SemanticMemoryService semantic, DiscussionService discussion,
-            ProviderSettingsService providers, BrainVault brain, SolicitationsService solicitations) {
+            ProviderSettingsService providers, BrainVault brain, SolicitationsService solicitations,
+            UploadedDocsService uploads) {
     }
 
     private AppWiring() {
@@ -238,10 +239,14 @@ final class AppWiring {
         // set; the memory backend stays the source of truth. No writes to the vault in Phase 1.
         BrainVault brain = BrainVault.fromEnvironment(auditLog);
 
+        // Uploaded documents the assistant can read (txt/md/csv/json native, docx/xlsx JDK-only,
+        // pdf via PDFBox). In-memory and session-scoped; every upload is audited.
+        UploadedDocsService uploads = new UploadedDocsService(auditLog);
+
         return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
                 permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
-                autonomous, semantic, discussion, providerSettings, brain, solicitations);
+                autonomous, semantic, discussion, providerSettings, brain, solicitations, uploads);
     }
 
     /**

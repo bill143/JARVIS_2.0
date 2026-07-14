@@ -203,6 +203,17 @@
                 border:1px solid #1c4a77; border-radius:9px; padding:0 20px; font:inherit;
                 letter-spacing:1px; cursor:pointer; }
   .cmd button:hover { border-color:var(--cyan); }
+  .attach-btn { padding:0 13px !important; font-size:16px; }
+  .attach-chips { width:100%; max-width:640px; display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .attach-chips:empty { display:none; }
+  .achip { display:inline-flex; align-items:center; gap:7px; padding:4px 6px 4px 10px; font-size:12px;
+    border-radius:999px; background:rgba(20,50,80,.45); border:1px solid var(--line); color:#cfeeff; max-width:280px; }
+  .achip .an { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .achip .ak { color:var(--dim); font-size:10.5px; text-transform:uppercase; letter-spacing:.5px; }
+  .achip.err { border-color:rgba(239,68,68,.5); color:#f6a3a3; }
+  .achip.busy { opacity:.65; }
+  .achip button { all:unset; cursor:pointer; color:var(--dim); font-size:14px; line-height:1; padding:0 3px; }
+  .achip button:hover { color:#f6a3a3; }
 
   /* Right chat */
   .chat { flex:1; min-height:0; display:flex; flex-direction:column; }
@@ -638,9 +649,12 @@
           <div class="hint" id="statusHint">Press 🎤 VOICE or type a command</div>
         </div>
       </div>
+      <div class="attach-chips" id="attachChips"></div>
       <form class="cmd" id="form" autocomplete="off">
         <input id="box" placeholder="Ask JARVIS anything…" autofocus>
+        <button type="button" class="attach-btn" id="attachBtn" title="Attach a file JARVIS can read (txt, md, csv, json, pdf, docx, xlsx)">📎</button>
         <button id="send" type="submit">SEND</button>
+        <input type="file" id="fileInput" style="display:none" multiple accept=".txt,.text,.log,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.pdf,.docx,.xlsx,.html,.htm,.rtf">
       </form>
     </div>
 
@@ -1512,8 +1526,9 @@
                    friendly:'Answer in a warm, friendly tone.'};
       const hint=tones[S.personality];
       const sendPrompt = hint ? ('['+hint+']\n'+prompt) : prompt;
+      const docIds = attachedDocs.filter(d=>d.readable).map(d=>d.id);
       const r = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ prompt: sendPrompt }) });
+        body: JSON.stringify({ prompt: sendPrompt, docs: docIds }) });
       const j = await r.json();
       pending.className = '';
       if (A.motion.streaming && A.motion.animations!=='off' && j.response) {
@@ -1533,6 +1548,49 @@
   document.getElementById('form').addEventListener('submit', (e) => {
     e.preventDefault(); const p = box.value.trim(); if (!p) return; box.value=''; ask(p);
   });
+
+  // ---- File upload: read files the assistant can understand (txt/md/csv/json/pdf/docx/xlsx) ----
+  let attachedDocs=[];   // {id, filename, kind, readable, note, busy, error}
+  function renderChips(){
+    const wrap=$('attachChips'); if(!wrap) return; wrap.innerHTML='';
+    attachedDocs.forEach(d=>{
+      const c=document.createElement('div');
+      c.className='achip'+(d.error?' err':'')+(d.busy?' busy':'');
+      const kind=d.busy?'reading…':(d.error?'failed':(d.readable?(d.kind||'file'):(d.kind||'unsupported')));
+      c.innerHTML='<span class="an">'+esc(d.filename)+'</span><span class="ak">'+esc(kind)+'</span>';
+      if(!d.busy){ const x=document.createElement('button'); x.type='button'; x.textContent='✕';
+        x.title=d.error?'Remove':'Detach'; x.addEventListener('click',()=>removeDoc(d)); c.appendChild(x); }
+      if(d.note && !d.readable){ c.title=d.note; }
+      wrap.appendChild(c);
+    });
+  }
+  function removeDoc(d){
+    attachedDocs=attachedDocs.filter(x=>x!==d); renderChips();
+    if(d.id){ fetch('/uploads?id='+encodeURIComponent(d.id),{method:'DELETE'}).catch(()=>{}); }
+  }
+  function readAsBase64(file){ return new Promise((res,rej)=>{ const r=new FileReader();
+    r.onload=()=>{ const s=r.result; res(String(s).slice(String(s).indexOf(',')+1)); };
+    r.onerror=()=>rej(r.error); r.readAsDataURL(file); }); }
+  async function uploadFile(file){
+    const entry={id:null,filename:file.name,kind:'',readable:false,note:'',busy:true,error:false};
+    attachedDocs.push(entry); renderChips();
+    try{
+      const content=await readAsBase64(file);
+      const r=await fetch('/upload',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({filename:file.name,content})});
+      if(!r.ok){ throw new Error(r.status===503?'uploads disabled':('HTTP '+r.status)); }
+      const j=await r.json();
+      entry.id=j.id; entry.kind=j.kind; entry.readable=!!j.readable; entry.note=j.note||''; entry.busy=false;
+      if(!entry.readable){ entry.error=true; if(entry.note) toast(entry.note); }
+    }catch(err){ entry.busy=false; entry.error=true; entry.kind='error'; entry.note=err.message; toast('Upload failed: '+err.message); }
+    renderChips();
+  }
+  function toast(msg){ try{ add('jarvis', msg); }catch(e){} }
+  (function wireUpload(){
+    const btn=document.getElementById('attachBtn'), fi=document.getElementById('fileInput');
+    if(btn) btn.addEventListener('click',()=>fi.click());
+    if(fi) fi.addEventListener('change',e=>{ [...e.target.files].forEach(uploadFile); e.target.value=''; });
+  })();
   document.getElementById('brief').addEventListener('click', () => {
     if (send.disabled) return;   // don't double-fire a briefing already in flight
     const cityPart = S.city ? (', and the current weather in ' + S.city) : '';
