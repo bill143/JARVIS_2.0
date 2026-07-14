@@ -86,6 +86,11 @@
   .kbhit { padding:8px 2px; border-bottom:1px solid rgba(120,160,200,.12); }
   .kbhit .kbt { color:#eaf7ff; font-size:13px; }
   .kbhit .kbs { color:var(--dim); font-size:11.5px; }
+  .brainmd { font-size:13px; line-height:1.55; color:var(--text); }
+  .brainmd h1,.brainmd h2,.brainmd h3 { color:#eaf7ff; margin:10px 0 6px; }
+  .brainmd pre { background:rgba(8,18,30,.8); padding:8px 10px; border-radius:6px; overflow:auto; }
+  .brainmd code { color:var(--cyan); }
+  .brainmd .wikilink { color:var(--cyan); }
   .agmsg,.agfinal { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
   .agfinal { border-color:var(--cyan); background:rgba(65,217,255,.05); }
   .agrole { color:var(--cyan); font-size:10px; letter-spacing:2px; margin-bottom:5px; }
@@ -344,6 +349,7 @@
   <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
   <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
   <div class="navitem" data-nav="kb"><span class="ic">📚</span> Knowledge</div>
+  <div class="navitem" data-nav="brain"><span class="ic">🧩</span> Brain</div>
   <div class="navitem" data-nav="intel"><span class="ic">✨</span> Intelligence</div>
   <div class="navitem" data-nav="discussion"><span class="ic">🗣</span> Discussion</div>
   <div class="navitem" data-nav="agents"><span class="ic">🤖</span> Agents</div>
@@ -558,6 +564,35 @@
       <div id="kbResults" style="margin-top:10px;"></div>
     </div>
     <div class="pcard"><h4>All documents</h4><div id="kbList"><div class="hint">None yet.</div></div></div>
+  </div>
+</div>
+<div class="page cpage" id="cpage-brain">
+  <div class="page-head"><h2>🧩  BRAIN — OBSIDIAN VAULT</h2>
+    <span id="brainStatus" class="hint" style="margin-left:14px;"></span>
+    <span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" style="max-width:1000px;">
+    <div class="pcard" id="brainSetup" style="display:none;">
+      <h4>Vault not connected</h4>
+      <div class="hint">Set <b>OBSIDIAN_VAULT_PATH</b> to your local Obsidian vault folder and restart JARVIS. The vault is opened <b>read-only</b> — JARVIS never writes to your notes. <code>OBSIDIAN_READ_ONLY</code> defaults to <b>true</b>.</div>
+    </div>
+    <div class="pcard" id="brainSearchCard" style="display:none;">
+      <h4>Search notes</h4>
+      <div style="display:flex;gap:8px;"><input id="brainQuery" class="minput" style="flex:1;" placeholder="Search your vault…">
+        <button class="hbtn" id="brainSearchBtn" type="button">Search</button></div>
+      <div id="brainResults" style="margin-top:10px;"></div>
+    </div>
+    <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
+      <div class="pcard" id="brainListCard" style="flex:1;min-width:280px;display:none;">
+        <h4>All notes <span id="brainCount" class="hint"></span></h4>
+        <div id="brainList" style="max-height:60vh;overflow:auto;"><div class="hint">None yet.</div></div>
+      </div>
+      <div class="pcard" id="brainViewCard" style="flex:1.4;min-width:320px;display:none;">
+        <h4 id="brainNoteTitle">Note</h4>
+        <div style="margin-bottom:8px;"><button class="hbtn" id="brainCite" type="button" title="Drop a cited snippet into the chat box">＂ Cite in response</button></div>
+        <div id="brainNote" class="brainmd" style="max-height:56vh;overflow:auto;"></div>
+      </div>
+    </div>
   </div>
 </div>
 <div class="page cpage" id="cpage-intel">
@@ -1571,6 +1606,78 @@
   $('kbSearchBtn').addEventListener('click',kbSearch);
   $('kbQuery').addEventListener('keydown',e=>{ if(e.key==='Enter') kbSearch(); });
   pageLoaders.kb=loadKB;
+
+  // ---- BRAIN (Obsidian vault, read-only) page ----
+  let brainCurrent=null;   // {path,title,markdown}
+  function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  // Render markdown safely: escape ALL html first, then apply a minimal, whitelisted format.
+  // Note content is never inserted as raw html, so vault notes cannot inject script.
+  function renderMd(md){
+    const lines=esc(md).split('\n'); let html=''; let inCode=false;
+    for(const ln of lines){
+      if(ln.trim().startsWith('```')){ inCode=!inCode; html+=inCode?'<pre><code>':'</code></pre>'; continue; }
+      if(inCode){ html+=ln+'\n'; continue; }
+      let t=ln;
+      const h=t.match(/^(#{1,6})\s+(.*)$/);
+      if(h){ const lv=h[1].length; html+='<h'+lv+'>'+h[2]+'</h'+lv+'>'; continue; }
+      t=t.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+      t=t.replace(/\[\[([^\]]+)\]\]/g,'<span class="wikilink">$1</span>');   // obsidian link, inert
+      html+= t.trim()===''? '<br>' : '<div>'+t+'</div>';
+    }
+    return html;
+  }
+  async function loadBrain(){
+    let j={configured:false,notes:[],count:0,readOnly:true};
+    try{ j=await (await fetch('/brain')).json(); }catch(e){}
+    $('brainStatus').textContent = j.configured
+      ? (j.count+' notes · read-only · '+(j.root||'')) : 'not connected';
+    $('brainSetup').style.display = j.configured?'none':'';
+    $('brainSearchCard').style.display = j.configured?'':'none';
+    $('brainListCard').style.display = j.configured?'':'none';
+    $('brainCount').textContent = j.configured?('('+j.count+')'):'';
+    const list=$('brainList'); list.innerHTML='';
+    if(!j.notes || !j.notes.length){ list.innerHTML='<div class="hint">'+(j.configured?'No markdown notes found.':'Vault not connected.')+'</div>'; return; }
+    j.notes.forEach(n=>{ const row=document.createElement('div'); row.className='memrow';
+      const s=document.createElement('span'); s.className='memval'; s.style.cursor='pointer';
+      const b=document.createElement('b'); b.textContent=n.title||n.path;
+      const p=document.createElement('span'); p.style.color='var(--dim)'; p.style.marginLeft='8px'; p.textContent=n.path;
+      s.appendChild(b); s.appendChild(p); s.addEventListener('click',()=>openNote(n.path));
+      row.appendChild(s); list.appendChild(row);
+    });
+  }
+  async function openNote(path){
+    try{
+      const r=await fetch('/brain/note?path='+encodeURIComponent(path));
+      if(!r.ok){ $('brainViewCard').style.display=''; $('brainNoteTitle').textContent='Cannot open note';
+        $('brainNote').innerHTML='<div class="hint">'+esc(await r.text())+'</div>'; return; }
+      brainCurrent=await r.json();
+      $('brainViewCard').style.display='';
+      $('brainNoteTitle').textContent=brainCurrent.title||brainCurrent.path;
+      $('brainNote').innerHTML=renderMd(brainCurrent.markdown||'');
+    }catch(e){}
+  }
+  async function brainSearch(){
+    const q=$('brainQuery').value.trim(); const box=$('brainResults'); if(!q){ box.innerHTML=''; return; }
+    let hits=[]; try{ hits=await (await fetch('/brain/search?q='+encodeURIComponent(q)+'&k=10')).json(); }catch(e){}
+    box.innerHTML=''; if(!hits.length){ box.innerHTML='<div class="hint">No matches.</div>'; return; }
+    hits.forEach(h=>{ const d=document.createElement('div'); d.className='kbhit'; d.style.cursor='pointer';
+      const t=document.createElement('div'); t.className='kbt'; t.textContent=(h.title||h.path);
+      const s=document.createElement('div'); s.className='kbs'; s.textContent=h.snippet||'';
+      d.appendChild(t); d.appendChild(s); d.addEventListener('click',()=>openNote(h.path)); box.appendChild(d);
+    });
+  }
+  // "Cite in response": drop a quoted snippet + source into the chat composer (read-only).
+  function citeCurrent(){
+    if(!brainCurrent) return;
+    const md=(brainCurrent.markdown||'').replace(/\s+/g,' ').trim().slice(0,280);
+    const src=brainCurrent.title||brainCurrent.path;
+    const cite='\n\n> '+md+(md.length>=280?'…':'')+'\n> — from my note [['+src+']]';
+    box.value=(box.value+cite).trim(); navTo('home'); box.focus();
+  }
+  $('brainSearchBtn').addEventListener('click',brainSearch);
+  $('brainQuery').addEventListener('keydown',e=>{ if(e.key==='Enter') brainSearch(); });
+  $('brainCite').addEventListener('click',citeCurrent);
+  pageLoaders.brain=loadBrain;
 
   // ---- Personal Intelligence (semantic recall) page ----
   function intelSetMode(mode){
