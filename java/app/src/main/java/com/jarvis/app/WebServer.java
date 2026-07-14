@@ -104,6 +104,7 @@ public final class WebServer {
         SolicitationsService solicitations = governance == null ? null : governance.solicitations();
         UploadedDocsService uploads = governance == null ? null : governance.uploads();
         McpService mcp = governance == null ? null : governance.mcp();
+        BrainManager chatBrain = governance == null ? null : governance.chatBrain();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -607,8 +608,52 @@ public final class WebServer {
             respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        server.createContext("/providers/activate", exchange -> {
+            if (providers == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, providers == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String name;
+            try (InputStream body = exchange.getRequestBody()) {
+                name = MAPPER.readTree(body).path("name").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            boolean ok = providers.activate(name);
+            if (ok && chatBrain != null) {
+                chatBrain.reload();   // hot-swap the live brain — no restart
+            }
+            respond(exchange, ok ? 200 : 404, "application/json",
+                    ("{\"activated\":" + ok + ",\"model\":\""
+                            + (chatBrain == null ? "" : chatBrain.currentModel()) + "\"}")
+                            .getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/providers/test", exchange -> {
+            if (providers == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, providers == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String name;
+            try (InputStream body = exchange.getRequestBody()) {
+                name = MAPPER.readTree(body).path("name").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ProviderSettingsService.TestResult r = providers.test(name);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("ok", r.ok());
+            o.put("message", r.message());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/providers", exchange -> {
             if ("POST".equals(exchange.getRequestMethod()) && providers != null) {
+                boolean active;
                 try (InputStream body = exchange.getRequestBody()) {
                     JsonNode j = MAPPER.readTree(body);
                     String name = j.path("name").asText("").strip();
@@ -616,13 +661,24 @@ public final class WebServer {
                         respond(exchange, 400, "text/plain", "name required".getBytes(StandardCharsets.UTF_8));
                         return;
                     }
+                    active = j.path("active").asBoolean(false);
                     providers.save(name, j.path("kind").asText("openai"), j.path("baseUrl").asText(""),
-                            j.path("apiKey").asText(""), j.path("model").asText(""),
-                            j.path("active").asBoolean(false));
+                            j.path("apiKey").asText(""), j.path("model").asText(""), active);
                 } catch (IOException e) {
                     respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
                     return;
                 }
+                if (active && chatBrain != null) {
+                    chatBrain.reload();   // saved as active → hot-swap now
+                }
+            } else if ("DELETE".equals(exchange.getRequestMethod()) && providers != null) {
+                boolean removed = providers.remove(param(exchange, "name", ""));
+                if (removed && chatBrain != null) {
+                    chatBrain.reload();   // in case the active one was removed
+                }
+                respond(exchange, removed ? 200 : 404, "application/json",
+                        ("{\"removed\":" + removed + "}").getBytes(StandardCharsets.UTF_8));
+                return;
             }
             ObjectNode root = MAPPER.createObjectNode();
             ArrayNode presets = root.putArray("presets");
@@ -1257,8 +1313,12 @@ public final class WebServer {
 
         server.createContext("/status", exchange -> {
             ObjectNode status = MAPPER.createObjectNode();
-            status.put("online", online);
-            status.put("model", model);
+            // Reflect the live brain so a hot-swap (activate a provider) updates status without restart.
+            boolean liveOnline = online || (providers != null && !providers.list().isEmpty()
+                    && providers.list().stream().anyMatch(ProviderSettingsService.ProviderView::active));
+            String liveModel = chatBrain != null ? chatBrain.currentModel() : model;
+            status.put("online", liveOnline);
+            status.put("model", liveModel == null || liveModel.isBlank() ? model : liveModel);
             status.put("google", googleConnected);
             respond(exchange, 200, "application/json", status.toString().getBytes(StandardCharsets.UTF_8));
         });

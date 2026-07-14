@@ -80,13 +80,14 @@ final class AppWiring {
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
             AutonomousService autonomous, SemanticMemoryService semantic,
             DiscussionService discussion, ProviderSettingsService providers, BrainVault brain,
-            SolicitationsService solicitations, UploadedDocsService uploads, McpService mcp) {
+            SolicitationsService solicitations, UploadedDocsService uploads, McpService mcp,
+            BrainManager chatBrain) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion, providers, brain, solicitations, uploads, mcp);
+                    discussion, providers, brain, solicitations, uploads, mcp, chatBrain);
         }
     }
 
@@ -97,7 +98,7 @@ final class AppWiring {
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
             SemanticMemoryService semantic, DiscussionService discussion,
             ProviderSettingsService providers, BrainVault brain, SolicitationsService solicitations,
-            UploadedDocsService uploads, McpService mcp) {
+            UploadedDocsService uploads, McpService mcp, BrainManager chatBrain) {
     }
 
     private AppWiring() {
@@ -169,42 +170,49 @@ final class AppWiring {
         // (e.g. NVIDIA / OpenAI / a local model) overrides the ANTHROPIC_API_KEY default; it takes
         // effect on (re)start. Keys live locally in the memory store and are never logged.
         ProviderSettingsService providerSettings = new ProviderSettingsService(memory);
-        java.util.Optional<ProviderSettingsService.Active> chatProvider = providerSettings.active();
-        boolean brainOnline = chatProvider.isPresent() || online;
-        String effectiveModel = chatProvider.map(ProviderSettingsService.Active::model)
-                .filter(m -> !m.isBlank()).orElse(model);
+        final ToolRegistry brainTools = governedTools;
+        // Rebuilt on demand so activating a provider (APIs & Models) hot-swaps the brain, no restart.
+        java.util.function.Supplier<AgentPolicy> brainFactory = () -> {
+            java.util.Optional<ProviderSettingsService.Active> cp = providerSettings.active();
+            if (cp.isPresent()) {
+                ProviderSettingsService.Active a = cp.get();
+                String m = a.model() == null || a.model().isBlank() ? model : a.model();
+                com.jarvis.integrations.llm.LlmProvider prov = "anthropic".equals(a.kind())
+                        ? new com.jarvis.integrations.llm.AnthropicProvider(
+                                AnthropicPolicy.anthropicTransport(a.apiKey()))
+                        : new com.jarvis.integrations.llm.OpenAiCompatibleProvider(
+                                com.jarvis.integrations.llm.OpenAiCompatibleProvider.transport(
+                                        a.baseUrl(), a.apiKey()));
+                return AnthropicPolicy.withProvider(prov, m, 1024, brainTools)
+                        .withMemoryContext(() -> recall(memory, people))
+                        .withHistory(() -> conversationHistory(memory, "dashboard", 24))
+                        .withUsageSink((usedModel, in, out) -> {
+                            if (in > 0 || out > 0) {
+                                usageMeter.record(a.name(), usedModel, in, out);
+                            }
+                        });
+            }
+            if (online) {
+                return AnthropicPolicy.withApiKey(apiKey, model, brainTools)
+                        .withMemoryContext(() -> recall(memory, people))
+                        .withHistory(() -> conversationHistory(memory, "dashboard", 24))
+                        .withUsageSink((usedModel, in, out) -> {
+                            if (in > 0 || out > 0) {
+                                usageMeter.record("anthropic", usedModel, in, out);
+                            }
+                        });
+            }
+            return context -> new Decision.Respond(OFFLINE_HINT + context.input());
+        };
+        boolean brainOnline = providerSettings.active().isPresent() || online;
+        String effectiveModel = providerSettings.active()
+                .map(ProviderSettingsService.Active::model).filter(m -> !m.isBlank()).orElse(model);
 
-        AgentPolicy policy;
-        if (chatProvider.isPresent()) {
-            ProviderSettingsService.Active a = chatProvider.get();
-            com.jarvis.integrations.llm.LlmProvider prov = "anthropic".equals(a.kind())
-                    ? new com.jarvis.integrations.llm.AnthropicProvider(
-                            AnthropicPolicy.anthropicTransport(a.apiKey()))
-                    : new com.jarvis.integrations.llm.OpenAiCompatibleProvider(
-                            com.jarvis.integrations.llm.OpenAiCompatibleProvider.transport(
-                                    a.baseUrl(), a.apiKey()));
-            policy = AnthropicPolicy.withProvider(prov, effectiveModel, 1024, governedTools)
-                    .withMemoryContext(() -> recall(memory, people))
-                    .withHistory(() -> conversationHistory(memory, "dashboard", 24))
-                    .withUsageSink((usedModel, in, out) -> {
-                        if (in > 0 || out > 0) {
-                            usageMeter.record(a.name(), usedModel, in, out);
-                        }
-                    });
-        } else if (online) {
-            policy = AnthropicPolicy.withApiKey(apiKey, model, governedTools)
-                    .withMemoryContext(() -> recall(memory, people))
-                    .withHistory(() -> conversationHistory(memory, "dashboard", 24))
-                    .withUsageSink((usedModel, in, out) -> {
-                        if (in > 0 || out > 0) {
-                            usageMeter.record("anthropic", usedModel, in, out);
-                        }
-                    });
-        } else {
-            policy = context -> new Decision.Respond(OFFLINE_HINT + context.input());
-        }
-
-        JarvisApi api = assemble(policy, governedTools, memory);
+        SwappablePolicy swappable = new SwappablePolicy(brainFactory.get());
+        JarvisApi api = assemble(swappable, governedTools, memory);
+        BrainManager chatBrain = new BrainManager(swappable, brainFactory,
+                () -> providerSettings.active().map(ProviderSettingsService.Active::model)
+                        .filter(m -> !m.isBlank()).orElse(model));
         HardwareMonitor monitor = new HardwareMonitor();
         PeopleRecognizer recognizer = online
                 ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
@@ -250,7 +258,8 @@ final class AppWiring {
         return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
                 permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
-                autonomous, semantic, discussion, providerSettings, brain, solicitations, uploads, mcp);
+                autonomous, semantic, discussion, providerSettings, brain, solicitations, uploads, mcp,
+                chatBrain);
     }
 
     /**

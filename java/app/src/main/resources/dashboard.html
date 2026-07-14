@@ -736,9 +736,11 @@
   <div class="page-body" id="apisBody" style="max-width:1040px;">
     <div class="pcard">
       <h4>🤖 Chat providers</h4>
-      <div class="hint" style="margin-bottom:8px;">Pick a chat brain by adding an API key. Anthropic is native; every other option is an OpenAI-compatible endpoint (NVIDIA, OpenAI, OpenRouter, Groq, Mistral, DeepSeek, xAI, or a local Ollama). Keys stay on this PC and are never shown back. Changes apply on the next restart.</div>
+      <div class="hint" style="margin-bottom:8px;">Pick a chat brain by adding an API key. Anthropic is native; every other option is an OpenAI-compatible endpoint (NVIDIA, OpenAI, OpenRouter, Groq, Mistral, DeepSeek, xAI, or a local Ollama). Keys stay on this PC and are never shown back. <b>Test</b> a key before you trust it; <b>Activate</b> switches the brain live.</div>
+      <div class="hint" style="margin-bottom:8px;">Add as many providers as you like — each with its own key. Pick one as the active brain; switching applies <b>live, no restart</b>.</div>
       <div class="row"><label for="s_provPreset">Provider</label>
         <select id="s_provPreset"></select></div>
+      <div class="row"><label for="s_provName">Connection name</label><input type="text" id="s_provName" class="minput" placeholder="defaults to provider — rename to save several (e.g. NVIDIA-work)"></div>
       <div class="row"><label for="s_provBase">Base URL</label><input type="text" id="s_provBase" class="minput" placeholder="https://…/v1"></div>
       <div class="row"><label for="s_provKey">API key</label><input type="password" id="s_provKey" class="minput" placeholder="paste key (leave blank to keep existing)"></div>
       <div class="row"><label for="s_provModel">Model</label>
@@ -2227,45 +2229,71 @@
     headers:{'Content-Type':'application/json'},body:JSON.stringify({level:e.target.value})}).catch(()=>{}); });
   fetch('/permissions/config').then(r=>r.json()).then(j=>{ if(j.level) $('s_perm').value=j.level; }).catch(()=>{});
 
-  // ---- Models & Providers ----
-  let provPresets=[];
+  // ---- Models & Providers (multi-provider; activating hot-swaps the brain live) ----
+  let provPresets=[]; let provConfigured=[];
+  function provMsg(text,color){ const m=$('s_provMsg'); if(!m) return; m.style.color=color||'#8ef0b4'; m.textContent=text;
+    clearTimeout(window._provMsgT); window._provMsgT=setTimeout(()=>{ m.textContent=''; }, 9000); }
   function provApplyPreset(){
     const p=provPresets.find(x=>x.name===$('s_provPreset').value);
     if(p){ $('s_provBase').value=p.baseUrl||''; }
+    const nm=$('s_provName'); if(nm && (!nm.value.trim() || provPresets.some(x=>x.name===nm.value.trim()))) nm.value=$('s_provPreset').value;
   }
   async function provFetchModels(){
-    const name=$('s_provPreset').value; const sel=$('s_provModel'); const cur=sel.value;
-    const msg=$('s_provMsg'); if(msg){ msg.style.color='var(--dim)'; msg.textContent='Fetching models…'; }
-    // Save first so the server has the base URL + key for this provider, then list its models.
-    await provSave(false, true);
+    const name=($('s_provName').value.trim()||$('s_provPreset').value); const sel=$('s_provModel'); const cur=sel.value;
+    provMsg('Fetching models…','var(--dim)');
+    await provSave(false, true);   // persist base URL + key first, then list
     let ids=[];
     try{ ids=(await (await fetch('/providers/models?name='+encodeURIComponent(name))).json()).models||[]; }catch(e){}
-    sel.innerHTML='<option value="">—</option>'+ids.map(id=>'<option>'+id+'</option>').join('');
+    sel.innerHTML='<option value="">—</option>'+ids.map(id=>'<option>'+esc(id)+'</option>').join('');
     if(ids.includes(cur)) sel.value=cur;
-    if(msg){ if(ids.length){ msg.style.color='#8ef0b4'; msg.textContent=ids.length+' models loaded — pick one, tick “active”, Save.'; }
-      else { msg.style.color='#f3c67a'; msg.textContent='No models returned — check the base URL and key.'; }
-      clearTimeout(window._provMsgT); window._provMsgT=setTimeout(()=>{ msg.textContent=''; }, 8000); }
+    if(ids.length) provMsg(ids.length+' models loaded — pick one, then Save (tick “active” to use it now).');
+    else provMsg('No models returned — check the base URL and key.','#f3c67a');
   }
-  let provConfigured=[];
   async function provSave(makeActive, quiet){
-    const name=$('s_provPreset').value;
-    const preset=provPresets.find(x=>x.name===name);
+    const preset=provPresets.find(x=>x.name===$('s_provPreset').value);
+    const name=($('s_provName').value.trim()||$('s_provPreset').value);
     const body={name, kind:(preset?preset.kind:'openai'), baseUrl:$('s_provBase').value.trim(),
       apiKey:$('s_provKey').value, model:$('s_provModel').value, active:makeActive};
     let ok=false;
     try{ const r=await fetch('/providers',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(body)}); ok=r.ok; }catch(e){}
-    $('s_provKey').value='';   // never keep the key in the field
+    $('s_provKey').value='';
     await provLoad(name);
-    if(!quiet){ const m=$('s_provMsg'); if(m){
-      if(ok){ m.style.color='#8ef0b4'; m.textContent='Saved ✓ — '+(makeActive?'restart JARVIS to start using this brain.':'saved. Tick “active” to use it, then restart.'); }
-      else { m.style.color='#f6a3a3'; m.textContent='Save failed — is JARVIS still running?'; }
-      clearTimeout(window._provMsgT); window._provMsgT=setTimeout(()=>{ m.textContent=''; }, 8000);
-    } }
+    if(!quiet){
+      if(ok) provMsg('Saved ✓ — '+(makeActive?'now the active brain (live, no restart).':'saved. Hit “Activate” on it to use it.'));
+      else provMsg('Save failed — is JARVIS still running?','#f6a3a3');
+      if(makeActive && ok) refreshBrainStatus();
+    }
   }
+  async function provActivate(name){
+    provMsg('Switching to '+name+'…','var(--dim)');
+    let j={}; try{ j=await (await fetch('/providers/activate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name})})).json(); }catch(e){}
+    if(j.activated){ provMsg('Now using '+name+(j.model?(' · '+j.model):'')+' — live, no restart. ✓'); refreshBrainStatus(); }
+    else provMsg('Could not activate '+name+'.','#f6a3a3');
+    await provLoad(name);
+  }
+  async function provTest(name){
+    provMsg('Testing '+name+'…','var(--dim)');
+    let j={ok:false,message:'no response'};
+    try{ j=await (await fetch('/providers/test',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name})})).json(); }catch(e){ j.message=e.message; }
+    provMsg((j.ok?'✓ ':'✗ ')+name+': '+j.message, j.ok?'#8ef0b4':'#f6a3a3');
+  }
+  async function provRemove(name){
+    await fetch('/providers?name='+encodeURIComponent(name),{method:'DELETE'}).catch(()=>{});
+    provMsg('Removed '+name+'.','var(--dim)'); await provLoad(); refreshBrainStatus();
+  }
+  function refreshBrainStatus(){ fetch('/status').then(r=>r.json()).then(s=>{
+    jarvisModel=s.model||''; isOnline=s.online;
+    const mk=document.getElementById('modelKv'); if(mk) mk.textContent=s.online?s.model:'offline';
+    const sb=document.getElementById('sbMode'); if(sb) sb.textContent=s.online?('ONLINE · '+(s.model||'').toUpperCase()):'OFFLINE ECHO MODE';
+    const sm=document.getElementById('s_model'); if(sm) sm.textContent=jarvisModel||'offline';
+  }).catch(()=>{}); }
   function provFill(c){
     if(!c) return;
-    const psel=$('s_provPreset'); if([...psel.options].some(o=>o.value===c.name)) psel.value=c.name;
+    const psel=$('s_provPreset'); if(c.kind==='anthropic'){ if([...psel.options].some(o=>o.value==='Anthropic')) psel.value='Anthropic'; }
+    $('s_provName').value=c.name;
     $('s_provBase').value=c.baseUrl||'';
     const msel=$('s_provModel');
     if(c.model && ![...msel.options].some(o=>o.value===c.model)){ const o=document.createElement('option'); o.value=c.model; o.textContent=c.model; msel.appendChild(o); }
@@ -2278,17 +2306,26 @@
     try{ j=await (await fetch('/providers')).json(); }catch(e){ return; }
     provPresets=j.presets||[]; provConfigured=j.configured||[];
     const psel=$('s_provPreset'); const cur=psel.value;
-    psel.innerHTML=provPresets.map(p=>'<option>'+p.name+'</option>').join('');
-    if(provPresets.some(p=>p.name===cur)) psel.value=cur; else provApplyPreset();
+    psel.innerHTML=provPresets.map(p=>'<option>'+esc(p.name)+'</option>').join('');
+    if(provPresets.some(p=>p.name===cur)) psel.value=cur;
     const box=$('s_provList'); const cfg=provConfigured;
-    if(!cfg.length){ box.innerHTML='None configured — Anthropic env key (if set) is used.'; }
-    else { box.innerHTML='<div style="margin-bottom:4px;color:var(--dim);">Configured providers</div>'+cfg.map(c=>{
-      const tag=c.active?' <b style="color:var(--cyan)">● ACTIVE</b>':'';
-      const key=c.hasKey?'key set':'no key';
-      const model=c.model?(' · '+c.model):'';
-      return '<div style="padding:3px 0;">'+c.name+tag+' <span class="hint">('+key+model+')</span></div>';
+    if(!cfg.length){ box.innerHTML='<span class="hint">No providers saved yet — the ANTHROPIC_API_KEY env var (if set) is the fallback.</span>'; }
+    else { box.innerHTML='<div style="margin:2px 0 6px;color:var(--dim);">Saved providers ('+cfg.length+') — one is the active brain</div>'+cfg.map(c=>{
+      const tag=c.active?'<span class="pf-badge on" style="margin-left:6px;">active</span>':'';
+      const key=c.hasKey?'key set':'<span style="color:#f3c67a;">no key</span>';
+      const model=c.model?(' · '+esc(c.model)):'';
+      const acts=(c.active?'':'<button class="hbtn" data-act="'+esc(c.name)+'" style="padding:2px 9px;">Activate</button> ')
+        +'<button class="hbtn" data-test="'+esc(c.name)+'" style="padding:2px 9px;">Test</button> '
+        +'<button class="hbtn" data-edit="'+esc(c.name)+'" style="padding:2px 9px;">Edit</button> '
+        +'<button class="hbtn" data-rm="'+esc(c.name)+'" style="padding:2px 9px;">Remove</button>';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--line);flex-wrap:wrap;">'
+        +'<b>'+esc(c.name)+'</b>'+tag+' <span class="hint">('+key+model+')</span>'
+        +'<span style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap;">'+acts+'</span></div>';
     }).join(''); }
-    // Reflect the saved config in the form so a successful save doesn't look empty.
+    box.querySelectorAll('[data-act]').forEach(b=>b.addEventListener('click',()=>provActivate(b.dataset.act)));
+    box.querySelectorAll('[data-test]').forEach(b=>b.addEventListener('click',()=>provTest(b.dataset.test)));
+    box.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>provRemove(b.dataset.rm)));
+    box.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{ provFill(cfg.find(c=>c.name===b.dataset.edit)); $('apisBody').scrollTop=0; }));
     const pick=cfg.find(c=>c.name===focusName) || cfg.find(c=>c.active) || cfg[0];
     provFill(pick);
   }

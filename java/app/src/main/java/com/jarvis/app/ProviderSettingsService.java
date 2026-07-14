@@ -109,6 +109,67 @@ final class ProviderSettingsService {
         }
     }
 
+    /** Result of a live connection test. */
+    record TestResult(boolean ok, String message) {
+    }
+
+    /** Makes {@code name} the active brain if it is configured. Returns whether it now is. */
+    boolean activate(String name) {
+        if (name == null || store.get(SCOPE, name).isEmpty()) {
+            return false;
+        }
+        store.put(SCOPE, ACTIVE_KEY, name);
+        return true;
+    }
+
+    /** Removes a configured provider (and clears the active pointer if it referenced it). */
+    boolean remove(String name) {
+        if (name == null || ACTIVE_KEY.equals(name)) {
+            return false;
+        }
+        boolean had = store.delete(SCOPE, name);
+        if (name.equals(activeName())) {
+            store.delete(SCOPE, ACTIVE_KEY);
+        }
+        return had;
+    }
+
+    /**
+     * Live-tests a configured provider's credentials. For OpenAI-compatible providers this lists the
+     * models endpoint (a clean 200/401 signal); the native Anthropic provider validates on first use.
+     */
+    TestResult test(String name) {
+        var entry = store.get(SCOPE, name);
+        if (entry.isEmpty()) {
+            return new TestResult(false, "no such provider");
+        }
+        JsonNode c = parse(entry.get().value());
+        String kind = c.path("kind").asText("openai");
+        String key = c.path("apiKey").asText("");
+        if ("anthropic".equals(kind)) {
+            return key.isBlank()
+                    ? new TestResult(false, "no API key set")
+                    : new TestResult(true, "key stored — Anthropic validates on the first message");
+        }
+        if (key.isBlank() && !c.path("baseUrl").asText("").contains("localhost")) {
+            return new TestResult(false, "no API key set");
+        }
+        try {
+            List<String> models = fetcher.fetch(c.path("baseUrl").asText(""), key);
+            return new TestResult(true, "connected — " + models.size() + " models available");
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+            if (msg.contains("401")) {
+                msg = "authentication failed — the API key was rejected (401)";
+            } else if (msg.contains("403")) {
+                msg = "forbidden — the key lacks access to this endpoint (403)";
+            } else if (msg.contains("404")) {
+                msg = "endpoint not found — check the base URL (404)";
+            }
+            return new TestResult(false, msg);
+        }
+    }
+
     /** The active provider's full config (incl. key) if one is selected and configured. */
     Optional<Active> active() {
         String name = activeName();
