@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -23,10 +24,12 @@ public final class OpenHumanClient {
     /** Default JSON-RPC method names — override once confirmed against a live core via {@code /schema}. */
     public static final String DEFAULT_MEMORY_SEARCH_METHOD = "memory.search";
     public static final String DEFAULT_CONSULT_METHOD = "agent.chat";
+    public static final String DEFAULT_MEMORY_WRITE_METHOD = "memory.add";
 
     private final OpenHumanTransport transport;
     private final String memorySearchMethod;
     private final String consultMethod;
+    private final String memoryWriteMethod;
     private int rpcId;
 
     public OpenHumanClient(OpenHumanTransport transport) {
@@ -34,9 +37,15 @@ public final class OpenHumanClient {
     }
 
     public OpenHumanClient(OpenHumanTransport transport, String memorySearchMethod, String consultMethod) {
+        this(transport, memorySearchMethod, consultMethod, DEFAULT_MEMORY_WRITE_METHOD);
+    }
+
+    public OpenHumanClient(OpenHumanTransport transport, String memorySearchMethod,
+            String consultMethod, String memoryWriteMethod) {
         this.transport = Objects.requireNonNull(transport, "transport");
         this.memorySearchMethod = orDefault(memorySearchMethod, DEFAULT_MEMORY_SEARCH_METHOD);
         this.consultMethod = orDefault(consultMethod, DEFAULT_CONSULT_METHOD);
+        this.memoryWriteMethod = orDefault(memoryWriteMethod, DEFAULT_MEMORY_WRITE_METHOD);
     }
 
     /** Whether the core is configured and reachable (transport available). */
@@ -67,6 +76,28 @@ public final class OpenHumanClient {
         params.put("query", query == null ? "" : query);
         params.put("limit", Math.min(Math.max(1, limit), 50));
         return renderResult(rpc(memorySearchMethod, params));
+    }
+
+    /**
+     * Writes a durable memory into the shared brain. This is a MUTATING call — callers must gate it
+     * (risk-tier permission gate + {@link MemoryWritePolicy}); this method performs the write
+     * unconditionally once reached, so it must not be reached for an unauthorized role.
+     */
+    public String memoryWrite(String content, String tags) throws IOException, InterruptedException {
+        ObjectNode params = MAPPER.createObjectNode();
+        params.put("content", content == null ? "" : content);
+        if (tags != null && !tags.isBlank()) {
+            params.put("tags", tags);
+        }
+        return renderResult(rpc(memoryWriteMethod, params));
+    }
+
+    /**
+     * Private-mode concerns advertised by the core's {@code /schema} (RFC 0001 §6). An empty list
+     * means the schema is clean of public-network / payment / marketplace markers.
+     */
+    public List<String> schemaConcerns() throws IOException, InterruptedException {
+        return PrivateModeAssertion.scan(schema());
     }
 
     /** Consults OpenHuman as an advisor on {@code question} within {@code context}; returns its reply. */
