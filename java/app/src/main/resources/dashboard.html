@@ -256,6 +256,31 @@
   .danger { background:#3a1420 !important; border-color:#a03040 !important; color:#ffb3c0 !important; }
   .drawer textarea { width:100%; min-height:60px; background:rgba(8,18,30,.8); color:var(--text);
          border:1px solid var(--line); border-radius:6px; padding:8px 10px; font:inherit; font-size:13px; }
+  /* Settings modal: sidebar + detail pane (overrides the slide-in drawer for #drawer only) */
+  #drawer.settings-modal { top:50%; left:50%; right:auto; height:82vh; width:940px; max-width:94vw;
+         transform:translate(-50%,-50%) scale(.98); opacity:0; pointer-events:none; overflow:hidden;
+         border:1px solid var(--line); border-radius:14px; display:flex;
+         box-shadow:0 30px 80px rgba(0,0,0,.6); transition:opacity .18s ease, transform .18s ease; }
+  #drawer.settings-modal.open { opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1); }
+  .set-nav { width:214px; flex:0 0 214px; background:#081120; border-right:1px solid var(--line);
+         overflow-y:auto; padding:14px 10px; }
+  .set-nav-head { font-size:13px; letter-spacing:4px; color:#eaf7ff; padding:6px 10px 10px; font-weight:600; }
+  .set-nav-group { font-size:10px; letter-spacing:2px; color:var(--dim); text-transform:uppercase; padding:14px 10px 5px; }
+  .set-item { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:7px;
+         color:var(--dim); font-size:13px; cursor:pointer; }
+  .set-item:hover { color:var(--text); background:rgba(80,140,200,.06); }
+  .set-item.active { color:#eaf7ff; background:rgba(65,217,255,.10); }
+  .set-item .ic { width:18px; text-align:center; }
+  .set-body { flex:1; overflow-y:auto; padding:22px 26px 30px; position:relative; }
+  .set-close { position:absolute; top:14px; right:16px; z-index:2; }
+  .set-pane { display:none; }
+  .set-pane.active { display:block; }
+  .set-pane h4 { font-size:11px; letter-spacing:3px; color:var(--cyan); text-transform:uppercase; margin-bottom:14px; }
+  .set-swatches { display:flex; gap:10px; flex-wrap:wrap; margin:4px 0 6px; }
+  .set-swatch { width:34px; height:34px; border-radius:8px; cursor:pointer; border:2px solid transparent; }
+  .set-swatch.active { border-color:#eaf7ff; }
+  .set-scale { display:flex; gap:4px; flex-wrap:wrap; }
+  .set-scale button.active { color:#eaf7ff; border-color:var(--cyan); }
   .person { display:flex; align-items:center; gap:10px; border:1px solid var(--line); border-radius:8px;
             padding:8px 10px; margin:7px 0; }
   .person img { width:38px; height:38px; border-radius:50%; object-fit:cover; background:#0c1a2c; }
@@ -759,70 +784,128 @@
 </div>
 
 <div class="scrim" id="scrim"></div>
-<aside class="drawer" id="drawer" aria-label="Settings">
-  <div class="sect"><h2>SETTINGS</h2><button class="hbtn" id="closeSettings" type="button" style="margin-left:auto;">CLOSE</button></div>
-  <div class="sect">
-    <h4>🎙️ Voice</h4>
-    <div class="row"><label for="s_voiceOnStart">Enable voice on startup</label><input type="checkbox" id="s_voiceOnStart"></div>
-    <div class="row"><label for="s_autoSpeak">Speak JARVIS's replies aloud</label><input type="checkbox" id="s_autoSpeak"></div>
-    <div class="row"><label for="s_lang">Language</label>
-      <select id="s_lang">
-        <option value="en-US">English</option><option value="es-ES">Español</option>
-        <option value="fr-FR">Français</option><option value="de-DE">Deutsch</option>
-        <option value="tr-TR">Türkçe</option><option value="it-IT">Italiano</option>
-        <option value="pt-BR">Português</option>
-      </select></div>
-    <div class="row"><label for="s_voiceName">Specific voice</label>
-      <select id="s_voiceName"><option value="">Auto (British butler)</option></select></div>
-    <div class="row"><label for="s_rate">Speech speed</label><input type="range" id="s_rate" min="0.6" max="1.6" step="0.05"></div>
-    <div class="row"><label for="s_wake">Wake word</label><input type="text" id="s_wake" placeholder="jarvis"></div>
-    <div class="hint">Say the wake word, then your request — e.g. "Jarvis, what's the weather?"</div>
-    <div class="row"><label for="s_convo">Stay in conversation after wake word</label><input type="checkbox" id="s_convo"></div>
-    <div class="row"><label for="s_convoT">End conversation after quiet (seconds)</label><input type="number" id="s_convoT" min="10" max="600"></div>
-    <div class="hint">On: say the wake word once, then keep talking. Say "that's all" or go quiet to end.</div>
+<aside class="drawer settings-modal" id="drawer" aria-label="Settings">
+  <div class="set-nav">
+    <div class="set-nav-head">SETTINGS</div>
+    <div class="set-nav-group">General</div>
+    <div class="set-item active" data-set="models"><span class="ic">🤖</span> Models &amp; Providers</div>
+    <div class="set-item" data-set="chat"><span class="ic">💬</span> Chat</div>
+    <div class="set-item" data-set="appearance"><span class="ic">🎨</span> Appearance</div>
+    <div class="set-item" data-set="voice"><span class="ic">🎙️</span> Voice</div>
+    <div class="set-item" data-set="briefing"><span class="ic">🌅</span> Briefing</div>
+    <div class="set-item" data-set="alerts"><span class="ic">📊</span> Alerts</div>
+    <div class="set-item" data-set="security"><span class="ic">🛡</span> Security</div>
+    <div class="set-nav-group">Session</div>
+    <div class="set-item" data-set="session"><span class="ic">🧠</span> Session</div>
+    <div class="set-item" data-set="about"><span class="ic">ℹ️</span> About</div>
   </div>
-  <div class="sect">
-    <h4>🌅 Briefing &amp; Weather</h4>
-    <div class="row"><label for="s_autoBrief">Auto briefing on startup</label><input type="checkbox" id="s_autoBrief"></div>
-    <div class="row"><label for="s_city">Default city for weather</label><input type="text" id="s_city" placeholder="e.g. Dallas"></div>
-  </div>
-  <div class="sect">
-    <h4>📊 Hardware Alerts</h4>
-    <div class="row"><label for="s_showAlerts">Show hardware alerts</label><input type="checkbox" id="s_showAlerts"></div>
-    <div class="row"><label for="s_speakAlerts">Speak hardware alerts</label><input type="checkbox" id="s_speakAlerts"></div>
-    <div class="row"><label for="s_cpu">CPU alert threshold (%)</label><input type="number" id="s_cpu" min="1" max="100"></div>
-    <div class="row"><label for="s_ram">RAM alert threshold (%)</label><input type="number" id="s_ram" min="1" max="100"></div>
-  </div>
-  <div class="sect">
-    <h4>🛡 Security</h4>
-    <div class="row"><label for="s_perm">Confirm before actions</label>
-      <select id="s_perm">
-        <option value="DESTRUCTIVE">Destructive only</option>
-        <option value="MUTATING">Any change</option>
-        <option value="OFF">Off — never ask</option>
-      </select></div>
-    <div class="hint" style="padding:0 2px 4px;">JARVIS asks before running risky tools (send/delete mail, power off). Denied actions never run.</div>
-  </div>
-  <div class="sect">
-    <h4>🤖 Models &amp; Providers</h4>
-    <div class="hint" style="padding:0 2px 6px;">Pick a chat brain by adding an API key. Anthropic is native; every other option is an OpenAI-compatible endpoint (NVIDIA, OpenAI, OpenRouter, Groq, Mistral, DeepSeek, xAI, or a local Ollama). Keys stay on this PC and are never shown back. Changes apply on the next restart.</div>
-    <div class="row"><label for="s_provPreset">Provider</label>
-      <select id="s_provPreset"></select></div>
-    <div class="row"><label for="s_provBase">Base URL</label><input type="text" id="s_provBase" placeholder="https://…/v1"></div>
-    <div class="row"><label for="s_provKey">API key</label><input type="password" id="s_provKey" placeholder="paste key (leave blank to keep existing)"></div>
-    <div class="row"><label for="s_provModel">Model</label>
-      <select id="s_provModel"><option value="">—</option></select>
-      <button class="hbtn" id="s_provFetch" type="button" title="List this provider's models" style="margin-left:6px;">Fetch</button></div>
-    <div class="row"><label for="s_provActive">Use as active brain</label><input type="checkbox" id="s_provActive"></div>
-    <div style="margin:6px 2px;"><button class="hbtn" id="s_provSave" type="button">Save provider</button></div>
-    <div id="s_provList" class="hint">None configured — Anthropic env key (if set) is used.</div>
-  </div>
-  <div class="sect">
-    <h4>🧠 Session</h4>
-    <div class="row"><label>Model</label><span id="s_model" class="hint"></span></div>
-    <div class="row"><label>Conversation</label><button id="s_clearChat" type="button">Clear</button></div>
-    <div class="row"><label>Run first-time setup again</label><button id="s_setup" type="button">Setup</button></div>
-    <div class="row"><label>Reset all settings to defaults</label><button id="s_reset" class="danger" type="button">Reset</button></div>
+  <div class="set-body">
+    <button class="hbtn set-close" id="closeSettings" type="button">✕</button>
+
+    <div class="set-pane active" data-pane="models">
+      <h4>🤖 Models &amp; Providers</h4>
+      <div class="hint" style="padding:0 2px 6px;">Pick a chat brain by adding an API key. Anthropic is native; every other option is an OpenAI-compatible endpoint (NVIDIA, OpenAI, OpenRouter, Groq, Mistral, DeepSeek, xAI, or a local Ollama). Keys stay on this PC and are never shown back. Changes apply on the next restart.</div>
+      <div class="row"><label for="s_provPreset">Provider</label>
+        <select id="s_provPreset"></select></div>
+      <div class="row"><label for="s_provBase">Base URL</label><input type="text" id="s_provBase" placeholder="https://…/v1"></div>
+      <div class="row"><label for="s_provKey">API key</label><input type="password" id="s_provKey" placeholder="paste key (leave blank to keep existing)"></div>
+      <div class="row"><label for="s_provModel">Model</label>
+        <select id="s_provModel"><option value="">—</option></select>
+        <button class="hbtn" id="s_provFetch" type="button" title="List this provider's models" style="margin-left:6px;">Fetch</button></div>
+      <div class="row"><label for="s_provActive">Use as active brain</label><input type="checkbox" id="s_provActive"></div>
+      <div style="margin:6px 2px;"><button class="hbtn" id="s_provSave" type="button">Save provider</button></div>
+      <div id="s_provList" class="hint">None configured — Anthropic env key (if set) is used.</div>
+    </div>
+
+    <div class="set-pane" data-pane="chat">
+      <h4>💬 Chat</h4>
+      <div class="row"><label for="s_personality">Personality / tone</label>
+        <select id="s_personality">
+          <option value="balanced">Balanced</option>
+          <option value="technical">Technical — direct, precise</option>
+          <option value="concise">Concise — short answers</option>
+          <option value="friendly">Friendly — warm</option>
+        </select></div>
+      <div class="hint">Applied as a brief tone hint on your messages when the AI brain is online.</div>
+      <div class="row"><label for="s_timezone">Timezone</label><input type="text" id="s_timezone" placeholder="e.g. America/Chicago"></div>
+      <div class="row"><label for="s_showDetails">Show tool / step details in chat</label><input type="checkbox" id="s_showDetails"></div>
+    </div>
+
+    <div class="set-pane" data-pane="appearance">
+      <h4>🎨 Appearance</h4>
+      <div class="row" style="align-items:flex-start;"><label>Accent theme</label>
+        <div class="set-swatches" id="s_accentSwatches"></div></div>
+      <div class="row"><label>Interface scale</label>
+        <div class="set-scale" id="s_scaleBtns"></div></div>
+      <div class="row"><label for="s_font">Font</label>
+        <select id="s_font">
+          <option value="default">Default (system sans)</option>
+          <option value="mono">Monospace</option>
+          <option value="serif">Serif</option>
+        </select></div>
+      <div class="hint">Colors, scale and font apply instantly and persist on this PC.</div>
+    </div>
+
+    <div class="set-pane" data-pane="voice">
+      <h4>🎙️ Voice</h4>
+      <div class="row"><label for="s_voiceOnStart">Enable voice on startup</label><input type="checkbox" id="s_voiceOnStart"></div>
+      <div class="row"><label for="s_autoSpeak">Speak JARVIS's replies aloud</label><input type="checkbox" id="s_autoSpeak"></div>
+      <div class="row"><label for="s_lang">Language</label>
+        <select id="s_lang">
+          <option value="en-US">English</option><option value="es-ES">Español</option>
+          <option value="fr-FR">Français</option><option value="de-DE">Deutsch</option>
+          <option value="tr-TR">Türkçe</option><option value="it-IT">Italiano</option>
+          <option value="pt-BR">Português</option>
+        </select></div>
+      <div class="row"><label for="s_voiceName">Specific voice</label>
+        <select id="s_voiceName"><option value="">Auto (British butler)</option></select></div>
+      <div class="row"><label for="s_rate">Speech speed</label><input type="range" id="s_rate" min="0.6" max="1.6" step="0.05"></div>
+      <div class="row"><label for="s_wake">Wake word</label><input type="text" id="s_wake" placeholder="jarvis"></div>
+      <div class="hint">Say the wake word, then your request — e.g. "Jarvis, what's the weather?"</div>
+      <div class="row"><label for="s_convo">Stay in conversation after wake word</label><input type="checkbox" id="s_convo"></div>
+      <div class="row"><label for="s_convoT">End conversation after quiet (seconds)</label><input type="number" id="s_convoT" min="10" max="600"></div>
+      <div class="hint">On: say the wake word once, then keep talking. Say "that's all" or go quiet to end.</div>
+    </div>
+
+    <div class="set-pane" data-pane="briefing">
+      <h4>🌅 Briefing &amp; Weather</h4>
+      <div class="row"><label for="s_autoBrief">Auto briefing on startup</label><input type="checkbox" id="s_autoBrief"></div>
+      <div class="row"><label for="s_city">Default city for weather</label><input type="text" id="s_city" placeholder="e.g. Dallas"></div>
+    </div>
+
+    <div class="set-pane" data-pane="alerts">
+      <h4>📊 Hardware Alerts</h4>
+      <div class="row"><label for="s_showAlerts">Show hardware alerts</label><input type="checkbox" id="s_showAlerts"></div>
+      <div class="row"><label for="s_speakAlerts">Speak hardware alerts</label><input type="checkbox" id="s_speakAlerts"></div>
+      <div class="row"><label for="s_cpu">CPU alert threshold (%)</label><input type="number" id="s_cpu" min="1" max="100"></div>
+      <div class="row"><label for="s_ram">RAM alert threshold (%)</label><input type="number" id="s_ram" min="1" max="100"></div>
+    </div>
+
+    <div class="set-pane" data-pane="security">
+      <h4>🛡 Security</h4>
+      <div class="row"><label for="s_perm">Confirm before actions</label>
+        <select id="s_perm">
+          <option value="DESTRUCTIVE">Destructive only</option>
+          <option value="MUTATING">Any change</option>
+          <option value="OFF">Off — never ask</option>
+        </select></div>
+      <div class="hint" style="padding:0 2px 4px;">JARVIS asks before running risky tools (send/delete mail, power off). Denied actions never run.</div>
+    </div>
+
+    <div class="set-pane" data-pane="session">
+      <h4>🧠 Session</h4>
+      <div class="row"><label>Model</label><span id="s_model" class="hint"></span></div>
+      <div class="row"><label>Conversation</label><button id="s_clearChat" type="button">Clear</button></div>
+      <div class="row"><label>Run first-time setup again</label><button id="s_setup" type="button">Setup</button></div>
+      <div class="row"><label>Reset all settings to defaults</label><button id="s_reset" class="danger" type="button">Reset</button></div>
+    </div>
+
+    <div class="set-pane" data-pane="about">
+      <h4>ℹ️ About</h4>
+      <div class="row"><label>Application</label><span class="hint">J.A.R.V.I.S.</span></div>
+      <div class="row"><label>Version</label><span class="hint" id="s_version">0.1.0</span></div>
+      <div class="hint">Local-first AI assistant. Brain, Solicitations, and Models &amp; Providers are configured in this window.</div>
+    </div>
   </div>
 </aside>
 
@@ -1022,10 +1105,24 @@
   // ---------- Settings ----------
   const DEFAULTS = { voiceOnStart:false, autoSpeak:true, lang:'en-US', voiceName:'', rate:1.05,
     wakeWord:'jarvis', autoBrief:true, city:'', showAlerts:true, speakAlerts:true, cpu:90, ram:90,
-    mailQuery:'in:inbox', mailMax:12, calMax:15, calDuration:60, convoMode:true, convoTimeout:45 };
+    mailQuery:'in:inbox', mailMax:12, calMax:15, calDuration:60, convoMode:true, convoTimeout:45,
+    accent:'#41d9ff', uiScale:100, font:'default', personality:'balanced', timezone:'', showDetails:true };
   let S = Object.assign({}, DEFAULTS);
   try { S = Object.assign(S, JSON.parse(localStorage.getItem('jarvisSettings') || '{}')); } catch (e) {}
   function saveSettings() { localStorage.setItem('jarvisSettings', JSON.stringify(S)); }
+  // ---- Appearance: apply accent / scale / font live (persists on this PC) ----
+  const ACCENTS = [['Cyan','#41d9ff'],['Blue','#3b82f6'],['Violet','#8b5cf6'],
+                   ['Ember','#f0883e'],['Emerald','#22c55e'],['Slate','#94a3b8']];
+  function applyAppearance(){
+    const acc = S.accent || DEFAULTS.accent;
+    document.documentElement.style.setProperty('--cyan', acc);
+    document.documentElement.style.setProperty('--accent', acc);
+    try { document.body.style.zoom = (S.uiScale || 100) / 100; } catch(e){}
+    const fonts = { default:'', mono:"'Consolas','SF Mono',ui-monospace,monospace",
+                    serif:"Georgia,'Times New Roman',serif" };
+    document.body.style.fontFamily = fonts[S.font] || '';
+  }
+  applyAppearance();
   let jarvisModel = '', isOnline = false, didAutoBrief = false;
 
   // ---------- Orb build (radar ticks) ----------
@@ -1128,11 +1225,16 @@
     setOrb('thinking');
     const pending = add('jarvis', '…'); pending.className = 'thinking';
     try {
+      const tones={technical:'Answer in a direct, precise, technical tone.',
+                   concise:'Answer concisely — keep it short.',
+                   friendly:'Answer in a warm, friendly tone.'};
+      const hint=tones[S.personality];
+      const sendPrompt = hint ? ('['+hint+']\n'+prompt) : prompt;
       const r = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ prompt }) });
+        body: JSON.stringify({ prompt: sendPrompt }) });
       const j = await r.json();
       pending.className = ''; pending.textContent = j.response;
-      if (j.toolSteps > 0) { const m=document.createElement('div'); m.className='meta';
+      if (j.toolSteps > 0 && S.showDetails!==false) { const m=document.createElement('div'); m.className='meta';
         m.textContent='used '+j.toolSteps+' tool step'+(j.toolSteps>1?'s':''); pending.parentElement.appendChild(m); }
       if (S.autoSpeak) speak(j.response); else setOrb(restState());
     } catch (err) {
@@ -1297,6 +1399,33 @@
   document.querySelectorAll('#sidenav .navitem').forEach(n=>n.addEventListener('click',()=>navTo(n.dataset.nav)));
   document.querySelectorAll('.pgclose').forEach(b=>b.addEventListener('click',()=>navTo('home')));
   navTo('home');
+  // ---- Settings modal: sidebar pane switching ----
+  function setSettingsPane(id){
+    document.querySelectorAll('.set-item').forEach(n=>n.classList.toggle('active', n.dataset.set===id));
+    document.querySelectorAll('.set-pane').forEach(p=>p.classList.toggle('active', p.dataset.pane===id));
+  }
+  document.querySelectorAll('.set-item').forEach(n=>n.addEventListener('click',()=>setSettingsPane(n.dataset.set)));
+  function markAccent(){ document.querySelectorAll('#s_accentSwatches .set-swatch')
+      .forEach(el=>el.classList.toggle('active', el.dataset.acc===(S.accent||DEFAULTS.accent))); }
+  function markScale(){ document.querySelectorAll('#s_scaleBtns button')
+      .forEach(b=>b.classList.toggle('active', parseInt(b.dataset.scale,10)===(S.uiScale||100))); }
+  (function initAppearanceControls(){
+    const sw=$('s_accentSwatches');
+    if(sw){ sw.innerHTML=ACCENTS.map(a=>'<div class="set-swatch" data-acc="'+a[1]+'" title="'+a[0]
+        +'" style="background:'+a[1]+'"></div>').join('');
+      sw.querySelectorAll('.set-swatch').forEach(el=>el.addEventListener('click',()=>{
+        S.accent=el.dataset.acc; saveSettings(); applyAppearance(); markAccent(); })); }
+    const sc=$('s_scaleBtns');
+    if(sc){ sc.innerHTML=[90,100,110,125,150,175].map(v=>'<button class="hbtn" data-scale="'+v
+        +'" type="button">'+v+'%</button>').join('');
+      sc.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+        S.uiScale=parseInt(b.dataset.scale,10); saveSettings(); applyAppearance(); markScale(); })); }
+    if($('s_font')) $('s_font').addEventListener('change',e=>{ S.font=e.target.value; saveSettings(); applyAppearance(); });
+    if($('s_personality')) $('s_personality').addEventListener('change',e=>{ S.personality=e.target.value; saveSettings(); });
+    if($('s_timezone')) $('s_timezone').addEventListener('change',e=>{ S.timezone=e.target.value.trim(); saveSettings(); });
+    if($('s_showDetails')) $('s_showDetails').addEventListener('change',e=>{ S.showDetails=e.target.checked; saveSettings(); });
+  })();
+
   function openSettings() {
     $('s_voiceOnStart').checked=S.voiceOnStart; $('s_autoSpeak').checked=S.autoSpeak;
     $('s_lang').value=S.lang; $('s_rate').value=S.rate; $('s_wake').value=S.wakeWord;
@@ -1304,6 +1433,9 @@
     $('s_autoBrief').checked=S.autoBrief; $('s_city').value=S.city;
     $('s_showAlerts').checked=S.showAlerts; $('s_speakAlerts').checked=S.speakAlerts;
     $('s_cpu').value=S.cpu; $('s_ram').value=S.ram; $('s_model').textContent=jarvisModel||'offline';
+    $('s_personality').value=S.personality||'balanced'; $('s_timezone').value=S.timezone||'';
+    $('s_showDetails').checked=S.showDetails!==false; $('s_font').value=S.font||'default';
+    markAccent(); markScale();
     populateVoiceList();
     drawer.classList.add('open'); scrim.classList.add('open');
   }
