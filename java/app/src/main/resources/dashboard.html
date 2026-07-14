@@ -527,6 +527,15 @@
   .pf-metrics{ display:flex; gap:6px; flex-wrap:wrap; margin:0 2px 6px; }
   .pf-metric{ flex:1 1 92px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:rgba(10,22,36,calc(.5*var(--panel-alpha))); }
   .pf-metric .n{ font-size:18px; font-weight:600; color:var(--cyan); } .pf-metric .k{ font-size:11px; color:var(--dim); }
+  /* NVIDIA catalog quick-pick */
+  .nv-grp{ font-size:11px; letter-spacing:1.5px; color:var(--cyan); text-transform:uppercase; margin:10px 0 5px; }
+  .nv-sub{ font-size:11px; color:var(--dim); margin:7px 0 4px; }
+  .nv-row{ display:flex; flex-wrap:wrap; gap:6px; }
+  .nv-chip{ font:inherit; font-size:12px; padding:5px 10px; border-radius:999px; background:rgba(20,50,80,.4);
+    color:#cfeeff; border:1px solid var(--line); cursor:pointer; }
+  .nv-chip:hover{ border-color:var(--cyan); color:#eaf7ff; }
+  .nv-chip.spec{ background:rgba(120,140,160,.08); color:var(--dim); cursor:default; }
+  .nv-chip.spec:hover{ border-color:var(--line); color:var(--dim); }
 
 </style>
 </head>
@@ -543,6 +552,7 @@
   <div class="navitem" data-nav="home"><span class="ic">⬡</span> Command Center</div>
   <div class="navitem" data-nav="memory"><span class="ic">🧠</span> Memory</div>
   <div class="navitem" data-nav="conv"><span class="ic">💬</span> Conversations</div>
+  <div class="navitem" data-nav="apis"><span class="ic">🔌</span> APIs &amp; Models</div>
   <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
   <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
   <div class="navitem" data-nav="kb"><span class="ic">📚</span> Knowledge</div>
@@ -717,6 +727,41 @@
     <div class="pcard">
       <h4>Reminders</h4>
       <div id="memRem"><div class="hint">None.</div></div>
+    </div>
+  </div>
+</div>
+<div class="page cpage" id="cpage-apis">
+  <div class="page-head"><h2>🔌  APIs &amp; MODELS</h2><span style="margin-left:auto;"></span>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body" id="apisBody" style="max-width:1040px;">
+    <div class="pcard">
+      <h4>🤖 Chat providers</h4>
+      <div class="hint" style="margin-bottom:8px;">Pick a chat brain by adding an API key. Anthropic is native; every other option is an OpenAI-compatible endpoint (NVIDIA, OpenAI, OpenRouter, Groq, Mistral, DeepSeek, xAI, or a local Ollama). Keys stay on this PC and are never shown back. Changes apply on the next restart.</div>
+      <div class="row"><label for="s_provPreset">Provider</label>
+        <select id="s_provPreset"></select></div>
+      <div class="row"><label for="s_provBase">Base URL</label><input type="text" id="s_provBase" class="minput" placeholder="https://…/v1"></div>
+      <div class="row"><label for="s_provKey">API key</label><input type="password" id="s_provKey" class="minput" placeholder="paste key (leave blank to keep existing)"></div>
+      <div class="row"><label for="s_provModel">Model</label>
+        <select id="s_provModel"><option value="">—</option></select>
+        <button class="hbtn" id="s_provFetch" type="button" title="List this provider's models from its /v1/models endpoint" style="margin-left:6px;">Fetch live models</button></div>
+      <div class="row"><label for="s_provActive">Use as active brain</label><input type="checkbox" id="s_provActive"></div>
+      <div style="margin:6px 2px;"><button class="hbtn" id="s_provSave" type="button">Save provider</button></div>
+      <div id="s_provList" class="hint">None configured — Anthropic env key (if set) is used.</div>
+    </div>
+    <div class="pcard">
+      <h4>⚡ NVIDIA model catalog</h4>
+      <div class="hint" style="margin-bottom:8px;">A quick-pick of NVIDIA API Catalog models. Click a chat model to load it into the form above (Provider set to NVIDIA); then paste your <code>NVIDIA_API_KEY</code> and Save. Use <b>Fetch live models</b> to confirm the exact IDs currently served by your key. Specialized models are listed for reference — they aren't chat brains.</div>
+      <div id="nvCatalog"></div>
+    </div>
+    <div class="pcard">
+      <h4>🔗 MCP connections</h4>
+      <div class="hint" style="margin-bottom:8px;">Connect JARVIS to Model Context Protocol servers over HTTP. Once connected, the server's tools become available to JARVIS (governed and audited like any other tool). Dormant until you add one; connections are stored locally.</div>
+      <div class="row"><label for="mcp_name">Name</label><input type="text" id="mcp_name" class="minput" placeholder="e.g. my-docs-server"></div>
+      <div class="row"><label for="mcp_url">Server URL</label><input type="text" id="mcp_url" class="minput" placeholder="https://host/mcp  (Streamable HTTP / SSE endpoint)"></div>
+      <div class="row"><label for="mcp_token">Auth token</label><input type="password" id="mcp_token" class="minput" placeholder="optional bearer token (leave blank if none)"></div>
+      <div style="margin:6px 2px;"><button class="hbtn" id="mcp_save" type="button">Add &amp; connect</button>
+        <button class="hbtn" id="mcp_refresh" type="button" style="margin-left:6px;">Refresh</button></div>
+      <div id="mcpList" class="hint">No MCP servers configured.</div>
     </div>
   </div>
 </div>
@@ -964,17 +1009,8 @@
 
     <div class="set-pane active" data-pane="models">
       <h4>🤖 Models &amp; Providers</h4>
-      <div class="hint" style="padding:0 2px 6px;">Pick a chat brain by adding an API key. Anthropic is native; every other option is an OpenAI-compatible endpoint (NVIDIA, OpenAI, OpenRouter, Groq, Mistral, DeepSeek, xAI, or a local Ollama). Keys stay on this PC and are never shown back. Changes apply on the next restart.</div>
-      <div class="row"><label for="s_provPreset">Provider</label>
-        <select id="s_provPreset"></select></div>
-      <div class="row"><label for="s_provBase">Base URL</label><input type="text" id="s_provBase" placeholder="https://…/v1"></div>
-      <div class="row"><label for="s_provKey">API key</label><input type="password" id="s_provKey" placeholder="paste key (leave blank to keep existing)"></div>
-      <div class="row"><label for="s_provModel">Model</label>
-        <select id="s_provModel"><option value="">—</option></select>
-        <button class="hbtn" id="s_provFetch" type="button" title="List this provider's models" style="margin-left:6px;">Fetch</button></div>
-      <div class="row"><label for="s_provActive">Use as active brain</label><input type="checkbox" id="s_provActive"></div>
-      <div style="margin:6px 2px;"><button class="hbtn" id="s_provSave" type="button">Save provider</button></div>
-      <div id="s_provList" class="hint">None configured — Anthropic env key (if set) is used.</div>
+      <div class="hint" style="padding:0 2px 10px;">Models, API keys and MCP connections now live on their own full page.</div>
+      <button class="hbtn" id="s_openApis" type="button">Open APIs &amp; Models →</button>
     </div>
 
     <div class="set-pane" data-pane="chat">
@@ -2235,6 +2271,128 @@
   $('s_provFetch').addEventListener('click',provFetchModels);
   $('s_provSave').addEventListener('click',()=>provSave($('s_provActive').checked));
   provLoad();
+  if($('s_openApis')) $('s_openApis').addEventListener('click',()=>{ closeSettings(); navTo('apis'); });
+
+  // ---- NVIDIA model catalog (quick-pick; live /v1/models remains the source of truth for IDs) ----
+  const NV_CATALOG={
+    chat:[
+      {pub:'NVIDIA Nemotron', items:[
+        {n:'Nemotron 3 Ultra 550B-A55B',id:'nvidia/nemotron-3-ultra-550b'},
+        {n:'Nemotron 3 Super 120B-A12B',id:'nvidia/nemotron-3-super-120b'},
+        {n:'Nemotron 3 Nano 30B-A3B',id:'nvidia/nemotron-3-nano-30b'},
+        {n:'Nemotron 3 Nano Omni 30B-A3B Reasoning',id:'nvidia/nemotron-3-nano-omni-30b'},
+        {n:'NVIDIA Nemotron Nano 9B v2',id:'nvidia/nvidia-nemotron-nano-9b-v2'},
+        {n:'Nemotron Nano 12B v2 VL',id:'nvidia/nemotron-nano-12b-v2-vl'},
+        {n:'Llama 3.3 Nemotron Super 49B v1.5',id:'nvidia/llama-3.3-nemotron-super-49b-v1.5'},
+        {n:'Llama 3.3 Nemotron Super 49B v1',id:'nvidia/llama-3.3-nemotron-super-49b-v1'},
+        {n:'Llama 3.1 Nemotron Nano 8B v1',id:'nvidia/llama-3.1-nemotron-nano-8b-v1'},
+        {n:'Llama 3.1 Nemotron Nano VL 8B v1',id:'nvidia/llama-3.1-nemotron-nano-vl-8b-v1'},
+        {n:'Nemotron Mini 4B Instruct',id:'nvidia/nemotron-mini-4b-instruct'} ]},
+      {pub:'Meta Llama', items:[
+        {n:'Llama 4 Maverick 17B-128E Instruct',id:'meta/llama-4-maverick-17b-128e-instruct'},
+        {n:'Llama 3.3 70B Instruct',id:'meta/llama-3.3-70b-instruct'},
+        {n:'Llama 3.1 70B Instruct',id:'meta/llama-3.1-70b-instruct'},
+        {n:'Llama 3.1 8B Instruct',id:'meta/llama-3.1-8b-instruct'},
+        {n:'Llama 3.2 3B Instruct',id:'meta/llama-3.2-3b-instruct'},
+        {n:'Llama 3.2 1B Instruct',id:'meta/llama-3.2-1b-instruct'},
+        {n:'Llama 3.2 11B Vision Instruct',id:'meta/llama-3.2-11b-vision-instruct'},
+        {n:'Llama 3.2 90B Vision Instruct',id:'meta/llama-3.2-90b-vision-instruct'} ]},
+      {pub:'Mistral AI', items:[
+        {n:'Mistral Medium 3.5 128B',id:'mistralai/mistral-medium-3.5'},
+        {n:'Mistral Small 4 119B',id:'mistralai/mistral-small-4'},
+        {n:'Mistral Large 3 675B Instruct',id:'mistralai/mistral-large-3-instruct'},
+        {n:'Ministral 14B Instruct',id:'mistralai/ministral-14b-instruct'},
+        {n:'Mistral Nemotron',id:'mistralai/mistral-nemotron'},
+        {n:'Mixtral 8x7B Instruct v0.1',id:'mistralai/mixtral-8x7b-instruct-v0.1'} ]},
+      {pub:'Google Gemma', items:[
+        {n:'Gemma 4 31B-IT',id:'google/gemma-4-31b-it'},
+        {n:'Gemma 3n E4B-IT',id:'google/gemma-3n-e4b-it'},
+        {n:'Gemma 3n E2B-IT',id:'google/gemma-3n-e2b-it'},
+        {n:'Gemma 2 2B-IT',id:'google/gemma-2-2b-it'},
+        {n:'PaliGemma (vision)',id:'google/paligemma'} ]},
+      {pub:'Qwen', items:[
+        {n:'Qwen3.5-397B-A17B',id:'qwen/qwen3.5-397b-a17b'},
+        {n:'Qwen3.5-122B-A10B',id:'qwen/qwen3.5-122b-a10b'},
+        {n:'Qwen3-Next 80B-A3B Instruct',id:'qwen/qwen3-next-80b-a3b-instruct'} ]},
+      {pub:'Other publishers', items:[
+        {n:'Z.ai · GLM-5.2',id:'zai/glm-5.2'},
+        {n:'MiniMax M3 Preview',id:'minimaxai/minimax-m3-preview'},
+        {n:'MiniMax M2.7',id:'minimaxai/minimax-m2.7'},
+        {n:'Stepfun · Step-3.7 Flash',id:'stepfun-ai/step-3.7-flash'},
+        {n:'Stepfun · Step-3.5 Flash',id:'stepfun-ai/step-3.5-flash'},
+        {n:'DeepSeek V4 Pro',id:'deepseek-ai/deepseek-v4-pro'},
+        {n:'DeepSeek V4 Flash',id:'deepseek-ai/deepseek-v4-flash'},
+        {n:'OpenAI · GPT-OSS-120B',id:'openai/gpt-oss-120b'},
+        {n:'OpenAI · GPT-OSS-20B',id:'openai/gpt-oss-20b'},
+        {n:'Microsoft · Phi-4 Multimodal Instruct',id:'microsoft/phi-4-multimodal-instruct'},
+        {n:'Microsoft · Phi-4 Mini Instruct',id:'microsoft/phi-4-mini-instruct'},
+        {n:'ByteDance · Seed-OSS 36B Instruct',id:'bytedance/seed-oss-36b-instruct'},
+        {n:'Stockmark-2 100B Instruct',id:'stockmark/stockmark-2-100b-instruct'},
+        {n:'Sarvam AI · Sarvam-M',id:'sarvamai/sarvam-m'},
+        {n:'Abacus.AI · Dracarys-Llama 3.1 70B',id:'abacusai/dracarys-llama-3.1-70b-instruct'},
+        {n:'Upstage · Solar 10.7B Instruct',id:'upstage/solar-10.7b-instruct'} ]}
+    ],
+    specialized:[
+      {cat:'Embeddings & rerank & NER', items:['NV-Embed v1','NV-EmbedCode 7B v1','Rerank-QA Mistral 4B','GLiNER PII']},
+      {cat:'Safety & moderation', items:['Nemotron 3.5 Content Safety','Nemotron 3 Content Safety','Nemotron Content Safety Reasoning 4B','Llama 3.1 Nemotron Safety Guard 8B v3','Llama Guard 4 12B']},
+      {cat:'Speech & audio', items:['Nemotron Voicechat','Magpie TTS Zeroshot','Studio Voice','Background Noise Removal','Active Speaker Detection']},
+      {cat:'Vision-perception / world / driving', items:['Synthetic Video Detector','StreamPETR','SparseDrive','BEVFormer','Cosmos3 Nano','Cosmos3 Nano Reasoner','Cosmos Transfer2.5-2B','Cosmos Transfer1-7B','DiffusionGemma 26B-A4B-IT']},
+      {cat:'Biology', items:['ESMFold','ESM2-650M']},
+      {cat:'Translation & other', items:['Riva Translate 4B Instruct v1.1','Ising Calibration 1-35B-A3B']}
+    ]
+  };
+  function renderNvCatalog(){
+    const box=$('nvCatalog'); if(!box) return; let h='';
+    NV_CATALOG.chat.forEach(g=>{
+      h+='<div class="nv-grp">'+esc(g.pub)+'</div><div class="nv-row">'
+        +g.items.map(m=>'<button class="nv-chip" type="button" data-id="'+esc(m.id)+'" title="Load into the form above — then Fetch live models to confirm the exact ID">'+esc(m.n)+'</button>').join('')
+        +'</div>';
+    });
+    h+='<div class="nv-grp" style="color:var(--dim);border-top:1px solid var(--line);padding-top:8px;margin-top:8px;">Specialized — not chat brains (reference only)</div>';
+    NV_CATALOG.specialized.forEach(g=>{
+      h+='<div class="nv-sub">'+esc(g.cat)+'</div><div class="nv-row">'
+        +g.items.map(n=>'<span class="nv-chip spec" title="Not usable as a chat model — needs a dedicated feature">'+esc(n)+'</span>').join('')
+        +'</div>';
+    });
+    box.innerHTML=h;
+    box.querySelectorAll('.nv-chip[data-id]').forEach(b=>b.addEventListener('click',()=>{
+      const psel=$('s_provPreset'); if([...psel.options].some(o=>o.value==='NVIDIA')){ psel.value='NVIDIA'; provApplyPreset(); }
+      const msel=$('s_provModel'); const id=b.dataset.id;
+      if(![...msel.options].some(o=>o.value===id)){ const o=document.createElement('option'); o.value=id; o.textContent=id; msel.appendChild(o); }
+      msel.value=id;
+      $('apisBody').scrollTop=0;
+      $('s_provKey').focus();
+    }));
+  }
+
+  // ---- MCP connections ----
+  async function mcpLoad(){
+    const box=$('mcpList'); if(!box) return;
+    let j={servers:[]}; try{ j=await (await fetch('/mcp')).json(); }catch(e){ box.textContent='MCP unavailable.'; return; }
+    const s=j.servers||[];
+    if(!s.length){ box.innerHTML='No MCP servers configured.'; return; }
+    box.innerHTML=s.map(m=>{
+      const dot=m.connected?'<span style="color:#38e28e">● connected</span>':(m.error?('<span style="color:#f6a3a3">● '+esc(m.error)+'</span>'):'<span style="color:var(--dim)">○ dormant</span>');
+      const tools=(m.tools&&m.tools.length)?(' · '+m.tools.length+' tool'+(m.tools.length==1?'':'s')+': '+m.tools.map(esc).join(', ')):'';
+      return '<div style="padding:5px 0;border-top:1px solid var(--line);"><b>'+esc(m.name)+'</b> '+dot
+        +' <span class="hint">'+esc(m.url)+(m.hasToken?' · token set':'')+tools+'</span>'
+        +' <button class="hbtn" type="button" data-mcpdel="'+esc(m.name)+'" style="float:right;padding:2px 8px;">Remove</button></div>';
+    }).join('');
+    box.querySelectorAll('[data-mcpdel]').forEach(b=>b.addEventListener('click',async()=>{
+      await fetch('/mcp?name='+encodeURIComponent(b.dataset.mcpdel),{method:'DELETE'}).catch(()=>{}); mcpLoad(); }));
+  }
+  async function mcpSave(){
+    const name=$('mcp_name').value.trim(), url=$('mcp_url').value.trim();
+    if(!name||!url){ toast('MCP needs a name and a server URL, sir.'); return; }
+    await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,url,token:$('mcp_token').value})}).catch(()=>{});
+    $('mcp_token').value=''; $('mcp_name').value=''; $('mcp_url').value='';
+    mcpLoad();
+  }
+  if($('mcp_save')) $('mcp_save').addEventListener('click',mcpSave);
+  if($('mcp_refresh')) $('mcp_refresh').addEventListener('click',mcpLoad);
+
+  pageLoaders.apis=()=>{ provLoad(); renderNvCatalog(); mcpLoad(); };
 
   // ---- HUD Activity feed (sourced from the audit log — single source of truth) ----
   function actClass(e){

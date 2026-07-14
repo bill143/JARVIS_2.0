@@ -80,13 +80,13 @@ final class AppWiring {
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
             AutonomousService autonomous, SemanticMemoryService semantic,
             DiscussionService discussion, ProviderSettingsService providers, BrainVault brain,
-            SolicitationsService solicitations, UploadedDocsService uploads) {
+            SolicitationsService solicitations, UploadedDocsService uploads, McpService mcp) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion, providers, brain, solicitations, uploads);
+                    discussion, providers, brain, solicitations, uploads, mcp);
         }
     }
 
@@ -97,7 +97,7 @@ final class AppWiring {
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
             SemanticMemoryService semantic, DiscussionService discussion,
             ProviderSettingsService providers, BrainVault brain, SolicitationsService solicitations,
-            UploadedDocsService uploads) {
+            UploadedDocsService uploads, McpService mcp) {
     }
 
     private AppWiring() {
@@ -243,10 +243,14 @@ final class AppWiring {
         // pdf via PDFBox). In-memory and session-scoped; every upload is audited.
         UploadedDocsService uploads = new UploadedDocsService(auditLog);
 
+        // MCP connections: talk to Model Context Protocol servers over HTTP. Dormant until the user
+        // adds one; configs persist locally (scope 'mcp'), tokens never returned/logged, all audited.
+        McpService mcp = new McpService(auditLog);
+
         return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
                 permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
-                autonomous, semantic, discussion, providerSettings, brain, solicitations, uploads);
+                autonomous, semantic, discussion, providerSettings, brain, solicitations, uploads, mcp);
     }
 
     /**

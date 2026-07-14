@@ -103,6 +103,7 @@ public final class WebServer {
         BrainVault brain = governance == null ? null : governance.brain();
         SolicitationsService solicitations = governance == null ? null : governance.solicitations();
         UploadedDocsService uploads = governance == null ? null : governance.uploads();
+        McpService mcp = governance == null ? null : governance.mcp();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -828,6 +829,76 @@ public final class WebServer {
             respond(exchange, 200, "application/json", docJson(doc).toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // ---- MCP connections ----
+        server.createContext("/mcp/call", exchange -> {
+            if (mcp == null) {
+                respond(exchange, 503, "text/plain", "mcp unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String server1;
+            String tool;
+            JsonNode args;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                server1 = j.path("server").asText("");
+                tool = j.path("tool").asText("");
+                args = j.path("arguments");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String out = mcp.call(server1, tool, args.isObject() ? args : null);
+            ObjectNode reply = MAPPER.createObjectNode();
+            reply.put("output", out);
+            respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/mcp", exchange -> {
+            if (mcp == null) {
+                respond(exchange, 503, "text/plain", "mcp unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String method = exchange.getRequestMethod();
+            if ("POST".equals(method)) {
+                String name;
+                String url;
+                String token;
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    name = j.path("name").asText("");
+                    url = j.path("url").asText("");
+                    token = j.path("token").asText("");
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+                McpService.ServerView v = mcp.add(name, url, token);
+                respond(exchange, 200, "application/json",
+                        mcpJson(v).toString().getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("DELETE".equals(method)) {
+                boolean removed = mcp.remove(param(exchange, "name", ""));
+                respond(exchange, removed ? 200 : 404, "application/json",
+                        ("{\"removed\":" + removed + "}").getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("REFRESH".equals(method) || "true".equals(param(exchange, "refresh", ""))) {
+                mcp.refresh();
+            }
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode arr = root.putArray("servers");
+            for (McpService.ServerView v : mcp.list()) {
+                arr.add(mcpJson(v));
+            }
+            root.put("count", arr.size());
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/uploads", exchange -> {
             if (uploads == null) {
                 respond(exchange, 503, "text/plain", "uploads unavailable".getBytes(StandardCharsets.UTF_8));
@@ -1281,6 +1352,21 @@ public final class WebServer {
         } catch (NumberFormatException e) {
             return dflt;
         }
+    }
+
+    /** Serializes an MCP server view (never the token — only whether one is set). */
+    private static ObjectNode mcpJson(McpService.ServerView v) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("name", v.name());
+        o.put("url", v.url());
+        o.put("hasToken", v.hasToken());
+        o.put("connected", v.connected());
+        o.put("error", v.error());
+        ArrayNode t = o.putArray("tools");
+        for (String tool : v.tools()) {
+            t.add(tool);
+        }
+        return o;
     }
 
     /** Serializes uploaded-document metadata (never the extracted text itself). */
