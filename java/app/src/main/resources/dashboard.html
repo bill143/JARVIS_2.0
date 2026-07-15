@@ -1839,31 +1839,63 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') interrupt(); });
   if (window.speechSynthesis) speechSynthesis.getVoices();
 
-  // ---------- Webcam vision ----------
+  // ---------- Webcam vision (gated behind a live-preview confirmation) ----------
+  // The camera opens a preview modal first; NO frame is captured and NO facial-recognition request
+  // is sent until the user explicitly presses Capture. Cancel stops the camera and sends nothing.
   document.getElementById('camera').addEventListener('click', async () => {
     if (!isOnline) { add('jarvis','Webcam vision needs an API key, sir.'); return; }
-    add('you','📷 (webcam snapshot)'); setOrb('thinking');
-    const pending = add('jarvis','Looking through the camera now, sir…'); pending.className='thinking';
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video:true });
-      const video=document.createElement('video'); video.srcObject=stream; await video.play();
-      await new Promise(r=>setTimeout(r,400));
+    } catch (err) { add('jarvis','Camera error: '+err.message); return; }
+
+    const willRecognize = peopleCount > 0;
+    const wrap=document.createElement('div'); wrap.className='permwrap'; wrap.id='camGate';
+    wrap.innerHTML =
+      '<div class="permbox" style="width:min(560px,94vw)">'
+      +'<div class="permhead">📷 CAMERA — CONFIRM BEFORE CAPTURE</div>'
+      +'<div class="permbody">'
+      + (willRecognize
+          ? 'This will capture one frame and match it against your saved <b>People</b> directory ('+peopleCount+' saved). '
+          : 'This will capture one frame and describe what the camera sees. ')
+      +'Nothing is captured or sent until you press Capture.'
+      +'<div style="margin-top:12px"><video id="camPreview" autoplay playsinline muted style="width:100%;border-radius:10px;background:#000;max-height:46vh"></video></div>'
+      +'<div id="camCountdown" style="text-align:center;font-size:26px;margin-top:6px;min-height:30px"></div>'
+      +'</div>'
+      +'<div class="permbtns">'
+      +'<button class="hbtn" id="camCancel">Cancel</button>'
+      +'<button class="hbtn" id="camShoot" style="border-color:var(--cyan)">'+(willRecognize?'Capture &amp; Identify':'Capture')+'</button>'
+      +'</div></div>';
+    document.body.appendChild(wrap);
+    const video=wrap.querySelector('#camPreview'); video.srcObject=stream;
+    let closed=false;
+    const cleanup=()=>{ if(closed) return; closed=true; stream.getTracks().forEach(t=>t.stop()); wrap.remove(); };
+    wrap.querySelector('#camCancel').addEventListener('click', cleanup);
+    wrap.addEventListener('click', e=>{ if(e.target===wrap) cleanup(); });   // click backdrop = cancel
+
+    wrap.querySelector('#camShoot').addEventListener('click', async () => {
+      wrap.querySelector('#camShoot').disabled=true; wrap.querySelector('#camCancel').disabled=true;
+      const cd=wrap.querySelector('#camCountdown');
+      for (let n=3;n>=1;n--){ cd.textContent=String(n); await new Promise(r=>setTimeout(r,600)); }
+      cd.textContent='📸';
       const c=document.createElement('canvas'); c.width=video.videoWidth||640; c.height=video.videoHeight||480;
       c.getContext('2d').drawImage(video,0,0,c.width,c.height);
       const dataUrl=c.toDataURL('image/png');
-      let j;
-      if (peopleCount > 0) {
-        // Recognise against saved people first.
-        j = await (await fetch('/recognize',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({image:dataUrl})})).json();
-      } else {
-        j = await (await fetch('/vision',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({image:dataUrl.split(',')[1],question:'What do you see through this webcam? Be brief.'})})).json();
-      }
-      pending.className=''; pending.textContent=j.response; speak(j.response);
-    } catch (err){ pending.className=''; pending.textContent='Camera error: '+err.message; setOrb(restState()); }
-    finally { if (stream) stream.getTracks().forEach(t=>t.stop()); }
+      cleanup();
+      add('you','📷 (webcam snapshot)'); setOrb('thinking');
+      const pending=add('jarvis','Looking through the camera now, sir…'); pending.className='thinking';
+      try {
+        let j;
+        if (willRecognize) {
+          j = await (await fetch('/recognize',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({image:dataUrl})})).json();
+        } else {
+          j = await (await fetch('/vision',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({image:dataUrl.split(',')[1],question:'What do you see through this webcam? Be brief.'})})).json();
+        }
+        pending.className=''; pending.textContent=j.response; speak(j.response);
+      } catch (err){ pending.className=''; pending.textContent='Camera error: '+err.message; setOrb(restState()); }
+    });
   });
 
   // ---------- Settings drawer ----------
