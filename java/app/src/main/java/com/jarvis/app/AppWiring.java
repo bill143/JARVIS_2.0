@@ -172,6 +172,14 @@ final class AppWiring {
         // (e.g. NVIDIA / OpenAI / a local model) overrides the ANTHROPIC_API_KEY default; it takes
         // effect on (re)start. Keys live locally in the memory store and are never logged.
         ProviderSettingsService providerSettings = new ProviderSettingsService(memory);
+        // Semantic memory is the single source of truth for the facts JARVIS remembers: both the
+        // Memory tab and the Personal Intelligence tab read/write it, and it feeds the chat recall
+        // block below so the assistant draws on the same unified store during conversations. Cloud
+        // embeddings are dormant by default (decision D3) — keyword fallback until
+        // JARVIS_EMBEDDINGS_KEY is set, at which point recall becomes meaning-based.
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "semantic")),
+                HttpEmbeddingProvider.fromEnvironment(), auditLog);
         final ToolRegistry brainTools = governedTools;
         // Rebuilt on demand so activating a provider (APIs & Models) hot-swaps the brain, no restart.
         java.util.function.Supplier<AgentPolicy> brainFactory = () -> {
@@ -186,7 +194,7 @@ final class AppWiring {
                                 com.jarvis.integrations.llm.OpenAiCompatibleProvider.transport(
                                         a.baseUrl(), a.apiKey()));
                 return AnthropicPolicy.withProvider(prov, m, 1024, brainTools)
-                        .withMemoryContext(() -> recall(memory, people))
+                        .withMemoryContext(() -> recall(memory, people, semantic))
                         .withHistory(() -> conversationHistory(memory, "dashboard", 24))
                         .withUsageSink((usedModel, in, out) -> {
                             if (in > 0 || out > 0) {
@@ -196,7 +204,7 @@ final class AppWiring {
             }
             if (online) {
                 return AnthropicPolicy.withApiKey(apiKey, model, brainTools)
-                        .withMemoryContext(() -> recall(memory, people))
+                        .withMemoryContext(() -> recall(memory, people, semantic))
                         .withHistory(() -> conversationHistory(memory, "dashboard", 24))
                         .withUsageSink((usedModel, in, out) -> {
                             if (in > 0 || out > 0) {
@@ -246,11 +254,6 @@ final class AppWiring {
                 Path.of(System.getProperty("user.home"), ".jarvis", "knowledge")));
         MultiAgentService agents = new MultiAgentService(api, auditLog);
         AutonomousService autonomous = new AutonomousService(api, auditLog);
-        // Semantic memory: cloud embeddings dormant by default (decision D3) — keyword fallback until
-        // JARVIS_EMBEDDINGS_KEY is set, at which point recall becomes meaning-based.
-        SemanticMemoryService semantic = new SemanticMemoryService(
-                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "semantic")),
-                HttpEmbeddingProvider.fromEnvironment(), auditLog);
         // Project Discussion: JARVIS chairs, OpenHuman advises. Bounded + audited; read-only.
         DiscussionService discussion = new DiscussionService(api, openhuman, auditLog,
                 new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "discussions")));
@@ -394,9 +397,28 @@ final class AppWiring {
 
     /** Collapses durable preferences + directions into a recall block (no people contacts). */
     static String recall(MemoryStore<String> memory) {
-        List<String> lines = memory.query("preferences").stream()
-                .map(e -> "- " + e.value())
-                .collect(Collectors.toList());
+        return recall(memory, (SemanticMemoryService) null);
+    }
+
+    /**
+     * The chat recall block, drawn from the <b>single unified fact store</b>. When the semantic
+     * memory service is wired (production) the facts JARVIS remembers come from it — the same store
+     * the Memory tab and the Personal Intelligence tab read and write — so a fact added in either
+     * tab is available to the assistant during conversations. Email/calendar directions and the
+     * about-the-user note remain in the key/value memory store.
+     */
+    static String recall(MemoryStore<String> memory, SemanticMemoryService semantic) {
+        List<String> lines = new java.util.ArrayList<>();
+        if (semantic != null) {
+            semantic.all().stream().limit(100).forEach(d -> {
+                String title = SemanticMemoryService.titleOf(d);
+                String content = d.content();
+                lines.add("- " + (title.isBlank() ? content
+                        : (content.isBlank() ? title : title + ": " + content)));
+            });
+        } else {
+            memory.query("preferences").forEach(e -> lines.add("- " + e.value()));
+        }
         memory.get("instructions", "mail").map(m -> m.value()).filter(s -> !s.isBlank())
                 .ifPresent(s -> lines.add("- Email handling directions: " + s));
         memory.get("instructions", "calendar").map(m -> m.value()).filter(s -> !s.isBlank())
@@ -408,7 +430,13 @@ final class AppWiring {
 
     /** Recall including the People directory, so JARVIS can email/contact people by name. */
     static String recall(MemoryStore<String> memory, PeopleStore people) {
-        String base = recall(memory);
+        return recall(memory, people, null);
+    }
+
+    /** Recall including the People directory and drawing facts from the unified semantic store. */
+    static String recall(MemoryStore<String> memory, PeopleStore people,
+            SemanticMemoryService semantic) {
+        String base = recall(memory, semantic);
         String contacts = people.contactsBlock();
         if (contacts.isBlank()) {
             return base;

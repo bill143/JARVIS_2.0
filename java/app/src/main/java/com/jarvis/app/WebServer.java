@@ -1360,11 +1360,22 @@ public final class WebServer {
                     if ("add".equals(action)) {
                         String value = j.path("value").asText("").strip();
                         if (!value.isEmpty()) {
-                            memory.put("preferences",
-                                    "pref-" + Long.toHexString(System.nanoTime()), value);
+                            // Unified fact store: write through the semantic engine when wired so the
+                            // fact is visible to the Personal Intelligence tab and to chat recall too.
+                            if (semantic != null) {
+                                semantic.remember("", value, System.currentTimeMillis());
+                            } else {
+                                memory.put("preferences",
+                                        "pref-" + Long.toHexString(System.nanoTime()), value);
+                            }
                         }
                     } else if ("delete".equals(action)) {
-                        memory.delete("preferences", j.path("key").asText(""));
+                        String key = j.path("key").asText("");
+                        if (semantic != null && key.startsWith("sm-")) {
+                            semantic.forget(key);
+                        } else {
+                            memory.delete("preferences", key);
+                        }
                     }
                 } catch (IOException e) {
                     respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
@@ -1374,14 +1385,27 @@ public final class WebServer {
             ObjectNode out = MAPPER.createObjectNode();
             ArrayNode prefs = out.putArray("preferences");
             ArrayNode rem = out.putArray("reminders");
+            // Facts come from the unified semantic store when wired; each carries its id as the key
+            // so the Memory tab's delete flows back to the same store.
+            if (semantic != null) {
+                semantic.all().forEach(d -> {
+                    ObjectNode o = prefs.addObject();
+                    o.put("key", d.id());
+                    String title = SemanticMemoryService.titleOf(d);
+                    o.put("value", title.isBlank() ? d.content()
+                            : (d.content().isBlank() ? title : title + ": " + d.content()));
+                });
+            }
             if (memory != null) {
-                memory.query("preferences").stream()
-                        .sorted(java.util.Comparator.comparing(e -> e.key()))
-                        .forEach(e -> {
-                            ObjectNode o = prefs.addObject();
-                            o.put("key", e.key());
-                            o.put("value", e.value());
-                        });
+                if (semantic == null) {
+                    memory.query("preferences").stream()
+                            .sorted(java.util.Comparator.comparing(e -> e.key()))
+                            .forEach(e -> {
+                                ObjectNode o = prefs.addObject();
+                                o.put("key", e.key());
+                                o.put("value", e.value());
+                            });
+                }
                 memory.query("reminders").stream()
                         .sorted(java.util.Comparator.comparing(e -> e.key()))
                         .forEach(e -> {

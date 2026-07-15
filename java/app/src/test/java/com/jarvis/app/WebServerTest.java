@@ -383,6 +383,38 @@ class WebServerTest {
     }
 
     @Test
+    void memoryTabAndIntelligenceTabShareOneUnifiedFactStore() throws Exception {
+        // Issue #2: the Memory tab (/memory) and Personal Intelligence tab (/semantic) must be one
+        // source of truth. A fact added in either surfaces in the other.
+        SemanticMemoryService svc = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                memory, null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            // Added via the Memory tab → visible in the Personal Intelligence tab.
+            post2r(b + "/memory", "{\"action\":\"add\",\"value\":\"prefers metric units\"}");
+            assertTrue(get2(b + "/semantic").body().contains("prefers metric units"));
+            // Added via the Personal Intelligence tab → visible in the Memory tab.
+            post2r(b + "/semantic", "{\"action\":\"add\",\"title\":\"Coffee\",\"content\":\"black no sugar\"}");
+            String mem = get2(b + "/memory").body();
+            assertTrue(mem.contains("prefers metric units"));
+            assertTrue(mem.contains("Coffee") && mem.contains("black no sugar"));
+            // The Memory tab lists facts by their semantic id, so deleting there flows to the one store.
+            String id = mem.replaceAll(".*\"key\":\"(sm-[^\"]+)\".*", "$1");
+            post2r(b + "/memory", "{\"action\":\"delete\",\"key\":\"" + id + "\"}");
+            assertFalse(get2(b + "/semantic").body().contains(id));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void knowledgeBaseEndpointsAddSearchAndList() throws Exception {
         com.jarvis.kb.KnowledgeBase kb =
                 new com.jarvis.kb.KnowledgeBase(new com.jarvis.memory.InMemoryRecordStore());

@@ -82,6 +82,46 @@ final class SemanticMemoryService {
         return hits;
     }
 
+    /** Removes a stored memory by id (append-only delete op); returns whether it was present. */
+    synchronized boolean forget(String id) {
+        if (id == null || id.isBlank()) {
+            return false;
+        }
+        ObjectNode e = MAPPER.createObjectNode();
+        e.put("op", "delete");
+        e.put("id", id);
+        store.append(collection, e.toString());
+        boolean removed = memory.remove(id);
+        record("semantic-forget", "id: " + id);
+        return removed;
+    }
+
+    /**
+     * Updates a stored memory in place (edit): the id is preserved, the title/content replaced.
+     * Implemented as a delete followed by a re-save of the same id so the append-only log stays
+     * consistent and recall reflects the new text immediately. Returns whether the id existed.
+     */
+    synchronized boolean update(String id, String title, String content, long nowMillis) {
+        if (id == null || id.isBlank() || !memory.all().stream().anyMatch(d -> d.id().equals(id))) {
+            return false;
+        }
+        ObjectNode del = MAPPER.createObjectNode();
+        del.put("op", "delete");
+        del.put("id", id);
+        store.append(collection, del.toString());
+        memory.remove(id);
+        ObjectNode e = MAPPER.createObjectNode();
+        e.put("op", "save");
+        e.put("id", id);
+        e.put("title", title == null ? "" : title);
+        e.put("content", content == null ? "" : content);
+        store.append(collection, e.toString());
+        memory.add(new Document(id, content == null ? "" : content,
+                Map.of("title", title == null ? "" : title)));
+        record("semantic-update", "id: " + id);
+        return true;
+    }
+
     /** All stored memories (for listing). */
     List<Document> all() {
         return memory.all();
