@@ -479,6 +479,14 @@ class WebServerTest {
             // "OpenRouter" is also a preset name, so key on its unique configured model instead.
             assertFalse(afterDel.body().contains("x/y"));
 
+            // Assign an orchestration tier (role) and confirm it round-trips in the list.
+            assertTrue(post2r(base + "/providers/role",
+                    "{\"name\":\"NVIDIA\",\"role\":\"conductor\"}").body().contains("\"ok\":true"));
+            HttpResponse<String> withRole = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/providers")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(withRole.body().contains("\"role\":\"conductor\""));
+
             // Empty name is rejected.
             HttpResponse<String> bad = client.send(HttpRequest.newBuilder(URI.create(base + "/providers"))
                             .header("Content-Type", "application/json")

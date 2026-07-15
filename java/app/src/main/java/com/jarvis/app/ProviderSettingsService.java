@@ -39,10 +39,17 @@ final class ProviderSettingsService {
     record Preset(String name, String kind, String baseUrl) {
     }
 
-    /** A configured provider as shown to the UI — no API key, only whether one is set. */
+    /**
+     * A configured provider as shown to the UI — no API key, only whether one is set. {@code role}
+     * is its place in the orchestration hierarchy ({@code conductor} / {@code orchestrator} /
+     * {@code worker}), or empty when unassigned.
+     */
     record ProviderView(String name, String kind, String baseUrl, String model,
-            boolean hasKey, boolean active) {
+            boolean hasKey, boolean active, String role) {
     }
+
+    /** Valid orchestration roles (tiers), highest first. */
+    static final List<String> ROLES = List.of("conductor", "orchestrator", "worker");
 
     /** The active provider's full config, for internal use by {@link AppWiring}. */
     record Active(String name, String kind, String baseUrl, String apiKey, String model) {
@@ -82,7 +89,8 @@ final class ProviderSettingsService {
             JsonNode c = parse(e.value());
             out.add(new ProviderView(e.key(), c.path("kind").asText("openai"),
                     c.path("baseUrl").asText(""), c.path("model").asText(""),
-                    !c.path("apiKey").asText("").isBlank(), e.key().equals(active)));
+                    !c.path("apiKey").asText("").isBlank(), e.key().equals(active),
+                    c.path("role").asText("")));
         }
         return out;
     }
@@ -103,10 +111,30 @@ final class ProviderSettingsService {
             key = store.get(SCOPE, name).map(e -> parse(e.value()).path("apiKey").asText("")).orElse("");
         }
         c.put("apiKey", key);
+        // Preserve any assigned orchestration role across a save (model/key edits keep the tier).
+        c.put("role", store.get(SCOPE, name)
+                .map(e -> parse(e.value()).path("role").asText("")).orElse(""));
         store.put(SCOPE, name, c.toString());
         if (makeActive) {
             store.put(SCOPE, ACTIVE_KEY, name);
         }
+    }
+
+    /** Assigns an orchestration role/tier to a provider (empty/unknown clears it). */
+    boolean setRole(String name, String role) {
+        var entry = store.get(SCOPE, name);
+        if (entry.isEmpty()) {
+            return false;
+        }
+        String r = role == null ? "" : role.strip().toLowerCase();
+        if (!ROLES.contains(r)) {
+            r = "";
+        }
+        JsonNode c = parse(entry.get().value());
+        ObjectNode o = c.isObject() ? (ObjectNode) c : MAPPER.createObjectNode();
+        o.put("role", r);
+        store.put(SCOPE, name, o.toString());
+        return true;
     }
 
     /** Result of a live connection test. */

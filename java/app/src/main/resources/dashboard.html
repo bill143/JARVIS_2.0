@@ -536,6 +536,18 @@
   .nv-chip:hover{ border-color:var(--cyan); color:#eaf7ff; }
   .nv-chip.spec{ background:rgba(120,140,160,.08); color:var(--dim); cursor:default; }
   .nv-chip.spec:hover{ border-color:var(--line); color:var(--dim); }
+  /* Model roster / orchestration tiers */
+  .pf-rolesel{ padding:3px 7px; font:inherit; font-size:12px; border-radius:6px; background:rgba(8,18,30,.8);
+    color:var(--text); border:1px solid var(--line); }
+  .ros-tier{ border:1px solid var(--line); border-radius:9px; padding:9px 11px; margin:8px 0;
+    background:rgba(10,22,36,calc(.5*var(--panel-alpha))); }
+  .ros-head{ display:flex; align-items:center; gap:8px; font-size:13px; }
+  .ros-ic{ font-size:16px; }
+  .ros-row{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .ros-empty{ color:var(--dim); margin-top:6px; font-size:13px; }
+  .ros-chip{ display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px;
+    background:rgba(20,50,80,.4); border:1px solid var(--line); color:#cfeeff; font-size:12.5px; }
+  .ros-chip[data-active]{ border-color:var(--cyan); box-shadow:0 0 0 1px var(--cyan); }
 
 </style>
 </head>
@@ -750,6 +762,10 @@
       <div style="margin:6px 2px;"><button class="hbtn" id="s_provSave" type="button">Save provider</button>
         <span id="s_provMsg" style="margin-left:10px;font-size:12.5px;"></span></div>
       <div id="s_provList" class="hint">None configured — Anthropic env key (if set) is used.</div>
+    </div>
+    <div class="pcard">
+      <h4>🏛 Model roster &amp; orchestration tiers</h4>
+      <div id="rosterBox"><div class="hint">Save a provider first, then assign it a tier.</div></div>
     </div>
     <div class="pcard">
       <h4>⚡ NVIDIA model catalog</h4>
@@ -2309,25 +2325,51 @@
     psel.innerHTML=provPresets.map(p=>'<option>'+esc(p.name)+'</option>').join('');
     if(provPresets.some(p=>p.name===cur)) psel.value=cur;
     const box=$('s_provList'); const cfg=provConfigured;
+    const ROLE_OPTS=[['','— no tier'],['conductor','Conductor'],['orchestrator','Orchestrator'],['worker','Worker']];
     if(!cfg.length){ box.innerHTML='<span class="hint">No providers saved yet — the ANTHROPIC_API_KEY env var (if set) is the fallback.</span>'; }
-    else { box.innerHTML='<div style="margin:2px 0 6px;color:var(--dim);">Saved providers ('+cfg.length+') — one is the active brain</div>'+cfg.map(c=>{
+    else { box.innerHTML='<div style="margin:2px 0 6px;color:var(--dim);">Saved providers ('+cfg.length+') — one is the active brain; assign a tier to place it in the orchestration hierarchy</div>'+cfg.map(c=>{
       const tag=c.active?'<span class="pf-badge on" style="margin-left:6px;">active</span>':'';
       const key=c.hasKey?'key set':'<span style="color:#f3c67a;">no key</span>';
       const model=c.model?(' · '+esc(c.model)):'';
+      const roleSel='<select class="pf-rolesel" data-role="'+esc(c.name)+'" title="Orchestration tier">'
+        +ROLE_OPTS.map(r=>'<option value="'+r[0]+'"'+(c.role===r[0]?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
       const acts=(c.active?'':'<button class="hbtn" data-act="'+esc(c.name)+'" style="padding:2px 9px;">Activate</button> ')
         +'<button class="hbtn" data-test="'+esc(c.name)+'" style="padding:2px 9px;">Test</button> '
         +'<button class="hbtn" data-edit="'+esc(c.name)+'" style="padding:2px 9px;">Edit</button> '
         +'<button class="hbtn" data-rm="'+esc(c.name)+'" style="padding:2px 9px;">Remove</button>';
       return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--line);flex-wrap:wrap;">'
         +'<b>'+esc(c.name)+'</b>'+tag+' <span class="hint">('+key+model+')</span>'
-        +'<span style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap;">'+acts+'</span></div>';
+        +'<span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+roleSel+acts+'</span></div>';
     }).join(''); }
     box.querySelectorAll('[data-act]').forEach(b=>b.addEventListener('click',()=>provActivate(b.dataset.act)));
     box.querySelectorAll('[data-test]').forEach(b=>b.addEventListener('click',()=>provTest(b.dataset.test)));
     box.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>provRemove(b.dataset.rm)));
     box.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{ provFill(cfg.find(c=>c.name===b.dataset.edit)); $('apisBody').scrollTop=0; }));
+    box.querySelectorAll('[data-role]').forEach(s=>s.addEventListener('change',async()=>{
+      await fetch('/providers/role',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name:s.dataset.role, role:s.value})}).catch(()=>{});
+      provMsg((s.value?('Assigned '+s.dataset.role+' → '+s.options[s.selectedIndex].text):('Cleared tier for '+s.dataset.role)));
+      await provLoad(); }));
+    renderRoster();
     const pick=cfg.find(c=>c.name===focusName) || cfg.find(c=>c.active) || cfg[0];
     provFill(pick);
+  }
+  function renderRoster(){
+    const box=$('rosterBox'); if(!box) return;
+    const tiers=[['conductor','Conductor','Tier 0 — decomposes your request &amp; arbitrates the final answer','👑'],
+                 ['orchestrator','Orchestrator','Tier 1 — domain leads that coordinate workers','🎩'],
+                 ['worker','Worker','Tier 2/3 — execute sub-tasks in parallel','🐝']];
+    const assigned=provConfigured.filter(c=>c.role);
+    let html='<div class="hint" style="margin-bottom:8px;">Assign a tier to each model (in the list above). This is the hierarchy the orchestrator will use — Conductor delegates to Orchestrators, which run Workers concurrently. Ensemble &amp; concurrent execution come next.</div>';
+    if(!assigned.length){ html+='<div class="hint" style="color:var(--dim);">No tiers assigned yet — pick “Conductor / Orchestrator / Worker” next to a model above.</div>'; }
+    tiers.forEach(t=>{
+      const members=provConfigured.filter(c=>c.role===t[0]);
+      html+='<div class="ros-tier"><div class="ros-head"><span class="ros-ic">'+t[3]+'</span><b>'+t[1]+'</b> <span class="hint">'+t[2]+'</span></div>';
+      if(!members.length){ html+='<div class="ros-empty">—</div>'; }
+      else { html+='<div class="ros-row">'+members.map(m=>'<span class="ros-chip"'+(m.active?' data-active="1"':'')+'>'+esc(m.name)+(m.model?(' <span class="hint">· '+esc(m.model)+'</span>'):'')+'</span>').join('')+'</div>'; }
+      html+='</div>';
+    });
+    box.innerHTML=html;
   }
   $('s_provPreset').addEventListener('change',provApplyPreset);
   $('s_provFetch').addEventListener('click',provFetchModels);

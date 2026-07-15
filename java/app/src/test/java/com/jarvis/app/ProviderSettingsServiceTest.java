@@ -59,6 +59,22 @@ class ProviderSettingsServiceTest {
     }
 
     @Test
+    void roleAssignmentPersistsAndSurvivesResave() {
+        ProviderSettingsService svc = new ProviderSettingsService(new InMemoryStore<>(),
+                (b, k) -> java.util.List.of());
+        svc.save("NVIDIA", "openai", "https://a/v1", "k1", "m1", true);
+        assertTrue(svc.setRole("NVIDIA", "conductor"));
+        assertEquals("conductor", svc.list().get(0).role());
+        // An unknown role clears it; a model/key edit keeps the assigned role.
+        assertTrue(svc.setRole("NVIDIA", "conductor"));
+        svc.save("NVIDIA", "openai", "https://a/v1", "", "m2", true);   // edit model, no key
+        assertEquals("conductor", svc.list().get(0).role());
+        assertTrue(svc.setRole("NVIDIA", "bogus"));                     // invalid → cleared
+        assertEquals("", svc.list().get(0).role());
+        assertFalse(svc.setRole("ghost", "worker"));                    // unknown provider
+    }
+
+    @Test
     void blankKeyOnResaveKeepsTheStoredKey() {
         ProviderSettingsService svc = new ProviderSettingsService(new InMemoryStore<>(),
                 (b, k) -> java.util.List.of());

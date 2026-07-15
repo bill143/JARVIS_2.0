@@ -631,6 +631,27 @@ public final class WebServer {
                             .getBytes(StandardCharsets.UTF_8));
         });
 
+        server.createContext("/providers/role", exchange -> {
+            if (providers == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, providers == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String name;
+            String role;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                name = j.path("name").asText("");
+                role = j.path("role").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            boolean ok = providers.setRole(name, role);
+            respond(exchange, ok ? 200 : 404, "application/json",
+                    ("{\"ok\":" + ok + "}").getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/providers/test", exchange -> {
             if (providers == null || !"POST".equals(exchange.getRequestMethod())) {
                 respond(exchange, providers == null ? 503 : 405, "text/plain",
@@ -698,6 +719,7 @@ public final class WebServer {
                     vo.put("model", v.model());
                     vo.put("hasKey", v.hasKey());   // never the key itself
                     vo.put("active", v.active());
+                    vo.put("role", v.role());       // orchestration tier (may be empty)
                 }
             }
             respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
