@@ -548,6 +548,24 @@
   .ros-chip{ display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px;
     background:rgba(20,50,80,.4); border:1px solid var(--line); color:#cfeeff; font-size:12.5px; }
   .ros-chip[data-active]{ border-color:var(--cyan); box-shadow:0 0 0 1px var(--cyan); }
+  /* Orchestration mode selector + inline trace */
+  .orch-modes{ display:flex; gap:6px; margin-top:8px; width:100%; max-width:640px; }
+  .omode{ background:rgba(20,50,80,.35); color:#bfe6ff; border:1px solid var(--line); border-radius:8px;
+    padding:5px 11px; font:inherit; font-size:12.5px; cursor:pointer; }
+  .omode:hover{ border-color:var(--cyan); }
+  .omode.active{ color:#eaf7ff; border-color:var(--cyan); background:rgba(65,217,255,.12); }
+  .orch-trace{ margin-top:8px; border-top:1px dashed var(--line); padding-top:6px; }
+  .orch-toggle{ color:var(--cyan); cursor:pointer; font-size:12px; user-select:none; }
+  .orch-steps{ display:none; margin-top:6px; }
+  .orch-trace.open .orch-steps{ display:block; }
+  .orch-tier{ margin:6px 0; }
+  .orch-tier h6{ font-size:10.5px; letter-spacing:2px; color:var(--dim); text-transform:uppercase; margin:0 0 3px; }
+  .orch-step{ display:flex; align-items:center; gap:8px; padding:3px 0; font-size:12px; }
+  .orch-step .osp{ font-family:var(--font-mono); color:var(--text); flex:0 0 auto; }
+  .orch-step .osm{ color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .orch-step .osr{ margin-left:auto; color:var(--dim); flex:0 0 auto; font-size:11px; }
+  .orch-dot{ width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
+  .orch-dot.ok{ background:#38e28e; } .orch-dot.bad{ background:#ef4444; }
 
 </style>
 </head>
@@ -670,6 +688,11 @@
           <div class="st" id="statusText">STANDBY</div>
           <div class="hint" id="statusHint">Press 🎤 VOICE or type a command</div>
         </div>
+      </div>
+      <div class="orch-modes" id="orchModes">
+        <button type="button" class="omode active" data-omode="single" title="One active model answers">🧠 Single</button>
+        <button type="button" class="omode" data-omode="ensemble" title="Every rostered model answers in parallel; answers are fused">⚖️ Ensemble</button>
+        <button type="button" class="omode" data-omode="hierarchy" title="Conductor decomposes → Workers run concurrently → Conductor arbitrates">🏛 Hierarchy</button>
       </div>
       <div class="attach-chips" id="attachChips"></div>
       <form class="cmd" id="form" autocomplete="off">
@@ -1582,19 +1605,29 @@
       const hint=tones[S.personality];
       const sendPrompt = hint ? ('['+hint+']\n'+prompt) : prompt;
       const docIds = attachedDocs.filter(d=>d.readable).map(d=>d.id);
-      const r = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ prompt: sendPrompt, docs: docIds }) });
-      const j = await r.json();
+      let answer, trace=null;
+      if (orchMode!=='single'){
+        const r = await fetch('/orchestrate', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ mode:orchMode, prompt: sendPrompt }) });
+        const j = await r.json();
+        answer = j.answer || '(no answer)'; trace = j;
+      } else {
+        const r = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ prompt: sendPrompt, docs: docIds }) });
+        const j = await r.json(); answer = j.response;
+        if (j.toolSteps > 0 && S.showDetails!==false) trace={toolSteps:j.toolSteps};
+      }
       pending.className = '';
-      if (A.motion.streaming && A.motion.animations!=='off' && j.response) {
-        const txt=clean(j.response); pending.textContent='';
+      if (A.motion.streaming && A.motion.animations!=='off' && answer) {
+        const txt=clean(answer); pending.textContent='';
         let i=0; const step=Math.max(1,Math.round(txt.length/120));
         await new Promise(res=>{ const iv=setInterval(()=>{ i+=step; pending.textContent=txt.slice(0,i);
           log.scrollTop=log.scrollHeight; if(i>=txt.length){ clearInterval(iv); res(); } }, 16); });
-      } else { pending.textContent = j.response; }
-      if (j.toolSteps > 0 && S.showDetails!==false) { const m=document.createElement('div'); m.className='meta';
-        m.textContent='used '+j.toolSteps+' tool step'+(j.toolSteps>1?'s':''); pending.parentElement.appendChild(m); }
-      if (S.autoSpeak) speak(j.response); else setOrb(restState());
+      } else { pending.textContent = answer; }
+      if (trace && trace.trace) pending.parentElement.appendChild(renderTrace(trace));
+      else if (trace && trace.toolSteps) { const m=document.createElement('div'); m.className='meta';
+        m.textContent='used '+trace.toolSteps+' tool step'+(trace.toolSteps>1?'s':''); pending.parentElement.appendChild(m); }
+      if (S.autoSpeak) speak(answer); else setOrb(restState());
     } catch (err) {
       pending.className=''; pending.textContent='Connection error: '+err.message; setOrb(restState());
     } finally { send.disabled = false; box.focus(); }
@@ -1603,6 +1636,41 @@
   document.getElementById('form').addEventListener('submit', (e) => {
     e.preventDefault(); const p = box.value.trim(); if (!p) return; box.value=''; ask(p);
   });
+
+  // ---- Orchestration mode (Single / Ensemble / Hierarchy) + inline trace ----
+  let orchMode='single';
+  document.querySelectorAll('#orchModes .omode').forEach(b=>b.addEventListener('click',()=>{
+    orchMode=b.dataset.omode;
+    document.querySelectorAll('#orchModes .omode').forEach(x=>x.classList.toggle('active',x===b));
+    box.placeholder = orchMode==='single' ? 'Ask JARVIS anything…'
+      : (orchMode==='ensemble' ? 'Ask — every rostered model answers in parallel, fused…'
+        : 'Ask — Conductor delegates across the hierarchy…');
+  }));
+  function renderTrace(j){
+    const wrap=document.createElement('div'); wrap.className='orch-trace';
+    const steps=j.trace||[];
+    const base=(j.mode==='hierarchy'?'Hierarchy':'Ensemble')+' trace — '+steps.length+' model call'+(steps.length===1?'':'s')
+      +(j.chosen?(' · chosen: '+j.chosen):'')+(j.fusion?(' · fusion: '+j.fusion):'');
+    const tog=document.createElement('div'); tog.className='orch-toggle'; tog.textContent='▸ '+base;
+    tog.addEventListener('click',()=>{ wrap.classList.toggle('open'); tog.textContent=(wrap.classList.contains('open')?'▾ ':'▸ ')+base; });
+    wrap.appendChild(tog);
+    const body=document.createElement('div'); body.className='orch-steps';
+    if(j.plan && j.plan.length){ const pl=document.createElement('div'); pl.className='orch-tier';
+      pl.innerHTML='<h6>Conductor · plan</h6>'+j.plan.map(p=>'<div class="orch-step"><span class="osm">• '+esc(p)+'</span></div>').join(''); body.appendChild(pl); }
+    const byStage={}; steps.forEach(s=>{ (byStage[s.stage]=byStage[s.stage]||[]).push(s); });
+    const order=['decompose','ensemble','work','arbitrate'];
+    const stageLabel={decompose:'Conductor · decompose',ensemble:'Models · parallel',work:'Workers · parallel',arbitrate:'Conductor · arbitrate'};
+    Object.keys(byStage).sort((a,b)=>order.indexOf(a)-order.indexOf(b)).forEach(st=>{
+      const t=document.createElement('div'); t.className='orch-tier';
+      t.innerHTML='<h6>'+esc(stageLabel[st]||st)+'</h6>'+byStage[st].map(s=>
+        '<div class="orch-step"><span class="orch-dot '+(s.ok?'ok':'bad')+'"></span>'
+        +'<span class="osp">'+esc(s.provider)+'</span>'
+        +'<span class="osm">'+esc(s.ok?(s.snippet||''):(s.error||'failed'))+'</span>'
+        +'<span class="osr">'+esc(s.model)+(s.role?(' · '+esc(s.role)):'')+' · '+(s.latencyMs||0)+'ms</span></div>').join('');
+      body.appendChild(t);
+    });
+    wrap.appendChild(body); return wrap;
+  }
 
   // ---- File upload: read files the assistant can understand (txt/md/csv/json/pdf/docx/xlsx) ----
   let attachedDocs=[];   // {id, filename, kind, readable, note, busy, error}

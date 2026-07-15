@@ -81,13 +81,13 @@ final class AppWiring {
             AutonomousService autonomous, SemanticMemoryService semantic,
             DiscussionService discussion, ProviderSettingsService providers, BrainVault brain,
             SolicitationsService solicitations, UploadedDocsService uploads, McpService mcp,
-            BrainManager chatBrain) {
+            BrainManager chatBrain, OrchestrationService orchestration) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion, providers, brain, solicitations, uploads, mcp, chatBrain);
+                    discussion, providers, brain, solicitations, uploads, mcp, chatBrain, orchestration);
         }
     }
 
@@ -98,7 +98,8 @@ final class AppWiring {
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
             SemanticMemoryService semantic, DiscussionService discussion,
             ProviderSettingsService providers, BrainVault brain, SolicitationsService solicitations,
-            UploadedDocsService uploads, McpService mcp, BrainManager chatBrain) {
+            UploadedDocsService uploads, McpService mcp, BrainManager chatBrain,
+            OrchestrationService orchestration) {
     }
 
     private AppWiring() {
@@ -213,6 +214,10 @@ final class AppWiring {
         BrainManager chatBrain = new BrainManager(swappable, brainFactory,
                 () -> providerSettings.active().map(ProviderSettingsService.Active::model)
                         .filter(m -> !m.isBlank()).orElse(model));
+
+        // Local-first multi-model orchestration (ensemble + hierarchy) over the configured providers.
+        OrchestrationService orchestration =
+                new OrchestrationService(providerSettings, auditLog, effectiveModel);
         HardwareMonitor monitor = new HardwareMonitor();
         PeopleRecognizer recognizer = online
                 ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
@@ -259,7 +264,7 @@ final class AppWiring {
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
                 permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
                 autonomous, semantic, discussion, providerSettings, brain, solicitations, uploads, mcp,
-                chatBrain);
+                chatBrain, orchestration);
     }
 
     /**

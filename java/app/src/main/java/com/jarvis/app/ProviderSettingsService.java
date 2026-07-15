@@ -198,6 +198,41 @@ final class ProviderSettingsService {
         }
     }
 
+    /** Every configured provider as an {@link Active} (with key), for internal orchestration use. */
+    List<Active> allConfigured() {
+        List<Active> out = new ArrayList<>();
+        for (MemoryEntry<String> e : store.query(SCOPE)) {
+            if (ACTIVE_KEY.equals(e.key())) {
+                continue;
+            }
+            JsonNode c = parse(e.value());
+            out.add(new Active(e.key(), c.path("kind").asText("openai"), c.path("baseUrl").asText(""),
+                    c.path("apiKey").asText(""), c.path("model").asText("")));
+        }
+        return out;
+    }
+
+    /** Configured providers assigned the given orchestration role. */
+    List<Active> withRole(String role) {
+        List<Active> out = new ArrayList<>();
+        for (MemoryEntry<String> e : store.query(SCOPE)) {
+            if (ACTIVE_KEY.equals(e.key())) {
+                continue;
+            }
+            JsonNode c = parse(e.value());
+            if (role.equals(c.path("role").asText(""))) {
+                out.add(new Active(e.key(), c.path("kind").asText("openai"), c.path("baseUrl").asText(""),
+                        c.path("apiKey").asText(""), c.path("model").asText("")));
+            }
+        }
+        return out;
+    }
+
+    /** The role assigned to {@code name}, or empty. */
+    String roleOf(String name) {
+        return store.get(SCOPE, name).map(e -> parse(e.value()).path("role").asText("")).orElse("");
+    }
+
     /** The active provider's full config (incl. key) if one is selected and configured. */
     Optional<Active> active() {
         String name = activeName();

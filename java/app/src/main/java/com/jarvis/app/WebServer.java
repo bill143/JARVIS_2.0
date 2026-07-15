@@ -105,6 +105,7 @@ public final class WebServer {
         UploadedDocsService uploads = governance == null ? null : governance.uploads();
         McpService mcp = governance == null ? null : governance.mcp();
         BrainManager chatBrain = governance == null ? null : governance.chatBrain();
+        OrchestrationService orchestration = governance == null ? null : governance.orchestration();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -907,6 +908,54 @@ public final class WebServer {
             respond(exchange, 200, "application/json", docJson(doc).toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // ---- Multi-model orchestration (ensemble / hierarchy) ----
+        server.createContext("/orchestrate", exchange -> {
+            if (orchestration == null) {
+                respond(exchange, 503, "text/plain", "orchestration unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String mode;
+            String prompt;
+            String fusion;
+            java.util.List<String> names = new java.util.ArrayList<>();
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                mode = j.path("mode").asText("ensemble");
+                prompt = j.path("prompt").asText("");
+                fusion = j.path("fusion").asText("");
+                if (j.path("providers").isArray()) {
+                    j.path("providers").forEach(n -> names.add(n.asText()));
+                }
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (prompt.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty prompt".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode reply;
+            if ("hierarchy".equals(mode)) {
+                reply = hierarchyJson(orchestration.hierarchy(prompt));
+            } else {
+                OrchestrationService.EnsembleResult r = orchestration.ensemble(prompt, fusion, names);
+                reply = MAPPER.createObjectNode();
+                reply.put("mode", "ensemble");
+                reply.put("answer", r.answer());
+                reply.put("fusion", r.fusion());
+                reply.put("chosen", r.chosen());
+                ArrayNode arr = reply.putArray("trace");
+                for (OrchestrationService.ModelResult m : r.results()) {
+                    arr.add(modelResultJson(m));
+                }
+            }
+            respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         // ---- MCP connections ----
         server.createContext("/mcp/call", exchange -> {
             if (mcp == null) {
@@ -1434,6 +1483,38 @@ public final class WebServer {
         } catch (NumberFormatException e) {
             return dflt;
         }
+    }
+
+    /** Serializes one model's contribution to an orchestration run (for the trace tree). */
+    private static ObjectNode modelResultJson(OrchestrationService.ModelResult m) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("provider", m.provider());
+        o.put("model", m.model());
+        o.put("role", m.role());
+        o.put("stage", m.stage());
+        o.put("ok", m.ok());
+        o.put("latencyMs", m.latencyMs());
+        o.put("error", m.error());
+        // A short snippet keeps the trace light; the fused answer carries the full text.
+        String t = m.text() == null ? "" : m.text();
+        o.put("snippet", t.length() > 240 ? t.substring(0, 240) + "…" : t);
+        return o;
+    }
+
+    /** Serializes a hierarchy run: plan, arbitrated answer, and the tier-by-tier trace. */
+    private static ObjectNode hierarchyJson(OrchestrationService.HierarchyResult r) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("mode", "hierarchy");
+        o.put("answer", r.answer());
+        ArrayNode plan = o.putArray("plan");
+        for (String s : r.plan()) {
+            plan.add(s);
+        }
+        ArrayNode trace = o.putArray("trace");
+        for (OrchestrationService.ModelResult m : r.steps()) {
+            trace.add(modelResultJson(m));
+        }
+        return o;
     }
 
     /** Serializes an MCP server view (never the token — only whether one is set). */
