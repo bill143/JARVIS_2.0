@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from openjarvis.traces.store import TraceStore
+
 from openjarvis.agents._stubs import AgentResult
 from openjarvis.agents.executor import AgentExecutor
 from openjarvis.agents.manager import AgentManager
 from openjarvis.core.events import EventBus, EventType
-from openjarvis.traces.store import TraceStore
 
 
 def test_executor_records_trace(tmp_path):
