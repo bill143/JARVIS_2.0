@@ -95,6 +95,33 @@ class OrchestrationServiceTest {
     }
 
     @Test
+    void ensembleFansOutManyModelsAndIsResilientToFailures() {
+        // 24 workers; the odd-indexed ones throw. Proves the virtual-thread fan-out collects every
+        // result, isolates failures, and fuses deterministically — run repeatedly to catch flakiness.
+        ProviderSettingsService p = new ProviderSettingsService(new InMemoryStore<>(),
+                (b, k) -> java.util.List.of());
+        for (int i = 0; i < 24; i++) {
+            p.save("M" + i, "openai", "https://x/v1", "k", "m" + i, false);
+            p.setRole("M" + i, "worker");
+        }
+        Function<ProviderSettingsService.Active, LlmProvider> factory = a -> req -> {
+            int idx = Integer.parseInt(a.name().substring(1));
+            if (idx % 2 == 1) {
+                throw new RuntimeException("boom-" + idx);          // half the pool fails
+            }
+            return new LlmProvider.Result("ok from " + a.name(), 1, 1);
+        };
+        for (int trial = 0; trial < 5; trial++) {
+            OrchestrationService o = new OrchestrationService(p, null, "m", factory);
+            OrchestrationService.EnsembleResult r = o.ensemble("q", "best", null);
+            assertEquals(24, r.results().size());                  // every model reported back
+            assertEquals(12, r.results().stream().filter(OrchestrationService.ModelResult::ok).count());
+            assertEquals(12, r.results().stream().filter(m -> !m.ok()).count());   // failures captured
+            assertTrue(r.answer().startsWith("ok from"));          // fused from a surviving model
+        }
+    }
+
+    @Test
     void hierarchyFallsBackToEnsembleWithoutAConductor() {
         ProviderSettingsService p = providersWith("W1=worker", "W2=worker");
         OrchestrationService o = new OrchestrationService(p, null, "m", fakeModels());
