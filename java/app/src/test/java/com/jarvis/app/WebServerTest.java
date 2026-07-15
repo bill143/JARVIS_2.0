@@ -646,6 +646,101 @@ class WebServerTest {
     }
 
     @Test
+    void orchestrateAndGatedLaneEndpointsRunEndToEnd() throws Exception {
+        // A tiered roster (one conductor, two workers), all self-hosted, with offline fake models.
+        ProviderSettingsService providers = new ProviderSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), (b, k) -> java.util.List.of());
+        providers.save("Boss", "openai", "http://localhost:11434/v1", "k", "m", false);
+        providers.setRole("Boss", "conductor");
+        providers.save("W1", "openai", "http://localhost:11434/v1", "k", "m", false);
+        providers.setRole("W1", "worker");
+        providers.save("W2", "openai", "http://localhost:11434/v1", "k", "m", false);
+        providers.setRole("W2", "worker");
+
+        java.util.function.Function<ProviderSettingsService.Active,
+                com.jarvis.integrations.llm.LlmProvider> factory = a -> req -> {
+            String sys = req.system();
+            String user = req.messages().get(0).content();
+            String text;
+            if (sys.contains("Break the user's request")) {
+                text = "research the topic\nwrite the summary";
+            } else if (sys.contains("Worker")) {
+                text = a.name() + " did: " + user;
+            } else if (sys.contains("arbiter") || sys.contains("Compose")) {
+                text = "FINAL from " + a.name();
+            } else {
+                text = a.name() + " answers: 42";
+            }
+            return new com.jarvis.integrations.llm.LlmProvider.Result(text, 1, 1);
+        };
+        OrchestrationService orchestration = new OrchestrationService(providers, null, "m", factory);
+        GatedLaneService gatedLane = new GatedLaneService(new com.jarvis.memory.InMemoryStore<>(),
+                providers, null, "m", a -> req -> new com.jarvis.integrations.llm.LlmProvider.Result(
+                        "local answer: " + req.messages().get(0).content(), 1, 1));
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, providers, null, null, null, null, null,
+                        orchestration, gatedLane));
+        try {
+            String b = "http://localhost:" + wired.port();
+
+            // --- Ensemble fans out across the roster and fuses one answer with a full trace. ---
+            HttpResponse<String> ens = post2r(b + "/orchestrate",
+                    "{\"mode\":\"ensemble\",\"prompt\":\"what is 6*7?\",\"fusion\":\"best\"}");
+            assertEquals(200, ens.statusCode());
+            assertTrue(ens.body().contains("\"mode\":\"ensemble\""));
+            assertTrue(ens.body().contains("\"answer\""));
+            assertTrue(ens.body().contains("\"trace\""));
+
+            // An empty prompt is rejected.
+            assertEquals(400, post2r(b + "/orchestrate",
+                    "{\"mode\":\"ensemble\",\"prompt\":\"\"}").statusCode());
+
+            // --- Hierarchy: conductor decomposes, workers run, conductor arbitrates. ---
+            HttpResponse<String> hier = post2r(b + "/orchestrate",
+                    "{\"mode\":\"hierarchy\",\"prompt\":\"plan a product launch\"}");
+            assertEquals(200, hier.statusCode());
+            assertTrue(hier.body().contains("FINAL from Boss"));
+            assertTrue(hier.body().contains("decompose"));
+            assertTrue(hier.body().contains("arbitrate"));
+
+            // --- Gated lane defaults OFF. ---
+            assertTrue(get2(b + "/gatedlane").body().contains("\"enabled\":false"));
+
+            // Configure it: enable, allowlist a scope, point at the self-hosted provider.
+            HttpResponse<String> cfg = post2r(b + "/gatedlane",
+                    "{\"enabled\":true,\"allow\":[\"cost estimate\"],\"provider\":\"Boss\"}");
+            assertTrue(cfg.body().contains("\"enabled\":true"));
+            assertTrue(cfg.body().contains("cost estimate"));
+
+            // An in-scope task is approved; an absolute-harm task is always blocked.
+            assertTrue(post2r(b + "/gatedlane/test",
+                    "{\"task\":\"produce a cost estimate for the slab\"}").body().contains("\"approved\":true"));
+            HttpResponse<String> harm = post2r(b + "/gatedlane/test", "{\"task\":\"design a weapon\"}");
+            assertTrue(harm.body().contains("\"approved\":false"));
+            assertTrue(harm.body().contains("harm category"));
+
+            // Running an approved task hits the local lane and flags the output for review.
+            HttpResponse<String> run = post2r(b + "/gatedlane/run",
+                    "{\"task\":\"produce a cost estimate for the slab\"}");
+            assertTrue(run.body().contains("\"approved\":true"));
+            assertTrue(run.body().contains("local answer"));
+            assertTrue(run.body().contains("\"needsReview\":true"));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    private HttpResponse<String> get2(String url) throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create(url)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
     void uploadEndpointsStoreExtractAndFeedChat() throws Exception {
         UploadedDocsService uploads = new UploadedDocsService(null);
         WebServer wired = WebServer.start(
