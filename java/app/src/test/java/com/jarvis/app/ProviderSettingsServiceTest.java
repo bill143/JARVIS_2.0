@@ -124,16 +124,42 @@ class ProviderSettingsServiceTest {
     }
 
     @Test
-    void testAnthropicAcceptsAStoredKeyWithoutHittingTheNetwork() {
-        // Native Anthropic has no /models probe — a stored key is reported as ready; a missing one isn't.
-        ProviderSettingsService svc = new ProviderSettingsService(new InMemoryStore<>(),
-                (b, k) -> { throw new IllegalStateException("network must not be touched"); });
-        svc.save("Claude", "anthropic", "", "sk-ant-123", "claude-x", false);
-        assertTrue(svc.test("Claude").ok());
-        svc.save("ClaudeNoKey", "anthropic", "", "", "claude-x", false);
-        ProviderSettingsService.TestResult r = svc.test("ClaudeNoKey");
-        assertFalse(r.ok());
-        assertTrue(r.message().contains("no API key"));
+    void testAnthropicLiveValidatesTheKeyViaModelsList() {
+        // Native Anthropic now does a real (token-free) /v1/models listing to validate the key.
+        // A good key reports the model count; a rejected key reports a friendly 401; no key is refused
+        // before any network call.
+        ProviderSettingsService.AnthropicValidator good = key -> java.util.List.of("claude-a", "claude-b");
+        ProviderSettingsService.AnthropicValidator rejects = key -> {
+            throw new java.io.IOException("model list returned 401");
+        };
+        ProviderSettingsService.AnthropicValidator mustNotRun = key -> {
+            throw new IllegalStateException("network must not be touched when no key is set");
+        };
+
+        ProviderSettingsService ok = new ProviderSettingsService(new InMemoryStore<>(),
+                ModelCatalogNoop.FETCH, good);
+        ok.save("Claude", "anthropic", "", "sk-ant-123", "claude-x", false);
+        ProviderSettingsService.TestResult r = ok.test("Claude");
+        assertTrue(r.ok(), r.message());
+        assertTrue(r.message().contains("2"));   // two models listed
+
+        ProviderSettingsService bad = new ProviderSettingsService(new InMemoryStore<>(),
+                ModelCatalogNoop.FETCH, rejects);
+        bad.save("Claude", "anthropic", "", "bad-key", "claude-x", false);
+        assertFalse(bad.test("Claude").ok());
+        assertTrue(bad.test("Claude").message().toLowerCase().contains("authentication failed"));
+
+        ProviderSettingsService noKey = new ProviderSettingsService(new InMemoryStore<>(),
+                ModelCatalogNoop.FETCH, mustNotRun);
+        noKey.save("ClaudeNoKey", "anthropic", "", "", "claude-x", false);
+        ProviderSettingsService.TestResult nr = noKey.test("ClaudeNoKey");
+        assertFalse(nr.ok());
+        assertTrue(nr.message().contains("no API key"));   // refused before any validate() call
+    }
+
+    /** A model fetcher that must never be called on the anthropic path. */
+    private interface ModelCatalogNoop {
+        ProviderSettingsService.ModelFetcher FETCH = (b, k) -> java.util.List.of();
     }
 
     @Test

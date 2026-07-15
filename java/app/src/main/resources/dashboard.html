@@ -2415,7 +2415,7 @@
       const roleSel='<select class="pf-rolesel" data-role="'+esc(c.name)+'" title="Orchestration tier">'
         +ROLE_OPTS.map(r=>'<option value="'+r[0]+'"'+(c.role===r[0]?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
       const acts=(c.active?'':'<button class="hbtn" data-act="'+esc(c.name)+'" style="padding:2px 9px;">Activate</button> ')
-        +'<button class="hbtn" data-test="'+esc(c.name)+'" style="padding:2px 9px;">Test</button> '
+        +'<button class="hbtn" data-test="'+esc(c.name)+'" title="Live-check: lists the provider\'s models with this key (token-free) to prove it is accepted" style="padding:2px 9px;">Test</button> '
         +'<button class="hbtn" data-edit="'+esc(c.name)+'" style="padding:2px 9px;">Edit</button> '
         +'<button class="hbtn" data-rm="'+esc(c.name)+'" style="padding:2px 9px;">Remove</button>';
       return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--line);flex-wrap:wrap;">'

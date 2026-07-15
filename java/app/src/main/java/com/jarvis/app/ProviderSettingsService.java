@@ -35,6 +35,12 @@ final class ProviderSettingsService {
         List<String> fetch(String baseUrl, String apiKey) throws Exception;
     }
 
+    /** Validates a native Anthropic key by listing its models (seam so tests avoid the network). */
+    @FunctionalInterface
+    interface AnthropicValidator {
+        List<String> validate(String apiKey) throws Exception;
+    }
+
     /** Preset base URLs the UI offers (all real, documented endpoints). */
     record Preset(String name, String kind, String baseUrl) {
     }
@@ -68,14 +74,21 @@ final class ProviderSettingsService {
 
     private final MemoryStore<String> store;
     private final ModelFetcher fetcher;
+    private final AnthropicValidator anthropicValidator;
 
     ProviderSettingsService(MemoryStore<String> store) {
-        this(store, ModelCatalog::fetch);
+        this(store, ModelCatalog::fetch, ModelCatalog::fetchAnthropic);
     }
 
     ProviderSettingsService(MemoryStore<String> store, ModelFetcher fetcher) {
+        this(store, fetcher, ModelCatalog::fetchAnthropic);
+    }
+
+    ProviderSettingsService(MemoryStore<String> store, ModelFetcher fetcher,
+            AnthropicValidator anthropicValidator) {
         this.store = Objects.requireNonNull(store, "store");
         this.fetcher = Objects.requireNonNull(fetcher, "fetcher");
+        this.anthropicValidator = Objects.requireNonNull(anthropicValidator, "anthropicValidator");
     }
 
     /** Configured providers (no keys), newest config wins; marks the active one. */
@@ -163,8 +176,10 @@ final class ProviderSettingsService {
     }
 
     /**
-     * Live-tests a configured provider's credentials. For OpenAI-compatible providers this lists the
-     * models endpoint (a clean 200/401 signal); the native Anthropic provider validates on first use.
+     * Live-tests a configured provider's credentials with a token-free listing call. OpenAI-compatible
+     * providers hit {@code GET /models} with a bearer key; native Anthropic hits {@code GET
+     * /v1/models} with its {@code x-api-key} headers. Both are a clean 200/401 signal that actually
+     * validates the key — the "Test" button no longer merely confirms local storage.
      */
     TestResult test(String name) {
         var entry = store.get(SCOPE, name);
@@ -175,9 +190,15 @@ final class ProviderSettingsService {
         String kind = c.path("kind").asText("openai");
         String key = c.path("apiKey").asText("");
         if ("anthropic".equals(kind)) {
-            return key.isBlank()
-                    ? new TestResult(false, "no API key set")
-                    : new TestResult(true, "key stored — Anthropic validates on the first message");
+            if (key.isBlank()) {
+                return new TestResult(false, "no API key set");
+            }
+            try {
+                List<String> models = anthropicValidator.validate(key);
+                return new TestResult(true, "connected — " + models.size() + " models available");
+            } catch (Exception e) {
+                return new TestResult(false, friendlyError(e));
+            }
         }
         if (key.isBlank() && !c.path("baseUrl").asText("").contains("localhost")) {
             return new TestResult(false, "no API key set");
@@ -186,16 +207,21 @@ final class ProviderSettingsService {
             List<String> models = fetcher.fetch(c.path("baseUrl").asText(""), key);
             return new TestResult(true, "connected — " + models.size() + " models available");
         } catch (Exception e) {
-            String msg = e.getMessage() == null ? e.toString() : e.getMessage();
-            if (msg.contains("401")) {
-                msg = "authentication failed — the API key was rejected (401)";
-            } else if (msg.contains("403")) {
-                msg = "forbidden — the key lacks access to this endpoint (403)";
-            } else if (msg.contains("404")) {
-                msg = "endpoint not found — check the base URL (404)";
-            }
-            return new TestResult(false, msg);
+            return new TestResult(false, friendlyError(e));
         }
+    }
+
+    /** Maps a raw transport error to a user-facing message, decoding the common auth statuses. */
+    private static String friendlyError(Exception e) {
+        String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+        if (msg.contains("401")) {
+            return "authentication failed — the API key was rejected (401)";
+        } else if (msg.contains("403")) {
+            return "forbidden — the key lacks access to this endpoint (403)";
+        } else if (msg.contains("404")) {
+            return "endpoint not found — check the base URL (404)";
+        }
+        return msg;
     }
 
     /** Every configured provider as an {@link Active} (with key), for internal orchestration use. */
