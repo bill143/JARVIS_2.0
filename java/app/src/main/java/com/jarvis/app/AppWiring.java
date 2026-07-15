@@ -81,13 +81,14 @@ final class AppWiring {
             AutonomousService autonomous, SemanticMemoryService semantic,
             DiscussionService discussion, ProviderSettingsService providers, BrainVault brain,
             SolicitationsService solicitations, UploadedDocsService uploads, McpService mcp,
-            BrainManager chatBrain, OrchestrationService orchestration) {
+            BrainManager chatBrain, OrchestrationService orchestration, GatedLaneService gatedLane) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion, providers, brain, solicitations, uploads, mcp, chatBrain, orchestration);
+                    discussion, providers, brain, solicitations, uploads, mcp, chatBrain, orchestration,
+                    gatedLane);
         }
     }
 
@@ -99,7 +100,7 @@ final class AppWiring {
             SemanticMemoryService semantic, DiscussionService discussion,
             ProviderSettingsService providers, BrainVault brain, SolicitationsService solicitations,
             UploadedDocsService uploads, McpService mcp, BrainManager chatBrain,
-            OrchestrationService orchestration) {
+            OrchestrationService orchestration, GatedLaneService gatedLane) {
     }
 
     private AppWiring() {
@@ -218,6 +219,11 @@ final class AppWiring {
         // Local-first multi-model orchestration (ensemble + hierarchy) over the configured providers.
         OrchestrationService orchestration =
                 new OrchestrationService(providerSettings, auditLog, effectiveModel);
+
+        // Policy-gated self-hosted lane (off by default, default-deny, audited). Responsible analogue
+        // of the Hermes "Shadow CEO": local-only, absolute harm denylist, allowlist-scoped.
+        GatedLaneService gatedLane =
+                new GatedLaneService(memory, providerSettings, auditLog, effectiveModel);
         HardwareMonitor monitor = new HardwareMonitor();
         PeopleRecognizer recognizer = online
                 ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
@@ -264,7 +270,7 @@ final class AppWiring {
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
                 permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
                 autonomous, semantic, discussion, providerSettings, brain, solicitations, uploads, mcp,
-                chatBrain, orchestration);
+                chatBrain, orchestration, gatedLane);
     }
 
     /**

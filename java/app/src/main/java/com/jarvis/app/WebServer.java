@@ -106,6 +106,7 @@ public final class WebServer {
         McpService mcp = governance == null ? null : governance.mcp();
         BrainManager chatBrain = governance == null ? null : governance.chatBrain();
         OrchestrationService orchestration = governance == null ? null : governance.orchestration();
+        GatedLaneService gatedLane = governance == null ? null : governance.gatedLane();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -954,6 +955,80 @@ public final class WebServer {
                 }
             }
             respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- Gated local lane (policy-gated, self-hosted, off by default) ----
+        server.createContext("/gatedlane/test", exchange -> {
+            if (gatedLane == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, gatedLane == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String task;
+            try (InputStream body = exchange.getRequestBody()) {
+                task = MAPPER.readTree(body).path("task").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            GatedLaneService.GateDecision d = gatedLane.evaluate(task);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("approved", d.approved());
+            o.put("reason", d.reason());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/gatedlane/run", exchange -> {
+            if (gatedLane == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, gatedLane == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String task;
+            try (InputStream body = exchange.getRequestBody()) {
+                task = MAPPER.readTree(body).path("task").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            GatedLaneService.RunResult r = gatedLane.run(task);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("approved", r.approved());
+            o.put("reason", r.reason());
+            o.put("output", r.output());
+            o.put("provider", r.provider());
+            o.put("needsReview", r.needsReview());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/gatedlane", exchange -> {
+            if (gatedLane == null) {
+                respond(exchange, 503, "text/plain", "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    java.util.List<String> allow = new java.util.ArrayList<>();
+                    if (j.path("allow").isArray()) {
+                        j.path("allow").forEach(n -> allow.add(n.asText()));
+                    }
+                    gatedLane.setConfig(j.path("enabled").asBoolean(false), allow,
+                            j.path("provider").asText(""));
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            GatedLaneService.Config c = gatedLane.config();
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("enabled", c.enabled());
+            o.put("provider", c.provider());
+            ArrayNode allow = o.putArray("allow");
+            for (String a : c.allow()) {
+                allow.add(a);
+            }
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         // ---- MCP connections ----

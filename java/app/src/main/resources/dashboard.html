@@ -805,6 +805,19 @@
         <button class="hbtn" id="mcp_refresh" type="button" style="margin-left:6px;">Refresh</button></div>
       <div id="mcpList" class="hint">No MCP servers configured.</div>
     </div>
+    <div class="pcard">
+      <h4>🛡 Gated local lane <span class="hint" style="text-transform:none;letter-spacing:0;">(advanced)</span></h4>
+      <div class="hint" style="margin-bottom:8px;">A policy-gated route to a model <b>you self-host</b> (e.g. a local Ollama) for domain tasks a cloud provider declines on scope grounds. <b>Off by default; default-deny.</b> A task runs only if the lane is enabled, points at a self-hosted endpoint, matches your allowlist, and does <b>not</b> hit the absolute harm denylist (which always blocks). Every gate decision and run is audited; lane output is flagged for review.</div>
+      <div class="row"><label for="gl_enabled">Enable gated lane</label><input type="checkbox" id="gl_enabled"></div>
+      <div class="row"><label for="gl_provider">Lane provider (self-hosted only)</label><select id="gl_provider"></select></div>
+      <div class="row" style="align-items:flex-start;"><label for="gl_allow">Allowlist scopes (one per line)</label>
+        <textarea id="gl_allow" class="minput" style="flex:0 0 260px;min-height:60px;" placeholder="cost estimate&#10;schedule&#10;compliance spec"></textarea></div>
+      <div style="margin:6px 2px;"><button class="hbtn" id="gl_save" type="button">Save lane policy</button></div>
+      <div class="row" style="margin-top:8px;"><label for="gl_test">Test the gate</label>
+        <input type="text" id="gl_test" class="minput" placeholder="type a sample task…"></div>
+      <div style="margin:4px 2px;"><button class="hbtn" id="gl_testbtn" type="button">Check gate decision</button>
+        <span id="gl_msg" style="margin-left:10px;font-size:12.5px;"></span></div>
+    </div>
   </div>
 </div>
 <div class="page cpage" id="cpage-conv">
@@ -2564,7 +2577,36 @@
   if($('mcp_save')) $('mcp_save').addEventListener('click',mcpSave);
   if($('mcp_refresh')) $('mcp_refresh').addEventListener('click',mcpLoad);
 
-  pageLoaders.apis=()=>{ provLoad(); renderNvCatalog(); mcpLoad(); };
+  // ---- Gated local lane (Stage 4) ----
+  async function gatedLoad(){
+    const sel=$('gl_provider'); if(!sel) return;
+    // Only self-hosted providers are eligible as the lane.
+    const local=(provConfigured||[]).filter(c=>/localhost|127\.0\.0\.1|192\.168\.|10\.|172\.16\.|\.local|::1/.test(c.baseUrl||''));
+    sel.innerHTML='<option value="">— pick a self-hosted provider —</option>'
+      +local.map(c=>'<option value="'+esc(c.name)+'">'+esc(c.name)+' ('+esc(c.baseUrl)+')</option>').join('');
+    let cfg={enabled:false,allow:[],provider:''};
+    try{ cfg=await (await fetch('/gatedlane')).json(); }catch(e){}
+    $('gl_enabled').checked=!!cfg.enabled;
+    if(cfg.provider && [...sel.options].some(o=>o.value===cfg.provider)) sel.value=cfg.provider;
+    $('gl_allow').value=(cfg.allow||[]).join('\n');
+    if(!local.length){ const m=$('gl_msg'); if(m){ m.style.color='var(--dim)'; m.textContent='Add a self-hosted provider (e.g. Ollama at http://localhost:11434/v1) to use the lane.'; } }
+  }
+  async function gatedSave(){
+    const allow=$('gl_allow').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    await fetch('/gatedlane',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({enabled:$('gl_enabled').checked, provider:$('gl_provider').value, allow})}).catch(()=>{});
+    const m=$('gl_msg'); if(m){ m.style.color='#8ef0b4'; m.textContent='Lane policy saved.'; clearTimeout(window._glT); window._glT=setTimeout(()=>{m.textContent='';},7000); }
+  }
+  async function gatedTest(){
+    const task=$('gl_test').value.trim(); const m=$('gl_msg'); if(!task){ if(m){m.style.color='#f3c67a';m.textContent='Type a sample task first.';} return; }
+    let j={approved:false,reason:'no response'};
+    try{ j=await (await fetch('/gatedlane/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task})})).json(); }catch(e){ j.reason=e.message; }
+    if(m){ m.style.color=j.approved?'#8ef0b4':'#f6a3a3'; m.textContent=(j.approved?'✓ APPROVED — ':'✗ DENIED — ')+j.reason; }
+  }
+  if($('gl_save')) $('gl_save').addEventListener('click',gatedSave);
+  if($('gl_testbtn')) $('gl_testbtn').addEventListener('click',gatedTest);
+
+  pageLoaders.apis=()=>{ provLoad().then(gatedLoad); renderNvCatalog(); mcpLoad(); };
 
   // ---- HUD Activity feed (sourced from the audit log — single source of truth) ----
   function actClass(e){
