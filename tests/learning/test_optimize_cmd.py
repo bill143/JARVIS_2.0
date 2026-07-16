@@ -137,9 +137,8 @@ class TestTraceStoreUpdateFeedback:
     """Tests for TraceStore.update_feedback."""
 
     def test_update_feedback_success(self, tmp_path):
-        from openjarvis.traces.store import TraceStore
-
         from openjarvis.core.types import Trace
+        from openjarvis.traces.store import TraceStore
 
         store = TraceStore(tmp_path / "traces.db")
         trace = Trace(trace_id="test123", query="hello")
@@ -159,9 +158,8 @@ class TestTraceStoreUpdateFeedback:
         store.close()
 
     def test_update_feedback_overwrite(self, tmp_path):
-        from openjarvis.traces.store import TraceStore
-
         from openjarvis.core.types import Trace
+        from openjarvis.traces.store import TraceStore
 
         store = TraceStore(tmp_path / "traces.db")
         trace = Trace(trace_id="test456", query="test", feedback=0.3)

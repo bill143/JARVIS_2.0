@@ -5,12 +5,11 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from openjarvis.traces.analyzer import TraceAnalyzer
-from openjarvis.traces.store import TraceStore
-
 from openjarvis.core.types import StepType, Trace, TraceStep
 from openjarvis.learning._stubs import RoutingContext
 from openjarvis.learning.routing.learned_router import LearnedRouterPolicy
+from openjarvis.traces.analyzer import TraceAnalyzer
+from openjarvis.traces.store import TraceStore
 
 
 def _make_trace(
