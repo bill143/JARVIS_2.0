@@ -415,6 +415,40 @@ class WebServerTest {
     }
 
     @Test
+    void semanticEndpointEditsAndDeletesEntries() throws Exception {
+        // Issue #3: the Personal Intelligence panel can edit and delete individual entries.
+        SemanticMemoryService svc = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            post2r(b + "/semantic", "{\"action\":\"add\",\"title\":\"Draft\",\"content\":\"typo hlelo\"}");
+            String listed = get2(b + "/semantic").body();
+            assertTrue(listed.contains("typo hlelo"));
+            String id = listed.replaceAll(".*\"id\":\"(sm-[^\"]+)\".*", "$1");
+
+            // Edit the entry in place (same id, corrected content).
+            post2r(b + "/semantic",
+                    "{\"action\":\"update\",\"id\":\"" + id + "\",\"title\":\"Draft\",\"content\":\"fixed hello\"}");
+            String afterEdit = get2(b + "/semantic").body();
+            assertTrue(afterEdit.contains("fixed hello"));
+            assertFalse(afterEdit.contains("typo hlelo"));
+            assertTrue(afterEdit.contains(id));   // id preserved across edit
+
+            // Delete it → gone.
+            post2r(b + "/semantic", "{\"action\":\"delete\",\"id\":\"" + id + "\"}");
+            assertFalse(get2(b + "/semantic").body().contains(id));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void knowledgeBaseEndpointsAddSearchAndList() throws Exception {
         com.jarvis.kb.KnowledgeBase kb =
                 new com.jarvis.kb.KnowledgeBase(new com.jarvis.memory.InMemoryRecordStore());

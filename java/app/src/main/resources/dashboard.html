@@ -3065,11 +3065,28 @@
     intelSetMode(j.mode); const items=j.items||[];
     const box=$('intelList'); box.innerHTML=''; if(!items.length){ box.innerHTML='<div class="hint">None yet.</div>'; }
     items.forEach(d=>{ const row=document.createElement('div'); row.className='memrow';
+      row.style.display='flex'; row.style.alignItems='center';
       const s=document.createElement('span'); s.className='memval';
       const b=document.createElement('b'); b.textContent=d.title||'(untitled)';
       const sn=document.createElement('span'); sn.style.color='var(--dim)'; sn.style.marginLeft='8px'; sn.textContent=d.snippet||'';
-      s.appendChild(b); s.appendChild(sn); row.appendChild(s); box.appendChild(row);
+      s.appendChild(b); s.appendChild(sn); row.appendChild(s);
+      const acts=document.createElement('span'); acts.style.marginLeft='auto'; acts.style.display='flex'; acts.style.gap='6px'; acts.style.flex='0 0 auto';
+      const edit=document.createElement('button'); edit.className='hbtn'; edit.textContent='Edit'; edit.style.padding='2px 9px';
+      const del=document.createElement('button'); del.className='hbtn'; del.textContent='Delete'; del.style.padding='2px 9px';
+      edit.addEventListener('click',()=>intelStartEdit(row,d));
+      del.addEventListener('click',()=>{ if(confirm('Delete “'+(d.title||d.snippet||'this memory')+'” permanently?')) intelPost({action:'delete',id:d.id}); });
+      acts.appendChild(edit); acts.appendChild(del); row.appendChild(acts); box.appendChild(row);
     });
+  }
+  function intelStartEdit(row,d){
+    row.innerHTML=''; row.style.gap='6px';
+    const ti=document.createElement('input'); ti.value=d.title||''; ti.placeholder='Title'; ti.style.flex='0 0 30%';
+    const co=document.createElement('input'); co.value=(d.content!=null?d.content:(d.snippet||'')); co.placeholder='Content'; co.style.flex='1';
+    const save=document.createElement('button'); save.className='hbtn'; save.textContent='Save'; save.style.padding='2px 9px'; save.style.borderColor='var(--cyan)';
+    const cancel=document.createElement('button'); cancel.className='hbtn'; cancel.textContent='Cancel'; cancel.style.padding='2px 9px';
+    save.addEventListener('click',()=>{ const t=ti.value.trim(), c=co.value.trim(); if(!t&&!c) return; intelPost({action:'update',id:d.id,title:t,content:c}); });
+    cancel.addEventListener('click',loadIntel);
+    row.appendChild(ti); row.appendChild(co); row.appendChild(save); row.appendChild(cancel); ti.focus();
   }
   async function intelSearch(){
     const q=$('intelQuery').value.trim(); const box=$('intelResults'); if(!q){ box.innerHTML=''; return; }

@@ -1212,11 +1212,17 @@ public final class WebServer {
             if ("POST".equals(exchange.getRequestMethod()) && semantic != null) {
                 try (InputStream body = exchange.getRequestBody()) {
                     JsonNode j = MAPPER.readTree(body);
-                    if ("add".equals(j.path("action").asText(""))
+                    String action = j.path("action").asText("");
+                    if ("add".equals(action)
                             && (!j.path("content").asText("").isBlank()
                                     || !j.path("title").asText("").isBlank())) {
                         semantic.remember(j.path("title").asText(""), j.path("content").asText(""),
                                 System.currentTimeMillis());
+                    } else if ("delete".equals(action)) {
+                        semantic.forget(j.path("id").asText(""));
+                    } else if ("update".equals(action)) {
+                        semantic.update(j.path("id").asText(""), j.path("title").asText(""),
+                                j.path("content").asText(""), System.currentTimeMillis());
                     }
                 } catch (IOException e) {
                     respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
@@ -1232,6 +1238,7 @@ public final class WebServer {
                     o.put("id", d.id());
                     o.put("title", SemanticMemoryService.titleOf(d));
                     String c = d.content();
+                    o.put("content", c);   // full content, for the edit form
                     o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
                 }
             }
