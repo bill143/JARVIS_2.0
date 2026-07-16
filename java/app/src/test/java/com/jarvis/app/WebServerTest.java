@@ -383,6 +383,51 @@ class WebServerTest {
     }
 
     @Test
+    void brainConnectIndexesUnifiesAndGatesWrites() throws Exception {
+        // Issue #1: connect a vault live, mirror it into the unified store, and gate writes on approval.
+        java.nio.file.Path vault = java.nio.file.Files.createTempDirectory("vault");
+        java.nio.file.Files.writeString(vault.resolve("Motor.md"), "# Motor\nbrushless torque curve");
+        BrainVault brain = BrainVault.fromConfig(null, false, null);
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                true, "m", 0, new HardwareMonitor(), null, true, null,
+                memory, null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, brain, null, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            // Connect live with writes enabled.
+            HttpResponse<String> con = post2r(b + "/brain/connect",
+                    "{\"path\":\"" + vault.toString().replace("\\", "\\\\") + "\",\"allowWrites\":true}");
+            assertTrue(con.body().contains("\"configured\":true"), con.body());
+            assertTrue(con.body().contains("\"count\":1"));
+            // The vault note is unified into the semantic store.
+            assertTrue(get2(b + "/semantic").body().contains("Motor"));
+
+            // Propose a write — nothing on disk yet.
+            String pid = post2r(b + "/brain/writes",
+                    "{\"action\":\"propose\",\"path\":\"Ideas.md\",\"content\":\"# Ideas\\nspin it faster\",\"kind\":\"note\"}")
+                    .body().replaceAll(".*\"id\":\"([^\"]+)\".*", "$1");
+            assertTrue(get2(b + "/brain/writes").body().contains("Ideas.md"));
+            assertFalse(java.nio.file.Files.exists(vault.resolve("Ideas.md")));
+
+            // Approve → the file is written to disk.
+            assertTrue(post2r(b + "/brain/writes",
+                    "{\"action\":\"approve\",\"id\":\"" + pid + "\"}").body().contains("\"ok\":true"));
+            assertTrue(java.nio.file.Files.exists(vault.resolve("Ideas.md")));
+
+            // A path that escapes the vault is refused (400).
+            assertEquals(400, post2r(b + "/brain/writes",
+                    "{\"action\":\"propose\",\"path\":\"../evil.md\",\"content\":\"x\",\"kind\":\"note\"}").statusCode());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void connectorsConfigEndpointSavesFieldsAndMasksSecrets() throws Exception {
         // Issue #1: connector settings can be saved in-app (POST) and are read back (GET) with secrets
         // masked. The GET catalog exposes all seven connectors.

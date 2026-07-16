@@ -48,16 +48,22 @@ final class BrainVault {
     private static final long MAX_FILE_BYTES = 1_048_576;   // 1 MiB per note
     private static final int SNIPPET_LEN = 200;
 
-    private final Path root;          // null when unconfigured
-    private final Path rootReal;      // canonical root for containment checks; null when unconfigured
-    private final boolean readOnly;
-    private final AuditLog audit;     // nullable
-    private final KeywordIndex index = new KeywordIndex();
+    private volatile Path root;          // null when unconfigured; reassigned live by connect()
+    private volatile Path rootReal;      // canonical root for containment checks; null when unconfigured
+    private volatile boolean writable;   // when true, approved write proposals may modify the vault
+    private final AuditLog audit;        // nullable
+    private volatile KeywordIndex index = new KeywordIndex();
+
+    /** Pending write proposals awaiting explicit user approval (never auto-applied). */
+    private final java.util.Map<String, PendingWrite> pending =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong writeSeq =
+            new java.util.concurrent.atomic.AtomicLong();
 
     private BrainVault(Path root, Path rootReal, boolean readOnly, AuditLog audit) {
         this.root = root;
         this.rootReal = rootReal;
-        this.readOnly = readOnly;
+        this.writable = false;
         this.audit = audit;
     }
 
@@ -94,13 +100,51 @@ final class BrainVault {
         return fromConfig(path, readOnly, audit);
     }
 
+    /**
+     * Connects (or re-connects) the vault to {@code vaultPath} <b>live</b> — no restart. The path is
+     * validated, the keyword index is rebuilt, and the index sink (if set) is notified so the notes
+     * can be mirrored into the unified semantic store. Returns whether a vault is now configured.
+     * When {@code allowWrites} is true, approved write proposals may modify files on disk.
+     */
+    synchronized boolean connect(String vaultPath, boolean allowWrites) {
+        Path newRoot = null;
+        Path newRootReal = null;
+        if (vaultPath != null && !vaultPath.isBlank()) {
+            try {
+                Path p = Paths.get(vaultPath.strip()).toAbsolutePath().normalize();
+                if (Files.isDirectory(p)) {
+                    newRoot = p;
+                    newRootReal = p.toRealPath();
+                }
+            } catch (IOException | RuntimeException ignored) {
+                newRoot = null;
+            }
+        }
+        this.root = newRoot;
+        this.rootReal = newRootReal;
+        this.writable = allowWrites && newRoot != null;
+        this.index = new KeywordIndex();
+        this.pending.clear();
+        reindex();
+        record("brain_connect", newRoot == null ? "disconnected"
+                : ("connected: " + safe(newRoot.toString()) + " (" + count() + " notes, writable="
+                        + this.writable + ")"),
+                newRoot == null ? AuditOutcome.FAILURE : AuditOutcome.SUCCESS);
+        return configured();
+    }
+
+    /** All indexed notes as documents (id = relative path, content = markdown) for unified indexing. */
+    List<Document> allDocuments() {
+        return index.all();
+    }
+
     boolean configured() {
         return root != null;
     }
 
     boolean readOnly() {
-        // Phase 1 is read-only regardless of the flag — there is no write path.
-        return true;
+        // Writes are gated: read-only unless the vault was connected with writes enabled.
+        return !writable;
     }
 
     /** Display string for the vault root (or empty when unconfigured). */
@@ -259,6 +303,129 @@ final class BrainVault {
         }
     }
 
+    // ---- Write proposals: nothing is written to disk without explicit user approval ----
+
+    /** A proposed change to the vault, awaiting approval. {@code kind} is note/append for the UI. */
+    record PendingWrite(String id, String relativePath, String kind, String preview) {
+    }
+
+    /**
+     * Proposes a write (a new note or an append) without touching disk. The path is validated to live
+     * inside the vault; the proposal is queued and must be {@link #approveWrite approved} explicitly.
+     * Returns the proposal id. Throws {@link VaultAccessException} if the vault is unconfigured, not
+     * writable, or the path is unsafe.
+     */
+    synchronized String proposeWrite(String relativePath, String content, String kind) {
+        if (!configured()) {
+            throw new VaultAccessException("vault not configured");
+        }
+        if (!writable) {
+            throw new VaultAccessException("vault is read-only — reconnect with writes enabled");
+        }
+        resolveForWrite(relativePath);   // validate now so bad paths never enter the queue
+        String id = "w-" + writeSeq.incrementAndGet();
+        String c = content == null ? "" : content;
+        pending.put(id, new PendingWrite(id, relativePath, "append".equals(kind) ? "append" : "note",
+                snippet(c)));
+        // stash the full content alongside the preview
+        contentById.put(id, c);
+        record("brain_write_propose", "path: " + safe(relativePath) + " kind: " + kind);
+        return id;
+    }
+
+    private final java.util.Map<String, String> contentById =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The pending write proposals (for the approval UI). */
+    List<PendingWrite> pendingWrites() {
+        return new ArrayList<>(pending.values());
+    }
+
+    /** Discards a proposal without writing. */
+    synchronized boolean rejectWrite(String id) {
+        contentById.remove(id);
+        boolean had = pending.remove(id) != null;
+        if (had) {
+            record("brain_write_reject", "id: " + safe(id));
+        }
+        return had;
+    }
+
+    /**
+     * Applies an approved proposal to disk — the <b>only</b> path that ever modifies the vault. The
+     * write is a MUTATING action, re-validated at apply time and audited. Re-indexes the file after.
+     */
+    synchronized boolean approveWrite(String id) {
+        PendingWrite w = pending.get(id);
+        if (w == null) {
+            return false;
+        }
+        if (!writable) {
+            record("brain_write_apply", "denied (read-only): " + safe(w.relativePath()),
+                    RiskTier.MUTATING, AuditOutcome.FAILURE);
+            throw new VaultAccessException("vault is read-only");
+        }
+        try {
+            Path file = resolveForWrite(w.relativePath());
+            Files.createDirectories(file.getParent());
+            String content = contentById.getOrDefault(id, "");
+            if ("append".equals(w.kind()) && Files.exists(file)) {
+                Files.writeString(file, "\n" + content, StandardCharsets.UTF_8,
+                        java.nio.file.StandardOpenOption.APPEND);
+            } else {
+                Files.writeString(file, content, StandardCharsets.UTF_8);
+            }
+            pending.remove(id);
+            contentById.remove(id);
+            reindexOne(file);
+            record("brain_write_apply", "path: " + safe(w.relativePath()),
+                    RiskTier.MUTATING, AuditOutcome.SUCCESS);
+            return true;
+        } catch (IOException e) {
+            record("brain_write_apply", "io error: " + safe(w.relativePath()),
+                    RiskTier.MUTATING, AuditOutcome.FAILURE);
+            throw new VaultAccessException("could not write note");
+        }
+    }
+
+    /**
+     * Resolves a write target inside the vault, allowing the file not to exist yet (new note). The
+     * parent directory chain is confined to the vault root; absolute/{@code ..}/escape paths throw.
+     */
+    private Path resolveForWrite(String relativePath) {
+        if (relativePath == null || relativePath.isBlank() || relativePath.indexOf('\0') >= 0) {
+            throw new VaultAccessException("illegal path");
+        }
+        Path rel = Paths.get(relativePath);
+        if (rel.isAbsolute()) {
+            throw new VaultAccessException("absolute path not allowed");
+        }
+        for (Path part : rel) {
+            if ("..".equals(part.toString())) {
+                throw new VaultAccessException("parent traversal not allowed");
+            }
+        }
+        Path resolved = root.resolve(rel).normalize();
+        if (!resolved.startsWith(root)) {
+            throw new VaultAccessException("path escapes vault");
+        }
+        if (!isMarkdown(resolved)) {
+            throw new VaultAccessException("not a markdown note");
+        }
+        return resolved;
+    }
+
+    /** Indexes a single file after a write (best-effort). */
+    private void reindexOne(Path file) {
+        try {
+            String rel = root.relativize(file).toString().replace('\\', '/');
+            String content = Files.readString(file, StandardCharsets.UTF_8);
+            index.index(new Document(rel, content, Map.of("title", titleFromPath(rel, content))));
+        } catch (IOException | RuntimeException ignored) {
+            // leave the index as-is if the just-written file can't be read back
+        }
+    }
+
     private static boolean isMarkdown(Path p) {
         String name = p.getFileName() == null ? "" : p.getFileName().toString().toLowerCase();
         return name.endsWith(".md") || name.endsWith(".markdown");
@@ -311,10 +478,15 @@ final class BrainVault {
     }
 
     private void record(String action, String detail, AuditOutcome outcome) {
+        record(action, detail, RiskTier.READ_ONLY, outcome);
+    }
+
+    private void record(String action, String detail, RiskTier tier, AuditOutcome outcome) {
         if (audit == null) {
             return;
         }
-        audit.record(new AuditEvent(AuditCategory.TOOL_INVOCATION, action, AuditTrigger.USER,
-                RiskTier.READ_ONLY, outcome, detail));
+        AuditCategory category = tier == RiskTier.MUTATING || tier == RiskTier.DESTRUCTIVE
+                ? AuditCategory.DESTRUCTIVE_ACTION : AuditCategory.TOOL_INVOCATION;
+        audit.record(new AuditEvent(category, action, AuditTrigger.USER, tier, outcome, detail));
     }
 }

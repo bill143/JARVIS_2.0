@@ -803,6 +803,99 @@ public final class WebServer {
             respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // Connect (or re-connect) the vault live — no restart. Optionally enable writes. On success
+        // the notes are mirrored into the unified semantic store so they recall alongside memory.
+        server.createContext("/brain/connect", exchange -> {
+            if (brain == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, brain == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String path;
+            boolean allowWrites;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                path = j.path("path").asText("");
+                allowWrites = j.path("allowWrites").asBoolean(false);
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            boolean ok = brain.connect(path, allowWrites);
+            // Persist the path through the connector settings so it survives a restart.
+            new ConnectorSettingsService(memory).set("obsidian.vaultPath", ok ? path : "");
+            int indexed = 0;
+            if (ok && semantic != null) {
+                indexed = semantic.syncVault(brain.allDocuments());
+            }
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("configured", ok);
+            o.put("readOnly", brain.readOnly());
+            o.put("root", ok ? brain.rootDisplay() : "");
+            o.put("count", ok ? brain.count() : 0);
+            o.put("indexed", indexed);
+            o.put("message", ok ? ("Connected — " + brain.count() + " notes indexed"
+                    + (indexed > 0 ? ", " + indexed + " unified into recall" : ""))
+                    : "Not a valid vault folder");
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Write proposals: GET lists pending; POST {action: propose|approve|reject}. A write only
+        // touches disk on explicit approve (a MUTATING, audited action).
+        server.createContext("/brain/writes", exchange -> {
+            if (brain == null) {
+                respond(exchange, 503, "text/plain", "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String action = j.path("action").asText("");
+                    ObjectNode r = MAPPER.createObjectNode();
+                    switch (action) {
+                        case "propose" -> {
+                            String id = brain.proposeWrite(j.path("path").asText(""),
+                                    j.path("content").asText(""), j.path("kind").asText("note"));
+                            r.put("id", id);
+                            r.put("ok", true);
+                        }
+                        case "approve" -> {
+                            boolean applied = brain.approveWrite(j.path("id").asText(""));
+                            if (applied && semantic != null) {
+                                semantic.syncVault(brain.allDocuments());
+                            }
+                            r.put("ok", applied);
+                        }
+                        case "reject" -> r.put("ok", brain.rejectWrite(j.path("id").asText("")));
+                        default -> r.put("ok", false);
+                    }
+                    respond(exchange, 200, "application/json",
+                            r.toString().getBytes(StandardCharsets.UTF_8));
+                    return;
+                } catch (BrainVault.VaultAccessException e) {
+                    ObjectNode r = MAPPER.createObjectNode();
+                    r.put("ok", false);
+                    r.put("error", e.getMessage());
+                    respond(exchange, 400, "application/json",
+                            r.toString().getBytes(StandardCharsets.UTF_8));
+                    return;
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode out = MAPPER.createObjectNode();
+            ArrayNode arr = out.putArray("pending");
+            for (BrainVault.PendingWrite w : brain.pendingWrites()) {
+                ObjectNode o = arr.addObject();
+                o.put("id", w.id());
+                o.put("path", w.relativePath());
+                o.put("kind", w.kind());
+                o.put("preview", w.preview());
+            }
+            respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         // ---- Solicitations Command Center ----
         server.createContext("/solicitations/refresh", exchange -> {
             if (!"POST".equals(exchange.getRequestMethod()) || solicitations == null) {

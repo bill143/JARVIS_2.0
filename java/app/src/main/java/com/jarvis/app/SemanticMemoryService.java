@@ -122,6 +122,40 @@ final class SemanticMemoryService {
         return true;
     }
 
+    /**
+     * Mirrors the Brain/Obsidian vault into the unified store so notes are recalled alongside memory
+     * and intelligence facts. Vault notes get stable ids ({@code vault-<relpath>}) so re-syncing
+     * updates in place; notes removed from the vault are forgotten. Idempotent.
+     */
+    synchronized int syncVault(List<Document> notes) {
+        java.util.Set<String> keep = new java.util.HashSet<>();
+        for (Document n : notes) {
+            String id = "vault-" + n.id();
+            keep.add(id);
+            String title = n.metadata().getOrDefault("title", n.id());
+            ObjectNode e = MAPPER.createObjectNode();
+            e.put("op", "save");
+            e.put("id", id);
+            e.put("title", title);
+            e.put("content", n.content());
+            store.append(collection, e.toString());
+            memory.remove(id);
+            memory.add(new Document(id, n.content(), Map.of("title", title, "source", "vault")));
+        }
+        // Forget vault notes that no longer exist on disk.
+        for (Document d : memory.all()) {
+            if (d.id().startsWith("vault-") && !keep.contains(d.id())) {
+                ObjectNode del = MAPPER.createObjectNode();
+                del.put("op", "delete");
+                del.put("id", d.id());
+                store.append(collection, del.toString());
+                memory.remove(d.id());
+            }
+        }
+        record("semantic-vault-sync", notes.size() + " vault notes");
+        return notes.size();
+    }
+
     /** All stored memories (for listing). */
     List<Document> all() {
         return memory.all();
