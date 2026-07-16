@@ -9,6 +9,7 @@ reverse proxy with automatic TLS, on an isolated network.
 - [4. Enabling the auth gateway](#4-enabling-the-auth-gateway)
 - [5. Obsidian vault git-sync](#5-obsidian-vault-git-sync)
 - [6. Operations](#6-operations)
+- [7. Cloud deployment](#7-cloud-deployment)
 
 ---
 
@@ -153,3 +154,84 @@ Persistent state lives in named volumes:
 
 The container runs as the non-root `jarvis` user and exposes a Docker
 healthcheck against `/health`.
+
+---
+
+## 7. Cloud deployment
+
+The same image runs on any container platform. It honors a `$PORT` env var
+(default `8000`), so managed platforms that inject a listen port work
+unchanged. Managed platforms (Fly, Render, Railway) terminate TLS at their
+edge — **Caddy is only needed for the self-hosted VPS / docker-compose path**.
+
+Set your provider/admin secrets on each platform (never commit them):
+`OPENJARVIS_ADMIN_USER`, `OPENJARVIS_ADMIN_PASSWORD`, and at least one model
+provider key (e.g. `OPENAI_API_KEY`). Keep `OPENJARVIS_AUTH_ENABLED=true`.
+
+### 7a. Fly.io — `deploy/fly.toml`
+
+Fly terminates TLS at its edge; no Caddy needed.
+
+```bash
+fly launch --no-deploy --copy-config --config deploy/fly.toml   # first time
+fly volumes create jarvis_data --size 1
+fly secrets set OPENJARVIS_ADMIN_USER=admin \
+               OPENJARVIS_ADMIN_PASSWORD='<strong-password>' \
+               OPENAI_API_KEY='<key>'
+fly deploy --config deploy/fly.toml
+```
+
+Edit `app` and `primary_region` in `deploy/fly.toml` first. A
+`min_machines_running = 1` keeps the app warm; the healthcheck hits `/health`.
+
+Optional CI: the manual `deploy-fly` GitHub Actions workflow
+(`.github/workflows/deploy-fly.yml`) runs `flyctl deploy` on demand
+(workflow_dispatch). It needs a `FLY_API_TOKEN` repository secret
+(`fly tokens create deploy`) — **you must add this secret yourself.**
+
+### 7b. Render — `deploy/render.yaml`
+
+Render provides a managed HTTPS domain automatically.
+
+1. Copy `deploy/render.yaml` to the repo root (Render reads `render.yaml`
+   from the root), or create a Web Service pointed at the `Dockerfile`.
+2. Create a **Blueprint** from the repo.
+3. In the dashboard, fill in the `sync: false` secrets
+   (`OPENJARVIS_ADMIN_*`, provider keys).
+
+The blueprint pins `PORT=8000`, a `/health` healthcheck, and a 1 GB persistent
+disk mounted at `/home/jarvis/.openjarvis`.
+
+### 7c. Railway — `deploy/railway.json`
+
+Railway auto-provisions a public HTTPS domain.
+
+1. Create a project from the repo (Railway detects the Dockerfile) and copy
+   `deploy/railway.json` to the repo root, or set the build to use it.
+2. Add a **Volume** mounted at `/home/jarvis/.openjarvis` for persistence.
+3. Add the secret variables in the Railway dashboard.
+
+Railway injects `$PORT`; the start command and image both honor it.
+
+### 7d. Self-hosted VPS
+
+Use the docker-compose + Caddy path from sections 2–3 on any VPS (or bare
+`docker run` with your own TLS proxy):
+
+```bash
+git clone <repo> && cd JARVIS_2.0
+cp .env.example .env      # fill in JARVIS_DOMAIN, ACME_EMAIL, secrets
+docker compose up -d --build
+```
+
+Point your domain's DNS at the VPS; Caddy fetches a Let's Encrypt cert on
+first request. This is the only path that manages its own TLS.
+
+### Platform summary
+
+| Platform | Config | TLS | Persistence | Notes |
+|---|---|---|---|---|
+| Fly.io | `deploy/fly.toml` | Fly edge | `[[mounts]]` volume | `min_machines_running=1` keeps it warm |
+| Render | `deploy/render.yaml` | Render edge | `disk:` 1 GB | Fill `sync:false` secrets in dashboard |
+| Railway | `deploy/railway.json` | Railway edge | add a Volume | Injects `$PORT` |
+| VPS | `docker-compose.yml` + `Caddyfile` | Caddy / Let's Encrypt | named volumes | Self-managed TLS |

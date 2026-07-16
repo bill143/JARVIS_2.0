@@ -78,11 +78,14 @@ RUN mkdir -p /home/jarvis/.openjarvis /vault \
 
 USER jarvis
 
+# Bind port. Defaults to 8000 but honors $PORT so the same image runs on PaaS
+# platforms (Render, Railway, Fly) that inject the listen port at runtime.
+ENV PORT=8000
 EXPOSE 8000
 
 # The app is fronted by a reverse proxy; it binds to all interfaces inside the
-# isolated container network only (no host port is published in compose).
+# isolated container network (no host port is published in compose).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD curl -fsS http://localhost:8000/health || exit 1
+    CMD curl -fsS "http://localhost:${PORT:-8000}/health" || exit 1
 
-CMD ["jarvis", "serve", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "exec jarvis serve --host 0.0.0.0 --port ${PORT:-8000}"]
