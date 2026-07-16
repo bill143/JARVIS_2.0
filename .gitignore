@@ -39,6 +39,8 @@ Thumbs.db
 # Secrets
 .env
 .env.*
+!.env.example
+credentials.toml
 AIMLAPI_APIkey_d7b094b8.txt
 
 # Project

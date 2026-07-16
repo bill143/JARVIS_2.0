@@ -11,8 +11,17 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
+
+from openjarvis.core.secrets import externalize_secrets, resolve_mapping
+
+
+def _default_secret_setter(var_name: str, value: str) -> None:
+    """Persist an externalized binding secret to the credential store + env."""
+    from openjarvis.core.credentials import set_secret
+
+    set_secret(var_name, value)
 
 _CREATE_AGENTS = """\
 CREATE TABLE IF NOT EXISTS managed_agents (
@@ -90,8 +99,15 @@ _SUMMARY_MAX = 2000
 class AgentManager:
     """Persistent agent lifecycle manager with SQLite backing."""
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        *,
+        secret_setter: Optional[Callable[[str, str], None]] = None,
+    ) -> None:
         self._db_path = str(db_path)
+        # How externalized channel-binding secrets are persisted out of the DB.
+        self._secret_setter = secret_setter or _default_secret_setter
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -394,7 +410,16 @@ class AgentManager:
     ) -> Dict[str, Any]:
         binding_id = uuid.uuid4().hex[:12]
         session_id = uuid.uuid4().hex[:16]
-        config_json = json.dumps(config or {})
+        # Move secret-valued config fields (tokens, api keys, passwords) out of
+        # the database: the real value is persisted to the credential store and
+        # only a "${ENV_VAR}" reference is stored here. Non-secret fields and
+        # already-externalized values pass through unchanged.
+        safe_config = externalize_secrets(
+            config or {},
+            var_prefix=f"OJ_BINDING_{binding_id}",
+            setter=self._secret_setter,
+        )
+        config_json = json.dumps(safe_config)
         self._conn.execute(
             "INSERT INTO channel_bindings "
             "(id, agent_id, channel_type, config_json, session_id, routing_mode) "
@@ -685,11 +710,15 @@ class AgentManager:
     @staticmethod
     def _row_to_binding(row: sqlite3.Row) -> Dict[str, Any]:
         config_raw = row["config_json"]
+        # Resolve any "${ENV_VAR}" references back to real secret values for
+        # server-internal use (channel reconnect, webhook verification). API
+        # handlers redact these before returning them to a client.
+        config = json.loads(config_raw) if config_raw else {}
         return {
             "id": row["id"],
             "agent_id": row["agent_id"],
             "channel_type": row["channel_type"],
-            "config": json.loads(config_raw) if config_raw else {},
+            "config": resolve_mapping(config),
             "session_id": row["session_id"] or "",
             "routing_mode": row["routing_mode"] or "auto",
         }

@@ -171,6 +171,16 @@ def create_app(
     config:
         Optional JarvisConfig for other settings.
     """
+    # Load secrets from .env then ~/.openjarvis/credentials.toml into the
+    # environment before anything reads them. Real env vars always win, and
+    # missing files are a no-op, so this is safe on every startup.
+    try:
+        from openjarvis.core.credentials import bootstrap_secrets
+
+        bootstrap_secrets()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Secret bootstrap skipped: %s", exc)
+
     app = FastAPI(
         title="OpenJarvis API",
         description="OpenAI-compatible API server for OpenJarvis",

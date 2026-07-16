@@ -133,6 +133,55 @@ class TestChannelBindings:
         manager.unbind_channel(binding["id"])
         assert len(manager.list_channel_bindings(agent["id"])) == 0
 
+    def test_binding_secrets_externalized_out_of_db(self, monkeypatch):
+        """Secret fields are stored as ${ENV} refs, not plaintext, in the DB."""
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from openjarvis.agents.manager import AgentManager
+
+        vault: dict[str, str] = {}
+
+        def setter(var, value):
+            vault[var] = value
+            monkeypatch.setenv(var, value)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mgr = AgentManager(
+                db_path=str(Path(tmpdir) / "agents.db"), secret_setter=setter
+            )
+            try:
+                agent = mgr.create_agent(name="sb", agent_type="simple")
+                mgr.bind_channel(
+                    agent["id"],
+                    channel_type="sendblue",
+                    config={
+                        "from_number": "+15551234567",
+                        "api_key_id": "keyid-abc",
+                        "api_secret_key": "supersecret-xyz",
+                    },
+                )
+                # Raw DB row must not contain the plaintext secret.
+                row = mgr._conn.execute(
+                    "SELECT config_json FROM channel_bindings"
+                ).fetchone()
+                raw = row["config_json"]
+                assert "supersecret-xyz" not in raw
+                assert "keyid-abc" not in raw
+                stored = json.loads(raw)
+                assert stored["api_secret_key"].startswith("${")
+                assert stored["from_number"] == "+15551234567"  # non-secret kept
+                # The real secret went to the out-of-band vault.
+                assert "supersecret-xyz" in vault.values()
+                # list_channel_bindings resolves refs back for internal use.
+                bindings = mgr.list_channel_bindings(agent["id"])
+                cfg = bindings[0]["config"]
+                assert cfg["api_secret_key"] == "supersecret-xyz"
+                assert cfg["api_key_id"] == "keyid-abc"
+            finally:
+                mgr.close()
+
 
 class TestSummaryMemory:
     def test_initial_summary_empty(self, manager):
