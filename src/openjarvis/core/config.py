@@ -1011,6 +1011,29 @@ class SchedulerConfig:
 
 
 @dataclass(slots=True)
+class VaultConfig:
+    """Obsidian/Markdown vault synchronization.
+
+    The vault path is server-side configurable (config.toml ``[vault]`` or the
+    ``jarvis config set`` command / runtime API) so it can be changed without a
+    rebuild. When ``enabled`` and the path is a git repository, a background
+    watcher auto-commits local edits and pulls remote changes on an interval,
+    then re-indexes the vault into the knowledge store. Off by default.
+    """
+
+    enabled: bool = False
+    path: str = ""  # Absolute path to the Obsidian/Markdown vault directory.
+    poll_interval: int = 30  # Seconds between vault change checks.
+    git_sync: bool = True  # Auto-commit local edits and pull remote changes.
+    auto_commit: bool = True
+    auto_pull: bool = True
+    remote: str = "origin"
+    branch: str = ""  # Empty -> current branch.
+    commit_message: str = "chore(vault): auto-sync from JARVIS"
+    reindex_on_change: bool = True
+
+
+@dataclass(slots=True)
 class WorkflowConfig:
     """Workflow engine settings."""
 
@@ -1152,6 +1175,7 @@ class JarvisConfig:
     auth: AuthConfig = field(default_factory=AuthConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    vault: VaultConfig = field(default_factory=VaultConfig)
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
     sessions: SessionConfig = field(default_factory=SessionConfig)
     a2a: A2AConfig = field(default_factory=A2AConfig)
@@ -1364,6 +1388,7 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
             "tools",
             "sandbox",
             "scheduler",
+            "vault",
             "workflow",
             "sessions",
             "a2a",

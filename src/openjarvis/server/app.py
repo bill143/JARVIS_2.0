@@ -230,6 +230,12 @@ def create_app(
     app.include_router(dashboard_router)
     app.include_router(comparison_router)
     app.include_router(create_connectors_router())
+    try:
+        from openjarvis.server.vault_router import create_vault_router
+
+        app.include_router(create_vault_router())
+    except Exception as exc:
+        logger.debug("Vault router init skipped: %s", exc)
     include_all_routes(app)
 
     # Restore SendBlue channel bindings from database on startup
@@ -315,6 +321,19 @@ def create_app(
             )
         except Exception as exc:
             logger.warning("Session auth init failed: %s", exc)
+
+    # Dynamic Obsidian vault sync (opt-in). When config.vault.enabled and a path
+    # is set, a background watcher auto-commits/pulls and re-indexes on change.
+    app.state.vault_watcher = None
+    try:
+        from openjarvis.connectors.vault_sync import build_vault_watcher
+
+        watcher = build_vault_watcher(config)
+        if watcher is not None:
+            watcher.start()
+            app.state.vault_watcher = watcher
+    except Exception as exc:
+        logger.warning("Vault watcher init skipped: %s", exc)
 
     # Serve static frontend assets if the static/ directory exists
     static_dir = pathlib.Path(__file__).parent / "static"
