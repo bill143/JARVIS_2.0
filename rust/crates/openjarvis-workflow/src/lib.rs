@@ -136,13 +136,12 @@ impl WorkflowGraph {
                 continue;
             }
             if let Some(&vi) = self.node_index.get(&edge.target) {
-                match color[vi] {
+                // Bind the (Copy) color first so the match scrutinee doesn't hold a borrow of
+                // `color` — that lets the guard mutably borrow it via dfs_has_cycle.
+                let vcolor = color[vi];
+                match vcolor {
                     1 => return true,
-                    0 => {
-                        if self.dfs_has_cycle(vi, color) {
-                            return true;
-                        }
-                    }
+                    0 if self.dfs_has_cycle(vi, color) => return true,
                     _ => {}
                 }
             }
