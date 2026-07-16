@@ -1893,7 +1893,10 @@
       cd.textContent='📸';
       const c=document.createElement('canvas'); c.width=video.videoWidth||640; c.height=video.videoHeight||480;
       c.getContext('2d').drawImage(video,0,0,c.width,c.height);
-      const dataUrl=c.toDataURL('image/png');
+      // JPEG, not PNG: a 640x480 PNG snapshot (~600KB+) trips a request-size wall on some networks
+      // (corporate proxies/security agents) that silently kill the POST before a response arrives,
+      // surfacing as a generic "Failed to fetch". JPEG at 0.8 is ~15x smaller and plenty for vision.
+      const dataUrl=c.toDataURL('image/jpeg',0.8);
       cleanup();
       add('you','📷 (webcam snapshot)'); setOrb('thinking');
       const pending=add('jarvis','Looking through the camera now, sir…'); pending.className='thinking';
