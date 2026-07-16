@@ -9,6 +9,7 @@ description = "OpenJarvis — modular AI assistant backend with composable intel
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "bcrypt>=5.0.0",
     "click>=8",
     "datasets>=4.5.0",
     "ddgs>=9.11.4",

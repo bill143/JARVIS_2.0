@@ -262,6 +262,50 @@ def create_app(
         except Exception as exc:
             logger.debug("Webhook routes init skipped: %s", exc)
 
+    # Session-auth gateway (opt-in). When enabled, every route except the login
+    # flow requires a valid session cookie — see SessionAuthMiddleware.
+    import os
+
+    auth_cfg = getattr(config, "auth", None)
+    auth_enabled = bool(getattr(auth_cfg, "enabled", False)) or os.environ.get(
+        "OPENJARVIS_AUTH_ENABLED", ""
+    ).lower() in ("1", "true", "yes")
+    if auth_enabled:
+        try:
+            from openjarvis.core.config import DEFAULT_CONFIG_DIR
+            from openjarvis.server.auth import AuthStore
+            from openjarvis.server.session_auth import (
+                SessionAuthMiddleware,
+                create_auth_router,
+            )
+
+            db_path = getattr(auth_cfg, "db_path", None) or str(
+                DEFAULT_CONFIG_DIR / "auth.db"
+            )
+            cookie_name = getattr(auth_cfg, "cookie_name", "oj_session")
+            ttl_hours = int(getattr(auth_cfg, "session_ttl_hours", 12))
+            cookie_secure = bool(getattr(auth_cfg, "cookie_secure", True))
+            store = AuthStore(db_path)
+            # First-boot bootstrap: create the admin from env only if no users exist.
+            store.ensure_admin(
+                os.environ.get("OPENJARVIS_ADMIN_USER", ""),
+                os.environ.get("OPENJARVIS_ADMIN_PASSWORD", ""),
+            )
+            app.state.auth_store = store
+            app.include_router(
+                create_auth_router(
+                    store,
+                    cookie_name=cookie_name,
+                    ttl_hours=ttl_hours,
+                    cookie_secure=cookie_secure,
+                )
+            )
+            app.add_middleware(
+                SessionAuthMiddleware, store=store, cookie_name=cookie_name
+            )
+        except Exception as exc:
+            logger.warning("Session auth init failed: %s", exc)
+
     # Serve static frontend assets if the static/ directory exists
     static_dir = pathlib.Path(__file__).parent / "static"
     if static_dir.is_dir():

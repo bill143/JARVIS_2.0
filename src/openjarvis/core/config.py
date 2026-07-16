@@ -1117,6 +1117,23 @@ class SkillsConfig:
     auto_discover: bool = True
 
 
+@dataclass(slots=True)
+class AuthConfig:
+    """Dashboard/API authentication gateway.
+
+    Off by default (local-first). When ``enabled`` (or ``OPENJARVIS_AUTH_ENABLED``
+    is truthy) every HTML page and API route requires a valid session cookie;
+    unauthenticated requests are redirected to ``/login`` (browsers) or get a 401
+    (API clients). Sessions are server-side (SQLite) with a short TTL.
+    """
+
+    enabled: bool = False
+    db_path: str = str(DEFAULT_CONFIG_DIR / "auth.db")
+    session_ttl_hours: int = 12
+    cookie_name: str = "oj_session"
+    cookie_secure: bool = True  # only send the cookie over HTTPS in production
+
+
 @dataclass
 class JarvisConfig:
     """Top-level configuration for OpenJarvis."""
@@ -1132,6 +1149,7 @@ class JarvisConfig:
     traces: TracesConfig = field(default_factory=TracesConfig)
     channel: ChannelConfig = field(default_factory=ChannelConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
