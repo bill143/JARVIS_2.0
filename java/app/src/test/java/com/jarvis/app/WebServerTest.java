@@ -383,6 +383,38 @@ class WebServerTest {
     }
 
     @Test
+    void connectorsConfigEndpointSavesFieldsAndMasksSecrets() throws Exception {
+        // Issue #1: connector settings can be saved in-app (POST) and are read back (GET) with secrets
+        // masked. The GET catalog exposes all seven connectors.
+        com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                true, "m", 0, new HardwareMonitor(), null, true, null, memory);
+        try {
+            String b = "http://localhost:" + wired.port() + "/connectors/config";
+            String initial = get2(b).body();
+            for (String c : new String[]{"obsidian", "samgov", "github", "openhuman",
+                    "embeddings", "gdrive", "onedrive"}) {
+                assertTrue(initial.contains("\"" + c + "\""), "missing connector " + c);
+            }
+            // Save a secret (SAM.gov key) and a plain field (base URL).
+            post2r(b, "{\"key\":\"samgov.apiKey\",\"value\":\"nvapi-secret\"}");
+            post2r(b, "{\"key\":\"samgov.baseUrl\",\"value\":\"https://api.sam.gov/x\"}");
+            String after = get2(b).body();
+            assertFalse(after.contains("nvapi-secret"));           // secret never echoed
+            assertTrue(after.contains("https://api.sam.gov/x"));   // plain field prefilled
+            assertTrue(after.contains("\"set\":true"));            // secret reported as set
+            // It landed in the same store scope AppWiring's suppliers read.
+            assertEquals("nvapi-secret",
+                    new ConnectorSettingsService(memory).resolve("samgov.apiKey", "SAMGOV_API_KEY"));
+            // Unknown keys are rejected (no arbitrary store writes).
+            assertEquals(400, post2r(b, "{\"key\":\"evil.key\",\"value\":\"x\"}").statusCode());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void memoryTabAndIntelligenceTabShareOneUnifiedFactStore() throws Exception {
         // Issue #2: the Memory tab (/memory) and Personal Intelligence tab (/semantic) must be one
         // source of truth. A fact added in either surfaces in the other.

@@ -884,6 +884,50 @@ public final class WebServer {
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // In-app connector configuration (Settings → Connectors). Reads/writes the same 'connectors'
+        // scope in the memory store that AppWiring's live suppliers resolve, so a saved value takes
+        // effect without a restart. Secret fields report only whether a value is set, never the value.
+        server.createContext("/connectors/config", exchange -> {
+            if (memory == null) {
+                respond(exchange, 503, "text/plain", "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ConnectorSettingsService cs = new ConnectorSettingsService(memory);
+            if ("POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String key = j.path("key").asText("");
+                    // Only keys declared in the catalog may be written (no arbitrary store writes).
+                    boolean known = ConnectorSettingsService.CONNECTORS.values().stream()
+                            .flatMap(java.util.List::stream)
+                            .anyMatch(f -> f.key().equals(key));
+                    if (!known) {
+                        respond(exchange, 400, "text/plain",
+                                "unknown key".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                    cs.set(key, j.path("value").asText(""));
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode out = MAPPER.createObjectNode();
+            ObjectNode conns = out.putObject("connectors");
+            ConnectorSettingsService.CONNECTORS.forEach((name, specs) -> {
+                ArrayNode fields = conns.putArray(name);
+                for (ConnectorSettingsService.Field f : cs.view(specs)) {
+                    ObjectNode o = fields.addObject();
+                    o.put("key", f.key());
+                    o.put("env", f.env());
+                    o.put("secret", f.secret());
+                    o.put("set", f.set());
+                    o.put("value", f.value());   // blank for secret fields
+                }
+            });
+            respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         // ---- Uploaded documents the assistant can read ----
         server.createContext("/upload", exchange -> {
             if (uploads == null) {

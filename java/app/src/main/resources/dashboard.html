@@ -806,6 +806,11 @@
       <div id="mcpList" class="hint">No MCP servers configured.</div>
     </div>
     <div class="pcard">
+      <h4>🧩 Connectors</h4>
+      <div class="hint" style="margin-bottom:8px;">Configure the external connectors in-app — no environment variables, no restart. Saved values are stored locally and take effect on the next request. A saved value overrides its environment variable; clearing a field reverts to the environment. Secrets are never shown back.</div>
+      <div id="connList" class="hint">Loading…</div>
+    </div>
+    <div class="pcard">
       <h4>🛡 Gated local lane <span class="hint" style="text-transform:none;letter-spacing:0;">(advanced)</span></h4>
       <div class="hint" style="margin-bottom:8px;">A policy-gated route to a model <b>you self-host</b> (e.g. a local Ollama) for domain tasks a cloud provider declines on scope grounds. <b>Off by default; default-deny.</b> A task runs only if the lane is enabled, points at a self-hosted endpoint, matches your allowlist, and does <b>not</b> hit the absolute harm denylist (which always blocks). Every gate decision and run is audited; lane output is flagged for review.</div>
       <div class="row"><label for="gl_enabled">Enable gated lane</label><input type="checkbox" id="gl_enabled"></div>
@@ -2638,7 +2643,49 @@
   if($('gl_save')) $('gl_save').addEventListener('click',gatedSave);
   if($('gl_testbtn')) $('gl_testbtn').addEventListener('click',gatedTest);
 
-  pageLoaders.apis=()=>{ provLoad().then(gatedLoad); renderNvCatalog(); mcpLoad(); };
+  // ---- Connectors: in-app configuration for the external connectors (no env vars, no restart) ----
+  const CONN_META={
+    obsidian:{icon:'📓',name:'Brain (Obsidian vault)',note:'Local vault folder path — read-only mirror. Takes effect on restart (re-index).'},
+    samgov:{icon:'📄',name:'Solicitations (SAM.gov)',note:'An api.sam.gov key to pull live opportunities. Takes effect immediately.'},
+    github:{icon:'🐙',name:'GitHub',note:'A fine-grained Personal Access Token for repo / issue / PR tools. Takes effect immediately.'},
+    openhuman:{icon:'🧑',name:'OpenHuman advisor',note:'Run openhuman-core serve, then set its URL + core token. Takes effect immediately.'},
+    embeddings:{icon:'🧠',name:'Semantic embeddings',note:'A cloud embeddings endpoint + key switches recall from keyword to meaning. Takes effect immediately.'},
+    gdrive:{icon:'📁',name:'Google Drive',note:'An OAuth access token + allowed folder IDs (document connector). Credentials are stored for the document connector.'},
+    onedrive:{icon:'📁',name:'OneDrive',note:'An OAuth access token + allowed folder IDs (document connector). Credentials are stored for the document connector.'}
+  };
+  const CONN_FIELD_LABELS={ 'obsidian.vaultPath':'Vault folder path','samgov.apiKey':'API key','samgov.baseUrl':'Base URL (optional)',
+    'github.token':'Access token','openhuman.url':'Server URL','openhuman.token':'Core token',
+    'embeddings.key':'API key','embeddings.endpoint':'Endpoint (optional)','embeddings.model':'Model (optional)',
+    'gdrive.token':'Access token','gdrive.folders':'Allowed folder IDs','onedrive.token':'Access token','onedrive.folders':'Allowed folder IDs' };
+  async function connSave(key,value,msgEl){
+    try{ const r=await fetch('/connectors/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,value})});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      if(msgEl){ msgEl.textContent='✓ saved'; msgEl.style.color='#8ef0b4'; } connLoad();
+    }catch(e){ if(msgEl){ msgEl.textContent='✗ '+e.message; msgEl.style.color='#f6a3a3'; } }
+  }
+  async function connLoad(){
+    let j={connectors:{}}; try{ j=await (await fetch('/connectors/config')).json(); }catch(e){ return; }
+    const box=$('connList'); if(!box) return; box.innerHTML='';
+    Object.keys(j.connectors||{}).forEach(name=>{
+      const meta=CONN_META[name]||{icon:'🔌',name:name,note:''};
+      const card=document.createElement('div'); card.style.borderTop='1px solid var(--line)'; card.style.padding='10px 0';
+      const h=document.createElement('div'); h.innerHTML='<b>'+meta.icon+' '+esc(meta.name)+'</b>'; card.appendChild(h);
+      if(meta.note){ const n=document.createElement('div'); n.className='hint'; n.style.margin='2px 0 6px'; n.textContent=meta.note; card.appendChild(n); }
+      (j.connectors[name]||[]).forEach(f=>{
+        const row=document.createElement('div'); row.className='row'; row.style.alignItems='center';
+        const lab=document.createElement('label'); lab.textContent=CONN_FIELD_LABELS[f.key]||f.key; lab.style.flex='0 0 220px'; row.appendChild(lab);
+        const inp=document.createElement('input'); inp.className='minput'; inp.type=f.secret?'password':'text';
+        inp.value=f.secret?'':(f.value||''); inp.placeholder=f.secret?(f.set?'•••••• stored — leave blank to keep':('set '+f.env)):('falls back to '+f.env);
+        row.appendChild(inp);
+        const btn=document.createElement('button'); btn.className='hbtn'; btn.textContent='Save'; btn.style.padding='2px 9px'; btn.style.marginLeft='6px'; row.appendChild(btn);
+        const msg=document.createElement('span'); msg.style.marginLeft='8px'; msg.style.fontSize='12px'; row.appendChild(msg);
+        btn.addEventListener('click',()=>{ if(f.secret && !inp.value.trim()){ msg.textContent='unchanged'; msg.style.color='var(--dim)'; return; } connSave(f.key,inp.value,msg); });
+        card.appendChild(row);
+      });
+      box.appendChild(card);
+    });
+  }
+  pageLoaders.apis=()=>{ provLoad().then(gatedLoad); renderNvCatalog(); mcpLoad(); connLoad(); };
 
   // ---- HUD Activity feed (sourced from the audit log — single source of truth) ----
   function actClass(e){

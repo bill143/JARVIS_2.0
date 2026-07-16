@@ -110,6 +110,10 @@ final class AppWiring {
     static Runtime build(String apiKey, String model) {
         Path memoryFile = Path.of(System.getProperty("user.home"), ".jarvis", "memory.tsv");
         MemoryStore<String> memory = new FileBackedStore(memoryFile);
+        // In-app connector configuration (Settings → Connectors). Persists to the memory store and is
+        // resolved live (saved value → environment fallback), so the credential connectors below read
+        // through suppliers and pick up a saved value on the next request — no restart, no env var.
+        ConnectorSettingsService connectors = new ConnectorSettingsService(memory);
         boolean online = isOnline(apiKey);
 
         ToolRegistry tools = new ToolRegistry();
@@ -120,12 +124,19 @@ final class AppWiring {
         // registered (and manifest-tiered) either way; a missing token yields a graceful error, not
         // a crash. MUTATING actions are gated by the permission layer via their manifest risk tier.
         plugins.install(new com.jarvis.integrations.github.GitHubPlugin(
-                com.jarvis.integrations.github.HttpGitHubTransport.fromEnvironment()));
+                com.jarvis.integrations.github.HttpGitHubTransport.resolving(
+                        connectors.supplier("github.token", "JARVIS_GITHUB_TOKEN"))));
         // OpenHuman advisor (read-only). Dormant until 'openhuman-core serve' is running and
         // JARVIS_OPENHUMAN_URL + OPENHUMAN_CORE_TOKEN are set. Arm's-length HTTP only (GPL-safe).
         com.jarvis.integrations.openhuman.OpenHumanClient openhuman =
                 new com.jarvis.integrations.openhuman.OpenHumanClient(
-                        com.jarvis.integrations.openhuman.HttpOpenHumanTransport.fromEnvironment());
+                        com.jarvis.integrations.openhuman.HttpOpenHumanTransport.resolving(
+                                connectors.supplier("openhuman.url", "JARVIS_OPENHUMAN_URL"),
+                                () -> {
+                                    String t = connectors.resolve("openhuman.token",
+                                            "OPENHUMAN_CORE_TOKEN");
+                                    return t != null ? t : System.getenv("JARVIS_OPENHUMAN_TOKEN");
+                                }));
         plugins.install(new com.jarvis.integrations.openhuman.OpenHumanPlugin(openhuman));
 
         GoogleAuth google = googleAuth(memory);
@@ -158,7 +169,7 @@ final class AppWiring {
         // Solicitations Command Center. Sources + document connectors are dormant-by-default (env
         // gated); the AI tools register here (before governance wraps the registry) so they are
         // manifest-tiered READ_ONLY. Every source query / open / refresh is audited by the service.
-        SolicitationsService solicitations = buildSolicitations(auditLog);
+        SolicitationsService solicitations = buildSolicitations(auditLog, connectors);
         plugins.install(new SolicitationsPlugin(solicitations));
 
         ToolRegistry governedTools = governedRegistry(
@@ -179,7 +190,10 @@ final class AppWiring {
         // JARVIS_EMBEDDINGS_KEY is set, at which point recall becomes meaning-based.
         SemanticMemoryService semantic = new SemanticMemoryService(
                 new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "semantic")),
-                HttpEmbeddingProvider.fromEnvironment(), auditLog);
+                HttpEmbeddingProvider.resolving(
+                        connectors.supplier("embeddings.key", "JARVIS_EMBEDDINGS_KEY"),
+                        connectors.supplier("embeddings.endpoint", "JARVIS_EMBEDDINGS_ENDPOINT"),
+                        connectors.supplier("embeddings.model", "JARVIS_EMBEDDINGS_MODEL")), auditLog);
         final ToolRegistry brainTools = governedTools;
         // Rebuilt on demand so activating a provider (APIs & Models) hot-swaps the brain, no restart.
         java.util.function.Supplier<AgentPolicy> brainFactory = () -> {
@@ -257,9 +271,11 @@ final class AppWiring {
         // Project Discussion: JARVIS chairs, OpenHuman advises. Bounded + audited; read-only.
         DiscussionService discussion = new DiscussionService(api, openhuman, auditLog,
                 new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "discussions")));
-        // BRAIN (Obsidian): read-only mirror of a local vault. Dormant unless OBSIDIAN_VAULT_PATH is
-        // set; the memory backend stays the source of truth. No writes to the vault in Phase 1.
-        BrainVault brain = BrainVault.fromEnvironment(auditLog);
+        // BRAIN (Obsidian): read-only mirror of a local vault. The vault path is configurable in-app
+        // (Settings → Connectors) and falls back to OBSIDIAN_VAULT_PATH; the memory backend stays the
+        // source of truth. No writes to the vault in Phase 1.
+        BrainVault brain = BrainVault.fromConfig(
+                connectors.resolve("obsidian.vaultPath", "OBSIDIAN_VAULT_PATH"), true, auditLog);
 
         // Uploaded documents the assistant can read (txt/md/csv/json native, docx/xlsx JDK-only,
         // pdf via PDFBox). In-memory and session-scoped; every upload is audited.
@@ -282,10 +298,13 @@ final class AppWiring {
      * own). Drive/OneDrive connectors are read-only and dormant until credentials + folder scope are
      * configured. No autonomous polling — the cache refreshes only on explicit request.
      */
-    private static SolicitationsService buildSolicitations(AuditLog auditLog) {
+    private static SolicitationsService buildSolicitations(AuditLog auditLog,
+            ConnectorSettingsService connectorSettings) {
         List<com.jarvis.solicitations.SolicitationSourceAdapter> sources = List.of(
                 new com.jarvis.solicitations.SamGovAdapter(
-                        com.jarvis.solicitations.HttpSamGovTransport.fromEnvironment()),
+                        com.jarvis.solicitations.HttpSamGovTransport.resolving(
+                                connectorSettings.supplier("samgov.apiKey", "SAMGOV_API_KEY"),
+                                connectorSettings.supplier("samgov.baseUrl", "SAMGOV_BASE_URL"))),
                 com.jarvis.solicitations.GovTribeMcpAdapter.dormant());
         List<com.jarvis.solicitations.DocumentConnector> connectors = List.of(
                 GoogleDriveConnector.fromEnvironment(null),

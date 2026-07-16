@@ -26,16 +26,34 @@ final class HttpEmbeddingProvider implements EmbeddingProvider {
     private static final String DEFAULT_ENDPOINT = "https://api.openai.com/v1/embeddings";
     private static final String DEFAULT_MODEL = "text-embedding-3-small";
 
-    private final String apiKey;      // nullable → dormant
-    private final String endpoint;
-    private final String model;
+    private final java.util.function.Supplier<String> keySupplier;       // resolved live; null → dormant
+    private final java.util.function.Supplier<String> endpointSupplier;  // resolved live
+    private final java.util.function.Supplier<String> modelSupplier;     // resolved live
     private final HttpClient client;
 
     HttpEmbeddingProvider(String apiKey, String endpoint, String model) {
-        this.apiKey = apiKey == null || apiKey.isBlank() ? null : apiKey;
-        this.endpoint = endpoint == null || endpoint.isBlank() ? DEFAULT_ENDPOINT : endpoint;
-        this.model = model == null || model.isBlank() ? DEFAULT_MODEL : model;
+        this((java.util.function.Supplier<String>) () -> apiKey,
+                (java.util.function.Supplier<String>) () -> endpoint,
+                (java.util.function.Supplier<String>) () -> model);
+    }
+
+    private HttpEmbeddingProvider(java.util.function.Supplier<String> keySupplier,
+            java.util.function.Supplier<String> endpointSupplier,
+            java.util.function.Supplier<String> modelSupplier) {
+        this.keySupplier = keySupplier == null ? () -> null : keySupplier;
+        this.endpointSupplier = endpointSupplier == null ? () -> null : endpointSupplier;
+        this.modelSupplier = modelSupplier == null ? () -> null : modelSupplier;
         this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
+    }
+
+    /**
+     * Live-resolving provider: the key, endpoint and model are read from the suppliers on every
+     * request, so an in-app configuration change takes effect without a restart.
+     */
+    static HttpEmbeddingProvider resolving(java.util.function.Supplier<String> keySupplier,
+            java.util.function.Supplier<String> endpointSupplier,
+            java.util.function.Supplier<String> modelSupplier) {
+        return new HttpEmbeddingProvider(keySupplier, endpointSupplier, modelSupplier);
     }
 
     /** Reads the key from {@code JARVIS_EMBEDDINGS_KEY} (unset → dormant). */
@@ -46,20 +64,36 @@ final class HttpEmbeddingProvider implements EmbeddingProvider {
                 System.getenv("JARVIS_EMBEDDINGS_MODEL"));
     }
 
+    private String apiKey() {
+        String k = keySupplier.get();
+        return k == null || k.isBlank() ? null : k;
+    }
+
+    private String endpoint() {
+        String e = endpointSupplier.get();
+        return e == null || e.isBlank() ? DEFAULT_ENDPOINT : e;
+    }
+
+    private String model() {
+        String m = modelSupplier.get();
+        return m == null || m.isBlank() ? DEFAULT_MODEL : m;
+    }
+
     @Override
     public boolean available() {
-        return apiKey != null;
+        return apiKey() != null;
     }
 
     @Override
     public float[] embed(String text) throws IOException, InterruptedException {
-        if (!available()) {
+        String apiKey = apiKey();
+        if (apiKey == null) {
             throw new IllegalStateException("embeddings are dormant (no API key wired)");
         }
         ObjectNode body = MAPPER.createObjectNode();
-        body.put("model", model);
+        body.put("model", model());
         body.put("input", text == null ? "" : text);
-        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+        HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint()))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("content-type", "application/json")
                 .timeout(Duration.ofSeconds(60))

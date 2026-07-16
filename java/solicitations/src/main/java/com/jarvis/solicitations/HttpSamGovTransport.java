@@ -35,8 +35,8 @@ public final class HttpSamGovTransport implements SamGovTransport {
     private static final int MAX_RETRIES = 4;
     private static final DateTimeFormatter SAM_DATE = DateTimeFormatter.ofPattern("MM/dd/yyyy");
 
-    private final String apiKey;   // nullable → dormant; never logged
-    private final String base;
+    private final java.util.function.Supplier<String> keySupplier;   // resolved live; null → dormant
+    private final java.util.function.Supplier<String> baseSupplier;  // resolved live
     private final HttpClient client;
     private final int lookbackDays;
 
@@ -45,8 +45,22 @@ public final class HttpSamGovTransport implements SamGovTransport {
     }
 
     HttpSamGovTransport(String apiKey, String base, int lookbackDays) {
-        this.apiKey = apiKey == null || apiKey.isBlank() ? null : apiKey;
-        this.base = base == null || base.isBlank() ? DEFAULT_BASE : base.strip();
+        this(() -> apiKey, () -> base, lookbackDays);
+    }
+
+    /**
+     * Live-resolving transport: the key and base URL are read from the supplier on every request, so
+     * an in-app configuration change takes effect without a restart.
+     */
+    public static HttpSamGovTransport resolving(java.util.function.Supplier<String> keySupplier,
+            java.util.function.Supplier<String> baseSupplier) {
+        return new HttpSamGovTransport(keySupplier, baseSupplier, DEFAULT_LOOKBACK_DAYS);
+    }
+
+    HttpSamGovTransport(java.util.function.Supplier<String> keySupplier,
+            java.util.function.Supplier<String> baseSupplier, int lookbackDays) {
+        this.keySupplier = keySupplier == null ? () -> null : keySupplier;
+        this.baseSupplier = baseSupplier == null ? () -> null : baseSupplier;
         this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
         this.lookbackDays = lookbackDays;
     }
@@ -56,14 +70,25 @@ public final class HttpSamGovTransport implements SamGovTransport {
         return new HttpSamGovTransport(System.getenv(KEY_ENV), System.getenv(BASE_ENV));
     }
 
+    private String key() {
+        String k = keySupplier.get();
+        return k == null || k.isBlank() ? null : k;
+    }
+
+    private String base() {
+        String b = baseSupplier.get();
+        return b == null || b.isBlank() ? DEFAULT_BASE : b.strip();
+    }
+
     @Override
     public boolean available() {
-        return apiKey != null;
+        return key() != null;
     }
 
     @Override
     public String search(Map<String, String> params) throws IOException, InterruptedException {
-        if (!available()) {
+        String apiKey = key();
+        if (apiKey == null) {
             throw new IOException("SAM.gov is not configured — set the " + KEY_ENV
                     + " environment variable to an api.sam.gov key");
         }
@@ -73,7 +98,7 @@ public final class HttpSamGovTransport implements SamGovTransport {
         query.putIfAbsent("postedTo", LocalDate.now().format(SAM_DATE));
         query.put("api_key", apiKey);   // added last; never logged
 
-        StringBuilder url = new StringBuilder(base).append('?');
+        StringBuilder url = new StringBuilder(base()).append('?');
         boolean first = true;
         for (Map.Entry<String, String> e : query.entrySet()) {
             if (!first) {
