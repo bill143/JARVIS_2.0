@@ -383,6 +383,36 @@ class WebServerTest {
     }
 
     @Test
+    void agentTeamEndpointsRunAndSupportHumanInTheLoop() throws Exception {
+        // Issue #2: the team endpoint composes a team, runs it, and exposes budget usage; the
+        // start/status/redirect endpoints back the human-in-the-loop flow.
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()), false, "m", 0);
+        try {
+            String b = "http://localhost:" + wired.port();
+            HttpResponse<String> run = post2r(b + "/agents/team/run",
+                    "{\"task\":\"what is 2+2?\",\"maxTokens\":100000}");
+            assertEquals(200, run.statusCode());
+            assertTrue(run.body().contains("\"team\""));
+            assertTrue(run.body().contains("\"steps\""));
+            assertTrue(run.body().contains("\"usage\""));
+            assertTrue(run.body().contains("executor"));   // simple task → executor selected
+
+            assertEquals(400, post2r(b + "/agents/team/run", "{\"task\":\"\"}").statusCode());
+
+            // Background start → a run id we can poll and redirect.
+            String id = post2r(b + "/agents/team/start", "{\"task\":\"say hi\"}").body()
+                    .replaceAll(".*\"runId\":\"([^\"]+)\".*", "$1");
+            assertTrue(id.startsWith("team-"));
+            assertTrue(post2r(b + "/agents/team/redirect",
+                    "{\"id\":\"" + id + "\",\"feedback\":\"be brief\"}").body().contains("\"ok\":true"));
+            assertEquals(404, get2(b + "/agents/team/status?id=ghost").statusCode());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void brainConnectIndexesUnifiesAndGatesWrites() throws Exception {
         // Issue #1: connect a vault live, mirror it into the unified store, and gate writes on approval.
         java.nio.file.Path vault = java.nio.file.Files.createTempDirectory("vault");

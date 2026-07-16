@@ -853,6 +853,22 @@
       <button class="hbtn" id="agRun" type="button">▶ Team</button>
       <button class="hbtn" id="agAuto" type="button" title="Autonomous planner: one agent iterates goal → next step, under a hard step budget.">▶ Autonomous</button></div>
     <div id="agOut" style="margin-top:14px;"></div>
+
+    <div class="pcard" style="margin-top:18px;">
+      <h4>⚡ Team 2.0 <span class="hint" style="text-transform:none;letter-spacing:0;">— dynamic roles · parallel · self-correcting · budgeted · human-in-the-loop</span></h4>
+      <div class="hint" style="margin-bottom:8px;">The orchestrator picks only the roles your task needs, runs independent sub-tasks in parallel, grounds the shared scratchpad on your unified knowledge (Brain/Memory/Intelligence), and lets the Critic send feedback back to the Executor. Set optional budgets; you can redirect the team mid-run.</div>
+      <textarea id="tmTask" class="minput" style="min-height:60px;" placeholder="Task for the team (e.g. 'plan and verify a rollout for the estimator, step by step')…"></textarea>
+      <div class="row" style="margin-top:6px;"><label>Budgets (0 = no limit)</label>
+        <input id="tmTokens" class="minput" style="flex:0 0 130px;" type="number" min="0" placeholder="max tokens">
+        <input id="tmCost" class="minput" style="flex:0 0 120px;margin-left:6px;" type="number" min="0" step="0.01" placeholder="max $ cost">
+        <input id="tmMillis" class="minput" style="flex:0 0 130px;margin-left:6px;" type="number" min="0" placeholder="max ms">
+      </div>
+      <div style="margin:6px 2px;"><button class="hbtn" id="tmStart" type="button" style="border-color:var(--cyan);">▶ Run team</button>
+        <span id="tmMsg" style="margin-left:10px;font-size:12.5px;"></span></div>
+      <div id="tmRedirect" style="display:none;margin:6px 0;"><input id="tmFeedback" class="minput" style="flex:1;" placeholder="Redirect the running team — inject guidance…">
+        <button class="hbtn" id="tmSend" type="button" style="margin-left:6px;">Pause &amp; Redirect</button></div>
+      <div id="tmOut" style="margin-top:12px;"></div>
+    </div>
   </div>
 </div>
 <div class="page cpage" id="cpage-kb">
@@ -3281,6 +3297,64 @@
   $('agRun').addEventListener('click',agRun);
   $('agAuto').addEventListener('click',autoRun);
   $('agGoal').addEventListener('keydown',e=>{ if(e.key==='Enter') agRun(); });
+
+  // ---- Team 2.0: dynamic / parallel / self-correcting, with budgets + human-in-the-loop ----
+  let tmRunId=null, tmPoll=null;
+  function tmRenderStep(s){
+    const d=document.createElement('div'); d.className='agmsg';
+    const r=document.createElement('div'); r.className='agrole'; r.textContent=(s.ok?'':'⚠ ')+s.role+' · '+s.phase+' · '+(s.latencyMs||0)+'ms';
+    const c=document.createElement('div'); c.className='agc'; c.textContent=s.ok?(s.snippet||''):(s.error||'failed');
+    d.appendChild(r); d.appendChild(c); return d;
+  }
+  function tmRender(j){
+    const out=$('tmOut'); out.innerHTML='';
+    const head=document.createElement('div'); head.className='hint'; head.style.marginBottom='8px';
+    const u=j.usage||{};
+    head.innerHTML='<b>Team:</b> '+((j.team||[]).join(' → ')||'—')
+      +' &nbsp;·&nbsp; <b>Status:</b> '+esc(j.status||'')
+      +' &nbsp;·&nbsp; <b>Critic:</b> '+(j.approvedByCritic?'✓ approved':'—')+' (retries '+ (j.retries||0) +')'
+      +'<br><b>Budget:</b> '+(u.tokens||0)+' tok · $'+(u.costUsd||0).toFixed(4)+' · '+(u.elapsedMs||0)+'ms'
+      +(u.exceeded?' <span style="color:#f6a3a3;">— budget exceeded (paused)</span>':(u.nearLimit?' <span style="color:#ffd479;">— near budget (degrading)</span>':''));
+    out.appendChild(head);
+    (j.steps||[]).forEach(s=>out.appendChild(tmRenderStep(s)));
+    const fin=document.createElement('div'); fin.className='agfinal';
+    const fr=document.createElement('div'); fr.className='agrole'; fr.textContent='ANSWER';
+    const fc=document.createElement('div'); fc.className='agc'; fc.textContent=j.answer||'';
+    fin.appendChild(fr); fin.appendChild(fc); out.appendChild(fin);
+    if((j.scratchpad||{}).human){ const h=document.createElement('div'); h.className='hint'; h.style.marginTop='6px';
+      h.textContent='Human guidance applied: '+j.scratchpad.human; out.appendChild(h); }
+  }
+  async function tmStart(){
+    const task=$('tmTask').value.trim(); if(!task) return;
+    const body={task,maxTokens:parseInt($('tmTokens').value||'0',10)||0,maxCostUsd:parseFloat($('tmCost').value||'0')||0,maxMillis:parseInt($('tmMillis').value||'0',10)||0};
+    $('tmMsg').textContent='Composing team & running…'; $('tmMsg').style.color='var(--dim)';
+    $('tmOut').innerHTML='';
+    try{
+      const j=await (await fetch('/agents/team/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+      tmRunId=j.runId; $('tmRedirect').style.display='flex';
+      if(tmPoll) clearInterval(tmPoll);
+      tmPoll=setInterval(tmTick, 500); tmTick();
+    }catch(e){ $('tmMsg').textContent='✗ '+e.message; $('tmMsg').style.color='#f6a3a3'; }
+  }
+  async function tmTick(){
+    if(!tmRunId) return;
+    try{
+      const r=await fetch('/agents/team/status?id='+encodeURIComponent(tmRunId));
+      if(!r.ok) return; const j=await r.json(); tmRender(j);
+      if(j.status==='done' || (j.status||'').startsWith('paused')){
+        clearInterval(tmPoll); tmPoll=null;
+        $('tmMsg').textContent=(j.status==='done'?'✓ complete':'⏸ '+j.status); $('tmMsg').style.color=j.status==='done'?'#8ef0b4':'#ffd479';
+        $('tmRedirect').style.display='none';
+      } else { $('tmMsg').textContent='Running… ('+((j.team||[]).join('→'))+')'; }
+    }catch(e){}
+  }
+  async function tmSend(){
+    const fb=$('tmFeedback').value.trim(); if(!fb||!tmRunId) return;
+    await fetch('/agents/team/redirect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:tmRunId,feedback:fb})});
+    $('tmFeedback').value=''; $('tmMsg').textContent='↪ redirect sent — applied at next checkpoint';
+  }
+  $('tmStart').addEventListener('click',tmStart);
+  $('tmSend').addEventListener('click',tmSend);
 
   // ---- System Monitor page (full telemetry gauges) ----
   function setGauge(gid,vid,pct){

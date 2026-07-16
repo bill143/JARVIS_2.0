@@ -109,6 +109,25 @@ public final class WebServer {
         GatedLaneService gatedLane = governance == null ? null : governance.gatedLane();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
+        // The re-architected agent team (dynamic, specialized, parallel, self-correcting). Built once
+        // per server so human-in-the-loop runs persist across status/redirect requests. Each role turn
+        // runs through the governed api; the scratchpad is grounded on the unified semantic store.
+        final SemanticMemoryService semanticForTeam = semantic;
+        AgentTeamService agentTeam = new AgentTeamService(
+                (role, prompt) -> api.chat(new com.jarvis.api.ChatRequest("agents",
+                        role.system() + "\n\n" + prompt)).response(),
+                auditLog,
+                task -> {
+                    if (semanticForTeam == null) {
+                        return java.util.List.of();
+                    }
+                    java.util.List<String> notes = new java.util.ArrayList<>();
+                    for (com.jarvis.rag.ScoredDocument s : semanticForTeam.recall(task, 4)) {
+                        notes.add(SemanticMemoryService.titleOf(s.document()) + ": "
+                                + s.document().content());
+                    }
+                    return notes;
+                });
         byte[] page = loadDashboard();
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.setExecutor(Executors.newFixedThreadPool(4));
@@ -550,6 +569,90 @@ public final class WebServer {
                 mo.put("role", m.role().name());
                 mo.put("content", m.content());
             }
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- Re-architected agent team: dynamic / specialized / parallel / self-correcting ----
+        // Synchronous run (compose → execute → self-correct) with a resource budget.
+        server.createContext("/agents/team/run", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String task;
+            AgentTeamService.Budget budget;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                task = j.path("task").asText("").strip();
+                budget = new AgentTeamService.Budget(j.path("maxTokens").asLong(0),
+                        j.path("maxCostUsd").asDouble(0), j.path("maxMillis").asLong(0));
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (task.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty task".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            respond(exchange, 200, "application/json",
+                    teamJson(agentTeam.run(task, budget)).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Start a run in the background (for human-in-the-loop) → returns a run id.
+        server.createContext("/agents/team/start", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String task;
+            AgentTeamService.Budget budget;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                task = j.path("task").asText("").strip();
+                budget = new AgentTeamService.Budget(j.path("maxTokens").asLong(0),
+                        j.path("maxCostUsd").asDouble(0), j.path("maxMillis").asLong(0));
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (task.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty task".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("runId", agentTeam.start(task, budget));
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Live status of a background run.
+        server.createContext("/agents/team/status", exchange -> {
+            AgentTeamService.TeamResult r = agentTeam.status(param(exchange, "id", ""));
+            if (r == null) {
+                respond(exchange, 404, "text/plain", "no such run".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            respond(exchange, 200, "application/json",
+                    teamJson(r).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Human-in-the-loop: inject feedback / redirect a running team.
+        server.createContext("/agents/team/redirect", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String id;
+            String feedback;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                id = j.path("id").asText("");
+                feedback = j.path("feedback").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("ok", agentTeam.redirect(id, feedback));
             respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
@@ -1729,6 +1832,39 @@ public final class WebServer {
     }
 
     /** Serializes one model's contribution to an orchestration run (for the trace tree). */
+    /** Serializes an agent-team run: composition, per-role trace, budget usage, and scratchpad. */
+    private static ObjectNode teamJson(AgentTeamService.TeamResult r) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("task", r.task());
+        o.put("answer", r.answer());
+        o.put("status", r.status());
+        o.put("approvedByCritic", r.approvedByCritic());
+        o.put("retries", r.retries());
+        ArrayNode team = o.putArray("team");
+        r.team().forEach(team::add);
+        ArrayNode steps = o.putArray("steps");
+        for (AgentTeamService.AgentStep s : r.steps()) {
+            ObjectNode so = steps.addObject();
+            so.put("role", s.role());
+            so.put("phase", s.phase());
+            so.put("ok", s.ok());
+            so.put("latencyMs", s.latencyMs());
+            so.put("error", s.error());
+            String t = s.output() == null ? "" : s.output();
+            so.put("snippet", t.length() > 240 ? t.substring(0, 240) + "…" : t);
+        }
+        AgentTeamService.Usage u = r.usage();
+        ObjectNode usage = o.putObject("usage");
+        usage.put("tokens", u.tokens());
+        usage.put("costUsd", u.costUsd());
+        usage.put("elapsedMs", u.elapsedMs());
+        usage.put("nearLimit", u.nearLimit());
+        usage.put("exceeded", u.exceeded());
+        ObjectNode pad = o.putObject("scratchpad");
+        r.scratchpad().forEach(pad::put);
+        return o;
+    }
+
     private static ObjectNode modelResultJson(OrchestrationService.ModelResult m) {
         ObjectNode o = MAPPER.createObjectNode();
         o.put("provider", m.provider());
