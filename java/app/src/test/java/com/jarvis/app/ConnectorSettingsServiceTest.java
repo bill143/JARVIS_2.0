@@ -71,10 +71,28 @@ class ConnectorSettingsServiceTest {
     }
 
     @Test
-    void catalogCoversAllSevenConnectors() {
+    void catalogCoversAllEightConnectors() {
         assertEquals(
-                java.util.Set.of("obsidian", "samgov", "github", "openhuman",
+                java.util.Set.of("obsidian", "samgov", "github", "openhuman", "routing",
                         "embeddings", "gdrive", "onedrive"),
                 ConnectorSettingsService.CONNECTORS.keySet());
+    }
+
+    @Test
+    void openHumanCatalogNowIncludesTheEnabledFlag() {
+        List<ConnectorSettingsService.FieldSpec> fields = ConnectorSettingsService.CONNECTORS.get("openhuman");
+        assertTrue(fields.stream().anyMatch(f -> f.key().equals("openhuman.enabled")
+                && f.env().equals("JARVIS_OPENHUMAN_ENABLED") && !f.secret()));
+    }
+
+    @Test
+    void routingCatalogCoversAllRoutingKeys() {
+        List<ConnectorSettingsService.FieldSpec> fields = ConnectorSettingsService.CONNECTORS.get("routing");
+        java.util.Set<String> envs = fields.stream().map(ConnectorSettingsService.FieldSpec::env)
+                .collect(java.util.stream.Collectors.toSet());
+        assertEquals(java.util.Set.of("JARVIS_ROUTING_FAILOVER_ENABLED", "JARVIS_ROUTING_TIMEOUT_MS",
+                "JARVIS_ROUTING_MAX_RETRIES", "JARVIS_ROUTING_BREAKER_FAIL_THRESHOLD",
+                "JARVIS_ROUTING_BREAKER_WINDOW_SEC", "JARVIS_ROUTING_BREAKER_COOLDOWN_SEC"), envs);
+        assertTrue(fields.stream().noneMatch(ConnectorSettingsService.FieldSpec::secret));
     }
 }

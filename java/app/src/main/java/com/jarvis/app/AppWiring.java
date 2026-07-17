@@ -126,19 +126,6 @@ final class AppWiring {
         plugins.install(new com.jarvis.integrations.github.GitHubPlugin(
                 com.jarvis.integrations.github.HttpGitHubTransport.resolving(
                         connectors.supplier("github.token", "JARVIS_GITHUB_TOKEN"))));
-        // OpenHuman advisor (read-only). Dormant until 'openhuman-core serve' is running and
-        // JARVIS_OPENHUMAN_URL + OPENHUMAN_CORE_TOKEN are set. Arm's-length HTTP only (GPL-safe).
-        com.jarvis.integrations.openhuman.OpenHumanClient openhuman =
-                new com.jarvis.integrations.openhuman.OpenHumanClient(
-                        com.jarvis.integrations.openhuman.HttpOpenHumanTransport.resolving(
-                                connectors.supplier("openhuman.url", "JARVIS_OPENHUMAN_URL"),
-                                () -> {
-                                    String t = connectors.resolve("openhuman.token",
-                                            "OPENHUMAN_CORE_TOKEN");
-                                    return t != null ? t : System.getenv("JARVIS_OPENHUMAN_TOKEN");
-                                }));
-        plugins.install(new com.jarvis.integrations.openhuman.OpenHumanPlugin(openhuman));
-
         GoogleAuth google = googleAuth(memory);
         boolean googleConnected = google != null && google.isConnected();
         com.jarvis.integrations.google.GoogleWorkspaceService googleService = null;
@@ -165,6 +152,30 @@ final class AppWiring {
                 Path.of(System.getProperty("user.home"), ".jarvis", "audit")));
         PermissionPolicy permissionPolicy = new PermissionPolicy();   // prompt on destructive
         PermissionBroker permissions = new PermissionBroker();
+
+        // OpenHuman advisor (Tier 1, read-only) + Tier-2 delegated/failover target. Dormant until
+        // 'openhuman-core serve' is running and JARVIS_OPENHUMAN_URL + OPENHUMAN_CORE_TOKEN are set.
+        // Arm's-length HTTP only (GPL-safe). memory_doc_put writes are gated default-deny by
+        // OpenHumanWriteGate — see its Javadoc for why OpenHuman's own write path can't be trusted
+        // alone. Built here (after auditLog exists) so the gate can audit its decisions.
+        OpenHumanWriteGate openHumanWriteGate = new OpenHumanWriteGate(memory, auditLog);
+        com.jarvis.integrations.openhuman.OpenHumanClient openhuman =
+                new com.jarvis.integrations.openhuman.OpenHumanClient(
+                        com.jarvis.integrations.openhuman.HttpOpenHumanTransport.resolving(
+                                connectors.supplier("openhuman.url", "JARVIS_OPENHUMAN_URL"),
+                                () -> {
+                                    String t = connectors.resolve("openhuman.token",
+                                            "OPENHUMAN_CORE_TOKEN");
+                                    return t != null ? t : System.getenv("JARVIS_OPENHUMAN_TOKEN");
+                                }),
+                        com.jarvis.integrations.openhuman.OpenHumanClient.DEFAULT_MEMORY_SEARCH_METHOD,
+                        com.jarvis.integrations.openhuman.OpenHumanClient.DEFAULT_CONSULT_METHOD,
+                        com.jarvis.integrations.openhuman.OpenHumanClient.DEFAULT_MEMORY_WRITE_METHOD,
+                        openHumanWriteGate);
+        plugins.install(new com.jarvis.integrations.openhuman.OpenHumanPlugin(openhuman));
+        // Tier-2 routing configuration (OPENHUMAN_ENABLED / ROUTING_*), resolved live through the
+        // same connectors catalog — see ConnectorSettingsService's "openhuman"/"routing" entries.
+        RoutingSettings routingSettings = new RoutingSettings(connectors);
 
         // Solicitations Command Center. Sources + document connectors are dormant-by-default (env
         // gated); the AI tools register here (before governance wraps the registry) so they are
@@ -239,8 +250,10 @@ final class AppWiring {
                         .filter(m -> !m.isBlank()).orElse(model));
 
         // Local-first multi-model orchestration (ensemble + hierarchy) over the configured providers.
-        OrchestrationService orchestration =
-                new OrchestrationService(providerSettings, auditLog, effectiveModel);
+        // Tier-2 routing/failover to OpenHuman is wired in but stays inert (byte-for-byte the prior
+        // behavior) unless JARVIS_OPENHUMAN_ENABLED is set — see OrchestrationService#callOne.
+        OrchestrationService orchestration = new OrchestrationService(providerSettings, auditLog,
+                effectiveModel, OrchestrationService::build, routingSettings, openhuman);
 
         // Policy-gated self-hosted lane (off by default, default-deny, audited). Responsible analogue
         // of the Hermes "Shadow CEO": local-only, absolute harm denylist, allowlist-scoped.

@@ -6,8 +6,9 @@ import java.util.function.Function;
 
 /**
  * Durable, in-app configuration for the external connectors (Brain/Obsidian, SAM.gov, GitHub,
- * OpenHuman, embeddings, Google Drive, OneDrive). Values are persisted to the {@link MemoryStore}
- * under the {@code connectors} scope so they survive a restart, and they are resolved <b>live</b>:
+ * OpenHuman, Tier-2 routing, embeddings, Google Drive, OneDrive). Values are persisted to the
+ * {@link MemoryStore} under the {@code connectors} scope so they survive a restart, and they are
+ * resolved <b>live</b>:
  * {@link #resolve} returns the saved value when present, otherwise falls back to the process
  * environment variable. Because the transports read through a {@link java.util.function.Supplier}
  * backed by {@link #resolve}, saving a value through the UI takes effect on the next request with
@@ -39,7 +40,15 @@ final class ConnectorSettingsService {
                 new FieldSpec("github.token", "JARVIS_GITHUB_TOKEN", true)));
         m.put("openhuman", List.of(
                 new FieldSpec("openhuman.url", "JARVIS_OPENHUMAN_URL", false),
-                new FieldSpec("openhuman.token", "OPENHUMAN_CORE_TOKEN", true)));
+                new FieldSpec("openhuman.token", "OPENHUMAN_CORE_TOKEN", true),
+                new FieldSpec("openhuman.enabled", "JARVIS_OPENHUMAN_ENABLED", false)));
+        m.put("routing", List.of(
+                new FieldSpec("routing.failoverEnabled", "JARVIS_ROUTING_FAILOVER_ENABLED", false),
+                new FieldSpec("routing.timeoutMs", "JARVIS_ROUTING_TIMEOUT_MS", false),
+                new FieldSpec("routing.maxRetries", "JARVIS_ROUTING_MAX_RETRIES", false),
+                new FieldSpec("routing.breakerFailThreshold", "JARVIS_ROUTING_BREAKER_FAIL_THRESHOLD", false),
+                new FieldSpec("routing.breakerWindowSec", "JARVIS_ROUTING_BREAKER_WINDOW_SEC", false),
+                new FieldSpec("routing.breakerCooldownSec", "JARVIS_ROUTING_BREAKER_COOLDOWN_SEC", false)));
         m.put("embeddings", List.of(
                 new FieldSpec("embeddings.key", "JARVIS_EMBEDDINGS_KEY", true),
                 new FieldSpec("embeddings.endpoint", "JARVIS_EMBEDDINGS_ENDPOINT", false),

@@ -4,8 +4,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.jarvis.audit.AuditEntry;
+import com.jarvis.audit.AuditLog;
+import com.jarvis.audit.RecordStoreAuditLog;
 import com.jarvis.integrations.llm.LlmProvider;
+import com.jarvis.integrations.openhuman.OpenHumanClient;
+import com.jarvis.integrations.openhuman.OpenHumanResponse;
+import com.jarvis.integrations.openhuman.OpenHumanTransport;
+import com.jarvis.memory.InMemoryRecordStore;
 import com.jarvis.memory.InMemoryStore;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
@@ -128,5 +138,132 @@ class OrchestrationServiceTest {
         OrchestrationService.HierarchyResult r = o.hierarchy("do a thing");
         assertFalse(r.answer().isBlank());
         assertTrue(r.plan().get(0).toLowerCase().contains("no conductor"));
+    }
+
+    // ---- Stage 4: Tier-2 routing wired into the callOne hot path -----------------------------
+
+    private static RoutingSettings routingSettings(Map<String, String> env) {
+        return new RoutingSettings(new ConnectorSettingsService(new InMemoryStore<>(), env::get));
+    }
+
+    /** A real {@link OpenHumanClient} backed by a scripted fake transport (no network). */
+    private static OpenHumanClient openHumanClient(String replyText, AtomicInteger callCounter) {
+        OpenHumanTransport transport = (method, path, body) -> {
+            if (callCounter != null && "/rpc".equals(path)) {
+                callCounter.incrementAndGet();
+            }
+            if ("/health".equals(path)) {
+                return new OpenHumanResponse(200, "{}");
+            }
+            return new OpenHumanResponse(200, "{\"result\":{\"result\":\"" + replyText + "\"}}");
+        };
+        return new OpenHumanClient(transport);
+    }
+
+    private static Function<ProviderSettingsService.Active, LlmProvider> alwaysThrows(
+            String message, AtomicInteger callCounter) {
+        return a -> req -> {
+            if (callCounter != null) {
+                callCounter.incrementAndGet();
+            }
+            throw new RuntimeException(message);
+        };
+    }
+
+    @Test
+    void routingIsInertByDefaultAndNeverCallsOpenHuman() {
+        ProviderSettingsService p = providersWith("A=worker");
+        AtomicInteger openHumanCalls = new AtomicInteger();
+        RoutingSettings routing = routingSettings(Map.of()); // JARVIS_OPENHUMAN_ENABLED unset -> false
+        OpenHumanClient openHuman = openHumanClient("should never be used", openHumanCalls);
+        OrchestrationService o = new OrchestrationService(p, null, "m",
+                alwaysThrows("HTTP 429 too many requests", null), routing, openHuman);
+
+        OrchestrationService.EnsembleResult r = o.ensemble("q", "best", null);
+
+        assertTrue(r.results().stream().noneMatch(OrchestrationService.ModelResult::ok));
+        assertEquals(0, openHumanCalls.get());
+    }
+
+    @Test
+    void routingFailsOverToOpenHumanWhenThePrimaryIsRateLimited() {
+        ProviderSettingsService p = providersWith("A=worker");
+        RoutingSettings routing = routingSettings(Map.of(
+                "JARVIS_OPENHUMAN_ENABLED", "true",
+                "JARVIS_ROUTING_FAILOVER_ENABLED", "true",
+                "JARVIS_ROUTING_MAX_RETRIES", "1"));
+        OpenHumanClient openHuman = openHumanClient("openhuman saved the day", null);
+        OrchestrationService o = new OrchestrationService(p, null, "m",
+                alwaysThrows("HTTP 429 too many requests", null), routing, openHuman);
+
+        OrchestrationService.EnsembleResult r = o.ensemble("q", "best", null);
+
+        assertTrue(r.answer().contains("openhuman saved the day"));
+    }
+
+    @Test
+    void routingHonorsFailoverDisabledEvenWhenOpenHumanEnabled() {
+        ProviderSettingsService p = providersWith("A=worker");
+        AtomicInteger openHumanCalls = new AtomicInteger();
+        RoutingSettings routing = routingSettings(Map.of(
+                "JARVIS_OPENHUMAN_ENABLED", "true",
+                "JARVIS_ROUTING_FAILOVER_ENABLED", "false"));
+        OpenHumanClient openHuman = openHumanClient("should never be used", openHumanCalls);
+        OrchestrationService o = new OrchestrationService(p, null, "m",
+                alwaysThrows("HTTP 429 too many requests", null), routing, openHuman);
+
+        OrchestrationService.EnsembleResult r = o.ensemble("q", "best", null);
+
+        assertTrue(r.results().stream().noneMatch(OrchestrationService.ModelResult::ok));
+        assertEquals(0, openHumanCalls.get());
+    }
+
+    @Test
+    void routingEmitsARouteDecisionAuditEventWithoutLeakingThePrompt() {
+        ProviderSettingsService p = providersWith("A=worker");
+        RoutingSettings routing = routingSettings(Map.of(
+                "JARVIS_OPENHUMAN_ENABLED", "true",
+                "JARVIS_ROUTING_FAILOVER_ENABLED", "true",
+                "JARVIS_ROUTING_MAX_RETRIES", "1"));
+        OpenHumanClient openHuman = openHumanClient("fallback reply", null);
+        AuditLog audit = new RecordStoreAuditLog(new InMemoryRecordStore());
+        OrchestrationService o = new OrchestrationService(p, audit, "m",
+                alwaysThrows("HTTP 429 too many requests", null), routing, openHuman);
+
+        o.ensemble("super secret prompt text", "best", null);
+
+        List<AuditEntry> routeEvents = audit.recent(50).stream()
+                .filter(e -> e.event().action().equals("route_decision")).toList();
+        assertFalse(routeEvents.isEmpty());
+        String detail = routeEvents.get(0).event().detail();
+        assertTrue(detail.contains("tier=TIER2_OPENHUMAN"));
+        assertTrue(detail.contains("reason=PRIMARY_RATE_LIMITED"));
+        assertTrue(detail.contains("corr="));
+        assertFalse(detail.contains("super secret prompt text")); // no user payload in the audit log
+        assertFalse(detail.toLowerCase().contains("bearer"));     // no credentials either
+    }
+
+    @Test
+    void circuitBreakerOnThePrimaryFailsFastButStillFailsOverToOpenHuman() {
+        ProviderSettingsService p = providersWith("A=worker");
+        RoutingSettings routing = routingSettings(Map.of(
+                "JARVIS_OPENHUMAN_ENABLED", "true",
+                "JARVIS_ROUTING_FAILOVER_ENABLED", "true",
+                "JARVIS_ROUTING_MAX_RETRIES", "1",
+                "JARVIS_ROUTING_BREAKER_FAIL_THRESHOLD", "2",
+                "JARVIS_ROUTING_BREAKER_WINDOW_SEC", "60",
+                "JARVIS_ROUTING_BREAKER_COOLDOWN_SEC", "30"));
+        AtomicInteger primaryCalls = new AtomicInteger();
+        OpenHumanClient openHuman = openHumanClient("fallback reply", null);
+        OrchestrationService o = new OrchestrationService(p, null, "m",
+                alwaysThrows("HTTP 500 boom", primaryCalls), routing, openHuman);
+
+        o.ensemble("q1", "best", null);
+        o.ensemble("q2", "best", null); // 2 consecutive failures crosses the threshold=2 -> breaker OPENs
+        assertEquals(2, primaryCalls.get());
+
+        OrchestrationService.EnsembleResult third = o.ensemble("q3", "best", null);
+        assertEquals(2, primaryCalls.get()); // breaker short-circuited the primary — no 3rd call
+        assertTrue(third.answer().contains("fallback reply")); // still failed over to OpenHuman
     }
 }

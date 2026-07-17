@@ -9,14 +9,25 @@ import com.jarvis.integrations.llm.AnthropicPolicy;
 import com.jarvis.integrations.llm.AnthropicProvider;
 import com.jarvis.integrations.llm.LlmProvider;
 import com.jarvis.integrations.llm.OpenAiCompatibleProvider;
+import com.jarvis.integrations.openhuman.OpenHumanClient;
+import com.jarvis.integrations.openhuman.routing.AgentRoleRouteConfig;
+import com.jarvis.integrations.openhuman.routing.FallbackRoute;
+import com.jarvis.integrations.openhuman.routing.RouteDecision;
+import com.jarvis.integrations.openhuman.routing.RouteSelector;
+import com.jarvis.integrations.openhuman.routing.RouteTier;
 import com.jarvis.tools.RiskTier;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
 /**
@@ -51,21 +62,50 @@ final class OrchestrationService {
     record HierarchyResult(String prompt, List<String> plan, String answer, List<ModelResult> steps) {
     }
 
+    /** The Tier-2 route target id used for the OpenHuman fallback candidate. */
+    private static final String OPENHUMAN_TARGET_ID = "openhuman";
+
     private final ProviderSettingsService providers;
     private final AuditLog audit;                       // nullable
     private final Function<ProviderSettingsService.Active, LlmProvider> providerFactory;
     private final String defaultModel;
+    private final RoutingSettings routingSettings;       // nullable — null means routing is inert
+    private final OpenHumanClient openHuman;             // nullable — null means no Tier-2 target
+    private final RouteSelector routeSelector;           // nullable — built once routingSettings is set
 
     OrchestrationService(ProviderSettingsService providers, AuditLog audit, String defaultModel) {
-        this(providers, audit, defaultModel, OrchestrationService::build);
+        this(providers, audit, defaultModel, OrchestrationService::build, null, null);
     }
 
     OrchestrationService(ProviderSettingsService providers, AuditLog audit, String defaultModel,
             Function<ProviderSettingsService.Active, LlmProvider> providerFactory) {
+        this(providers, audit, defaultModel, providerFactory, null, null);
+    }
+
+    /**
+     * Full constructor adding Tier-2 routing/failover. {@code routingSettings} and {@code openHuman}
+     * may both be {@code null} to leave routing entirely inert — byte-for-byte the pre-Tier-2
+     * behavior, which is exactly what the two convenience constructors above do (every existing
+     * caller/test is unaffected). When both are supplied, routing only actually engages per call
+     * once {@link RoutingSettings.Snapshot#openHumanEnabled()} reads {@code true} at that moment;
+     * circuit breaker thresholds are captured once, from the snapshot at construction time.
+     */
+    OrchestrationService(ProviderSettingsService providers, AuditLog audit, String defaultModel,
+            Function<ProviderSettingsService.Active, LlmProvider> providerFactory,
+            RoutingSettings routingSettings, OpenHumanClient openHuman) {
         this.providers = providers;
         this.audit = audit;
         this.defaultModel = defaultModel == null || defaultModel.isBlank() ? "model" : defaultModel;
         this.providerFactory = providerFactory;
+        this.routingSettings = routingSettings;
+        this.openHuman = openHuman;
+        this.routeSelector = routingSettings == null
+                ? null : new RouteSelector(breakerConfig(routingSettings.snapshot()));
+    }
+
+    private static RouteSelector.BreakerConfig breakerConfig(RoutingSettings.Snapshot snap) {
+        return new RouteSelector.BreakerConfig(
+                snap.breakerFailThreshold(), snap.breakerWindowSec(), snap.breakerCooldownSec());
     }
 
     /** Builds the real LLM provider for a configured entry (openai-compatible or native Anthropic). */
@@ -264,7 +304,25 @@ final class OrchestrationService {
         return results;
     }
 
+    /**
+     * The single model-invocation point — shared by {@link #runConcurrently} and {@link #hierarchy}.
+     * Tier-2 routing is intercepted here, immediately before the Tier-1 call: when a
+     * {@link RouteSelector} is wired AND {@link RoutingSettings.Snapshot#openHumanEnabled()} reads
+     * {@code true} at this moment, the call goes through {@link #callOneRouted}; otherwise it takes
+     * the exact original path via {@link #callOnePrimary}, so the {@code JARVIS_OPENHUMAN_ENABLED=
+     * false} (default) behavior is byte-for-byte unchanged from before Tier-2 existed.
+     */
     ModelResult callOne(ProviderSettingsService.Active a, String system, String prompt,
+            int maxTokens, String stage) {
+        if (routeSelector != null && routingSettings != null
+                && routingSettings.snapshot().openHumanEnabled()) {
+            return callOneRouted(a, system, prompt, maxTokens, stage);
+        }
+        return callOnePrimary(a, system, prompt, maxTokens, stage);
+    }
+
+    /** The pre-Tier-2 call path, unchanged — the legacy baseline the flag-off tests pin down. */
+    private ModelResult callOnePrimary(ProviderSettingsService.Active a, String system, String prompt,
             int maxTokens, String stage) {
         String model = a.model() == null || a.model().isBlank() ? defaultModel : a.model();
         String role = providers.roleOf(a.name());
@@ -283,6 +341,155 @@ final class OrchestrationService {
                     AuditOutcome.FAILURE);
             return new ModelResult(a.name(), model, role, stage, false, "", ms, msg);
         }
+    }
+
+    /**
+     * Builds a Tier-1(primary)+Tier-2(OpenHuman) route for {@code a}'s role, runs it through
+     * {@link #routeSelector}, and emits one {@code route_decision} audit event covering the whole
+     * decision. The OpenHuman fallback is only included when failover is enabled, at least one retry
+     * is configured, and the client reports itself reachable/configured.
+     */
+    private ModelResult callOneRouted(ProviderSettingsService.Active a, String system, String prompt,
+            int maxTokens, String stage) {
+        RoutingSettings.Snapshot snap = routingSettings.snapshot();
+        String role = providers.roleOf(a.name());
+        List<FallbackRoute> chain = new ArrayList<>();
+        chain.add(new FallbackRoute(0, a.name(), RouteTier.TIER1_PRIMARY));
+        boolean includeFallback = snap.failoverEnabled() && snap.maxRetries() >= 1
+                && openHuman != null && openHuman.available();
+        if (includeFallback) {
+            chain.add(new FallbackRoute(1, OPENHUMAN_TARGET_ID, RouteTier.TIER2_OPENHUMAN));
+        }
+        AgentRoleRouteConfig routeConfig = new AgentRoleRouteConfig(
+                role.isBlank() ? "unassigned" : role, snap.failoverEnabled(), chain,
+                snap.timeoutMs(), snap.maxRetries());
+
+        // RouteSelector only returns routing metadata — this map carries the actual ModelResult
+        // (text/latency/error) each attempted candidate produced, keyed by target id.
+        Map<String, ModelResult> attempted = new ConcurrentHashMap<>();
+        RouteSelector.RouteExecutor executor = (targetId, tier) -> {
+            ModelResult r = tier == RouteTier.TIER2_OPENHUMAN
+                    ? callOpenHuman(system, prompt, snap.timeoutMs())
+                    : callOnePrimaryBounded(a, system, prompt, maxTokens, stage, snap.timeoutMs());
+            attempted.put(targetId, r);
+            return r.ok() ? RouteSelector.AttemptOutcome.ok(r.latencyMs())
+                    : RouteSelector.AttemptOutcome.failed(classify(r.error()), r.latencyMs());
+        };
+
+        String correlationId = UUID.randomUUID().toString().substring(0, 8);
+        RouteDecision decision = routeSelector.select(routeConfig, executor);
+        recordRoutingDecision(decision, correlationId);
+
+        ModelResult chosen = attempted.get(decision.selectedTarget());
+        if (chosen != null) {
+            return chosen;
+        }
+        // Nothing was actually attempted for the selected target (e.g. NO_ROUTE_CONFIGURED, or the
+        // sole candidate's breaker was OPEN) — synthesize a failure result carrying the reason.
+        String model = a.model() == null || a.model().isBlank() ? defaultModel : a.model();
+        return new ModelResult(a.name(), model, role, stage, false, "",
+                Math.max(decision.latencyMs(), 0), "routing: " + decision.reasonCode());
+    }
+
+    /** {@link #callOnePrimary}, but bounded by {@code timeoutMs} and mapping a timeout explicitly. */
+    private ModelResult callOnePrimaryBounded(ProviderSettingsService.Active a, String system,
+            String prompt, int maxTokens, String stage, int timeoutMs) {
+        String model = a.model() == null || a.model().isBlank() ? defaultModel : a.model();
+        String role = providers.roleOf(a.name());
+        long t0 = System.nanoTime();
+        try {
+            LlmProvider prov = providerFactory.apply(a);
+            LlmProvider.Result r = runWithTimeout(() -> prov.complete(new LlmProvider.Request(model,
+                    system, List.of(new LlmProvider.Message("user", prompt)), maxTokens)), timeoutMs);
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            record("orchestrate_call", a.name() + "/" + model + " (" + stage + ")", AuditOutcome.SUCCESS);
+            return new ModelResult(a.name(), model, role, stage, true, r.text().strip(), ms, "");
+        } catch (TimeoutException te) {
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            record("orchestrate_call", a.name() + "/" + model + " failed (" + stage + ")",
+                    AuditOutcome.FAILURE);
+            return new ModelResult(a.name(), model, role, stage, false, "", ms,
+                    "timeout after " + timeoutMs + "ms");
+        } catch (Exception e) {
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+            record("orchestrate_call", a.name() + "/" + model + " failed (" + stage + ")",
+                    AuditOutcome.FAILURE);
+            return new ModelResult(a.name(), model, role, stage, false, "", ms, msg);
+        }
+    }
+
+    /** Consults OpenHuman as the Tier-2 target, bounded by {@code timeoutMs}. */
+    private ModelResult callOpenHuman(String system, String prompt, int timeoutMs) {
+        long t0 = System.nanoTime();
+        try {
+            String reply = runWithTimeout(() -> openHuman.consult(prompt, system), timeoutMs);
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            record("orchestrate_call", OPENHUMAN_TARGET_ID + " (consult)", AuditOutcome.SUCCESS);
+            return new ModelResult(OPENHUMAN_TARGET_ID, OPENHUMAN_TARGET_ID, "", "consult", true,
+                    reply.strip(), ms, "");
+        } catch (TimeoutException te) {
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            record("orchestrate_call", OPENHUMAN_TARGET_ID + " failed (consult)", AuditOutcome.FAILURE);
+            return new ModelResult(OPENHUMAN_TARGET_ID, OPENHUMAN_TARGET_ID, "", "consult", false, "",
+                    ms, "timeout after " + timeoutMs + "ms");
+        } catch (Exception e) {
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+            record("orchestrate_call", OPENHUMAN_TARGET_ID + " failed (consult)", AuditOutcome.FAILURE);
+            return new ModelResult(OPENHUMAN_TARGET_ID, OPENHUMAN_TARGET_ID, "", "consult", false, "",
+                    ms, msg);
+        }
+    }
+
+    /** Runs {@code call} on a fresh virtual thread, bounded by {@code timeoutMs}. */
+    private static <T> T runWithTimeout(Callable<T> call, int timeoutMs) throws Exception {
+        try (ExecutorService ex = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<T> f = ex.submit(call);
+            try {
+                return f.get(timeoutMs, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException te) {
+                f.cancel(true);
+                throw te;
+            }
+        }
+    }
+
+    /** Maps a failure message to a {@link RouteSelector.FailureKind} by the signals it contains. */
+    private static RouteSelector.FailureKind classify(String message) {
+        if (message == null || message.isBlank()) {
+            return RouteSelector.FailureKind.OTHER;
+        }
+        String m = message.toLowerCase();
+        if (m.contains("timeout") || m.contains("timed out")) {
+            return RouteSelector.FailureKind.TIMEOUT;
+        }
+        if (m.contains("429")) {
+            return RouteSelector.FailureKind.RATE_LIMITED;
+        }
+        if (m.matches(".*\\b5\\d\\d\\b.*")) {
+            return RouteSelector.FailureKind.SERVER_ERROR;
+        }
+        if (m.contains("malformed") || m.contains("unexpected") || m.contains("parse")) {
+            return RouteSelector.FailureKind.MALFORMED_RESPONSE;
+        }
+        return RouteSelector.FailureKind.OTHER;
+    }
+
+    /**
+     * Emits one audit event per routing decision: role, tier, target, reason code, latency, and a
+     * correlation id — never the prompt/response text or any credential, so nothing sensitive
+     * reaches the log by construction.
+     */
+    private void recordRoutingDecision(RouteDecision d, String correlationId) {
+        if (audit == null) {
+            return;
+        }
+        String detail = "role=" + d.role() + " tier=" + (d.selectedTier() == null ? "none" : d.selectedTier())
+                + " target=" + d.selectedTarget() + " reason=" + d.reasonCode()
+                + " latencyMs=" + d.latencyMs() + " corr=" + correlationId;
+        audit.record(new AuditEvent(AuditCategory.EXTERNAL_API, "route_decision", AuditTrigger.SYSTEM,
+                RiskTier.READ_ONLY, d.success() ? AuditOutcome.SUCCESS : AuditOutcome.FAILURE, detail));
     }
 
     /** Groups answers by normalized text and returns a representative of the largest group. */

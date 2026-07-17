@@ -35,8 +35,11 @@ final class GatedLaneService {
     static final String SCOPE = "gatedlane";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** Unconditional harm categories — always denied, regardless of the allowlist. */
-    private static final List<String> DENYLIST = List.of(
+    /**
+     * Unconditional harm categories — always denied, regardless of the allowlist. Package-visible
+     * so {@link OpenHumanWriteGate} can apply the same absolute denylist to memory-write requests.
+     */
+    static final List<String> DENYLIST = List.of(
             "weapon", "explosive", "bomb", "malware", "ransomware", "exploit code", "bioweapon",
             "chemical weapon", "child sexual", "csam", "assassinat", "untraceable", "counterfeit",
             "credit card number", "how to kill", "poison someone");
