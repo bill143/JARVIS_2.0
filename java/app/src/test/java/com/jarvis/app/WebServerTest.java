@@ -908,6 +908,66 @@ class WebServerTest {
         }
     }
 
+    @Test
+    void routingStatusAndTestEndpointsRunEndToEnd() throws Exception {
+        ProviderSettingsService providers = new ProviderSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), (b, k) -> java.util.List.of());
+        providers.save("Boss", "openai", "http://localhost:11434/v1", "k", "m", false);
+
+        RoutingSettings routing = new RoutingSettings(new ConnectorSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(),
+                java.util.Map.of("JARVIS_OPENHUMAN_ENABLED", "true",
+                        "JARVIS_ROUTING_FAILOVER_ENABLED", "true")::get));
+        com.jarvis.integrations.openhuman.OpenHumanTransport transport = (method, path, body) ->
+                new com.jarvis.integrations.openhuman.OpenHumanResponse(200, "{}");
+        com.jarvis.integrations.openhuman.OpenHumanClient openHuman =
+                new com.jarvis.integrations.openhuman.OpenHumanClient(transport);
+
+        java.util.function.Function<ProviderSettingsService.Active,
+                com.jarvis.integrations.llm.LlmProvider> factory =
+                a -> req -> new com.jarvis.integrations.llm.LlmProvider.Result("ok", 1, 1);
+        OrchestrationService orchestration =
+                new OrchestrationService(providers, null, "m", factory, routing, openHuman);
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, providers, null, null, null, null, null,
+                        orchestration, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+
+            // The engine reports itself wired, with the live settings (this session's env/config).
+            HttpResponse<String> status0 = get2(b + "/routing/status");
+            assertEquals(200, status0.statusCode());
+            assertTrue(status0.body().contains("\"wired\":true"));
+            assertTrue(status0.body().contains("\"openHumanEnabled\":true"));
+            assertTrue(status0.body().contains("\"openhuman\""));      // breaker entry always present
+            assertTrue(status0.body().contains("\"phase\":\"CLOSED\""));
+
+            // Test Route probes OpenHuman's real /health endpoint — no orchestration call involved.
+            HttpResponse<String> test = post2r(b + "/routing/test", "{}");
+            assertEquals(200, test.statusCode());
+            assertTrue(test.body().contains("\"configured\":true"));
+            assertTrue(test.body().contains("\"reachable\":true"));
+
+            // GET-only status; a GET on /routing/test is rejected (POST-only, matches /gatedlane/test).
+            assertEquals(405, client.send(HttpRequest.newBuilder(URI.create(b + "/routing/test")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).statusCode());
+
+            // A routed ensemble call succeeds via the Tier-1 primary and shows up in breaker health.
+            HttpResponse<String> ens = post2r(b + "/orchestrate",
+                    "{\"mode\":\"ensemble\",\"prompt\":\"hi\",\"fusion\":\"best\"}");
+            assertEquals(200, ens.statusCode());
+            HttpResponse<String> status1 = get2(b + "/routing/status");
+            assertTrue(status1.body().contains("\"Boss\""));
+        } finally {
+            wired.stop();
+        }
+    }
+
     private HttpResponse<String> get2(String url) throws Exception {
         return client.send(HttpRequest.newBuilder(URI.create(url)).GET().build(),
                 HttpResponse.BodyHandlers.ofString());

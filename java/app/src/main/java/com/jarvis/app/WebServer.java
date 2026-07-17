@@ -1197,6 +1197,50 @@ public final class WebServer {
             respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // ---- Tier-2 routing (OpenHuman failover): status/breaker health + a live "Test Route" probe ----
+        server.createContext("/routing/status", exchange -> {
+            if (orchestration == null) {
+                respond(exchange, 503, "text/plain",
+                        "orchestration unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            OrchestrationService.RoutingStatus s = orchestration.routingStatus();
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("wired", s.wired());
+            o.put("openHumanEnabled", s.openHumanEnabled());
+            o.put("failoverEnabled", s.failoverEnabled());
+            o.put("timeoutMs", s.timeoutMs());
+            o.put("maxRetries", s.maxRetries());
+            o.put("breakerFailThreshold", s.breakerFailThreshold());
+            o.put("breakerWindowSec", s.breakerWindowSec());
+            o.put("breakerCooldownSec", s.breakerCooldownSec());
+            ObjectNode breakers = o.putObject("breakers");
+            s.breakers().forEach((target, cb) -> {
+                ObjectNode b = breakers.putObject(target);
+                b.put("phase", cb.phase().name());
+                b.put("consecutiveFailures", cb.consecutiveFailures());
+                b.put("openedAt", cb.openedAt() == null ? "" : cb.openedAt().toString());
+                b.put("nextRetryAt", cb.nextRetryAt() == null ? "" : cb.nextRetryAt().toString());
+            });
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/routing/test", exchange -> {
+            if (orchestration == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, orchestration == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            OrchestrationService.RouteTestResult r = orchestration.testOpenHumanRoute();
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("configured", r.configured());
+            o.put("reachable", r.reachable());
+            o.put("degraded", r.degraded());
+            o.put("httpStatus", r.httpStatus());
+            o.put("message", r.message());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         // ---- Gated local lane (policy-gated, self-hosted, off by default) ----
         server.createContext("/gatedlane/test", exchange -> {
             if (gatedLane == null || !"POST".equals(exchange.getRequestMethod())) {

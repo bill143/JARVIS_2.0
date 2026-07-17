@@ -11,6 +11,7 @@ import com.jarvis.integrations.llm.LlmProvider;
 import com.jarvis.integrations.llm.OpenAiCompatibleProvider;
 import com.jarvis.integrations.openhuman.OpenHumanClient;
 import com.jarvis.integrations.openhuman.routing.AgentRoleRouteConfig;
+import com.jarvis.integrations.openhuman.routing.CircuitBreakerState;
 import com.jarvis.integrations.openhuman.routing.FallbackRoute;
 import com.jarvis.integrations.openhuman.routing.RouteDecision;
 import com.jarvis.integrations.openhuman.routing.RouteSelector;
@@ -18,6 +19,7 @@ import com.jarvis.integrations.openhuman.routing.RouteTier;
 import com.jarvis.tools.RiskTier;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -106,6 +108,58 @@ final class OrchestrationService {
     private static RouteSelector.BreakerConfig breakerConfig(RoutingSettings.Snapshot snap) {
         return new RouteSelector.BreakerConfig(
                 snap.breakerFailThreshold(), snap.breakerWindowSec(), snap.breakerCooldownSec());
+    }
+
+    /**
+     * A Tier-2 routing status snapshot for the UI: the effective settings plus each known target's
+     * current circuit breaker state. {@code wired=false} means routing was never constructed with
+     * {@link RoutingSettings} (the pre-Tier-2 constructors) — not the same as it being disabled.
+     * These settings are <b>global</b>, shared by every role — there is no separate breaker/timeout
+     * configuration per Conductor/Orchestrator/Worker.
+     */
+    record RoutingStatus(boolean wired, boolean openHumanEnabled, boolean failoverEnabled,
+            int timeoutMs, int maxRetries, int breakerFailThreshold, int breakerWindowSec,
+            int breakerCooldownSec, Map<String, CircuitBreakerState> breakers) {
+    }
+
+    /** The result of probing the OpenHuman Tier-2 target's real health endpoint (the "Test Route" action). */
+    record RouteTestResult(boolean configured, boolean reachable, boolean degraded, int httpStatus,
+            String message) {
+    }
+
+    /** Settings plus current breaker state for every configured Tier-1 provider and OpenHuman. */
+    RoutingStatus routingStatus() {
+        if (routingSettings == null || routeSelector == null) {
+            return new RoutingStatus(false, false, false, 0, 0, 0, 0, 0, Map.of());
+        }
+        RoutingSettings.Snapshot snap = routingSettings.snapshot();
+        Map<String, CircuitBreakerState> breakers = new LinkedHashMap<>();
+        for (ProviderSettingsService.Active a : providers.allConfigured()) {
+            breakers.put(a.name(), routeSelector.breakerState(a.name()));
+        }
+        if (openHuman != null) {
+            breakers.put(OPENHUMAN_TARGET_ID, routeSelector.breakerState(OPENHUMAN_TARGET_ID));
+        }
+        return new RoutingStatus(true, snap.openHumanEnabled(), snap.failoverEnabled(), snap.timeoutMs(),
+                snap.maxRetries(), snap.breakerFailThreshold(), snap.breakerWindowSec(),
+                snap.breakerCooldownSec(), breakers);
+    }
+
+    /** Probes OpenHuman's real {@code GET /health} — the "Test Route" button's backing action. */
+    RouteTestResult testOpenHumanRoute() {
+        if (openHuman == null || !openHuman.available()) {
+            return new RouteTestResult(false, false, false, 0, "OpenHuman is not configured");
+        }
+        try {
+            var status = openHuman.health();
+            String message = !status.reachable() ? "unreachable"
+                    : status.degraded() ? "reachable (degraded)" : "healthy";
+            return new RouteTestResult(true, status.reachable(), status.degraded(),
+                    status.httpStatus(), message);
+        } catch (Exception e) {
+            return new RouteTestResult(true, false, false, 0,
+                    e.getMessage() == null ? e.toString() : e.getMessage());
+        }
     }
 
     /** Builds the real LLM provider for a configured entry (openai-compatible or native Anthropic). */

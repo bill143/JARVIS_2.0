@@ -823,6 +823,14 @@
       <div style="margin:4px 2px;"><button class="hbtn" id="gl_testbtn" type="button">Check gate decision</button>
         <span id="gl_msg" style="margin-left:10px;font-size:12.5px;"></span></div>
     </div>
+    <div class="pcard">
+      <h4>🧭 Tier-2 routing (OpenHuman failover) <span class="hint" style="text-transform:none;letter-spacing:0;">(advanced)</span></h4>
+      <div class="hint" style="margin-bottom:8px;">When enabled (see <b>openhuman.enabled</b> in the OpenHuman connector card above), every model call tries its assigned Tier-1 provider first; on a timeout, HTTP 429, HTTP 5xx, or malformed response it fails over to OpenHuman as a Tier-2 delegate, gated by a circuit breaker per target. <b>Off by default.</b> Timeout / retry / breaker limits are set via the <b>routing</b> connector card above and are <b>global</b> — shared by every role (Conductor/Orchestrator/Worker), not configured per role.</div>
+      <div style="margin:4px 2px;"><button class="hbtn" id="rt_testbtn" type="button">Test OpenHuman route</button>
+        <button class="hbtn" id="rt_refresh" type="button" style="margin-left:6px;">Refresh breaker health</button>
+        <span id="rt_msg" style="margin-left:10px;font-size:12.5px;"></span></div>
+      <div id="rt_breakers" class="hint" style="margin-top:8px;">Loading…</div>
+    </div>
   </div>
 </div>
 <div class="page cpage" id="cpage-conv">
@@ -2670,18 +2678,55 @@
   if($('gl_save')) $('gl_save').addEventListener('click',gatedSave);
   if($('gl_testbtn')) $('gl_testbtn').addEventListener('click',gatedTest);
 
+  // ---- Tier-2 routing / OpenHuman failover (Stage 5) ----
+  function breakerRow(target,b){
+    const dot=b.phase==='OPEN'?'<span style="color:#f6a3a3">● OPEN</span>'
+      :b.phase==='HALF_OPEN'?'<span style="color:#f3c67a">◐ HALF-OPEN</span>'
+      :'<span style="color:#38e28e">● CLOSED</span>';
+    const extra=b.phase==='CLOSED'?'':(' · failures '+b.consecutiveFailures+(b.nextRetryAt?(' · retry after '+esc(b.nextRetryAt)):''));
+    return '<div style="padding:3px 0;"><b>'+esc(target)+'</b> '+dot+'<span class="hint">'+extra+'</span></div>';
+  }
+  async function routingLoad(){
+    const box=$('rt_breakers'); if(!box) return;
+    let s={wired:false,breakers:{}};
+    try{ s=await (await fetch('/routing/status')).json(); }catch(e){ box.textContent='Routing status unavailable.'; return; }
+    if(!s.wired){ box.innerHTML='<div class="hint">Routing engine not wired for this session.</div>'; return; }
+    const keys=Object.keys(s.breakers||{});
+    const summary='<div class="hint" style="margin-bottom:4px;">'+(s.openHumanEnabled?'Tier-2 enabled':'Tier-2 disabled')
+      +' · failover '+(s.failoverEnabled?'on':'off')+' · timeout '+s.timeoutMs+'ms'
+      +' · breaker '+s.breakerFailThreshold+'/'+s.breakerWindowSec+'s, cooldown '+s.breakerCooldownSec+'s</div>';
+    if(!keys.length){ box.innerHTML=summary+'<div class="hint">No targets seen yet — breaker health appears after the first routed call.</div>'; return; }
+    box.innerHTML=summary+keys.map(k=>breakerRow(k,s.breakers[k])).join('');
+  }
+  async function routingTest(){
+    const m=$('rt_msg'); if(m){ m.style.color='var(--dim)'; m.textContent='probing…'; }
+    let j={configured:false,reachable:false,degraded:false,message:'no response'};
+    try{ j=await (await fetch('/routing/test',{method:'POST'})).json(); }catch(e){ j.message=e.message; }
+    if(m){
+      if(!j.configured){ m.style.color='var(--dim)'; m.textContent='OpenHuman is not configured.'; }
+      else{ m.style.color=j.reachable?(j.degraded?'#f3c67a':'#8ef0b4'):'#f6a3a3'; m.textContent=(j.reachable?'✓ ':'✗ ')+j.message; }
+    }
+    routingLoad();
+  }
+  if($('rt_testbtn')) $('rt_testbtn').addEventListener('click',routingTest);
+  if($('rt_refresh')) $('rt_refresh').addEventListener('click',routingLoad);
+
   // ---- Connectors: in-app configuration for the external connectors (no env vars, no restart) ----
   const CONN_META={
     obsidian:{icon:'📓',name:'Brain (Obsidian vault)',note:'Local vault folder path — read-only mirror. Takes effect on restart (re-index).'},
     samgov:{icon:'📄',name:'Solicitations (SAM.gov)',note:'An api.sam.gov key to pull live opportunities. Takes effect immediately.'},
     github:{icon:'🐙',name:'GitHub',note:'A fine-grained Personal Access Token for repo / issue / PR tools. Takes effect immediately.'},
-    openhuman:{icon:'🧑',name:'OpenHuman advisor',note:'Run openhuman-core serve, then set its URL + core token. Takes effect immediately.'},
+    openhuman:{icon:'🧑',name:'OpenHuman advisor',note:'Run openhuman-core serve, then set its URL + core token. Set "enabled" to true to turn on Tier-2 failover (see the Tier-2 routing card below). Takes effect immediately.'},
+    routing:{icon:'🧭',name:'Tier-2 routing limits',note:'Global failover/circuit-breaker limits, shared by every role. Only apply once OpenHuman is enabled above. Takes effect on next restart (breaker thresholds are captured at startup).'},
     embeddings:{icon:'🧠',name:'Semantic embeddings',note:'A cloud embeddings endpoint + key switches recall from keyword to meaning. Takes effect immediately.'},
     gdrive:{icon:'📁',name:'Google Drive',note:'An OAuth access token + allowed folder IDs (document connector). Credentials are stored for the document connector.'},
     onedrive:{icon:'📁',name:'OneDrive',note:'An OAuth access token + allowed folder IDs (document connector). Credentials are stored for the document connector.'}
   };
   const CONN_FIELD_LABELS={ 'obsidian.vaultPath':'Vault folder path','samgov.apiKey':'API key','samgov.baseUrl':'Base URL (optional)',
-    'github.token':'Access token','openhuman.url':'Server URL','openhuman.token':'Core token',
+    'github.token':'Access token','openhuman.url':'Server URL','openhuman.token':'Core token','openhuman.enabled':'Enabled (true/false)',
+    'routing.failoverEnabled':'Failover enabled (true/false)','routing.timeoutMs':'Per-attempt timeout (ms)',
+    'routing.maxRetries':'Max fallback attempts','routing.breakerFailThreshold':'Breaker: failures to trip',
+    'routing.breakerWindowSec':'Breaker: failure window (sec)','routing.breakerCooldownSec':'Breaker: cooldown before retry (sec)',
     'embeddings.key':'API key','embeddings.endpoint':'Endpoint (optional)','embeddings.model':'Model (optional)',
     'gdrive.token':'Access token','gdrive.folders':'Allowed folder IDs','onedrive.token':'Access token','onedrive.folders':'Allowed folder IDs' };
   async function connSave(key,value,msgEl){
@@ -2712,7 +2757,7 @@
       box.appendChild(card);
     });
   }
-  pageLoaders.apis=()=>{ provLoad().then(gatedLoad); renderNvCatalog(); mcpLoad(); connLoad(); };
+  pageLoaders.apis=()=>{ provLoad().then(gatedLoad); renderNvCatalog(); mcpLoad(); connLoad(); routingLoad(); };
 
   // ---- HUD Activity feed (sourced from the audit log — single source of truth) ----
   function actClass(e){
