@@ -1443,4 +1443,48 @@ class WebServerTest {
             wired.stop();
         }
     }
+
+    // ---- standing agents (persistent multi-agent registry) ----
+
+    @Test
+    void standingAgentsCrudAndRunFlow() throws Exception {
+        // Save an agent → it appears in the list.
+        HttpResponse<String> save = post("/agents/standing",
+                "{\"action\":\"save\",\"name\":\"Watcher\",\"role\":\"analyst\","
+                        + "\"brief\":\"watch things\",\"intervalMinutes\":0}");
+        assertEquals(200, save.statusCode());
+        assertTrue(save.body().contains("\"name\":\"Watcher\""));
+        assertTrue(save.body().contains("\"status\":\"idle\""));
+
+        String id = save.body().replaceAll(".*\"id\":\"([^\"]+)\".*", "$1");
+        assertTrue(id.startsWith("ag-"));
+
+        // Run it (offline echo brain) → run state is recorded.
+        HttpResponse<String> run = post("/agents/standing",
+                "{\"action\":\"run\",\"id\":\"" + id + "\"}");
+        assertEquals(200, run.statusCode());
+        assertTrue(run.body().contains("\"totalRuns\":1"));
+        assertTrue(run.body().contains("\"lastOk\":true"));
+
+        // Toggle pauses it; delete removes it.
+        HttpResponse<String> toggled = post("/agents/standing",
+                "{\"action\":\"toggle\",\"id\":\"" + id + "\"}");
+        assertTrue(toggled.body().contains("\"enabled\":false"));
+        HttpResponse<String> deleted = post("/agents/standing",
+                "{\"action\":\"delete\",\"id\":\"" + id + "\"}");
+        assertEquals(200, deleted.statusCode());
+        assertTrue(get("/agents/standing").body().contains("\"agents\":[]"));
+    }
+
+    @Test
+    void standingAgentsRejectBadRequests() throws Exception {
+        assertEquals(400, post("/agents/standing",
+                "{\"action\":\"save\",\"name\":\"\"}").statusCode());
+        assertEquals(404, post("/agents/standing",
+                "{\"action\":\"delete\",\"id\":\"nope\"}").statusCode());
+        assertEquals(409, post("/agents/standing",
+                "{\"action\":\"run\",\"id\":\"nope\"}").statusCode());
+        assertEquals(400, post("/agents/standing",
+                "{\"action\":\"frobnicate\"}").statusCode());
+    }
 }

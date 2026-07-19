@@ -29,6 +29,7 @@ public final class WebServer {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final HttpServer server;
+    private final AgentRegistryService standingAgents;
 
     /** Analyzes a browser-supplied image (webcam frame) against a question. */
     @FunctionalInterface
@@ -36,8 +37,9 @@ public final class WebServer {
         String analyze(byte[] png, String question) throws Exception;
     }
 
-    private WebServer(HttpServer server) {
+    private WebServer(HttpServer server, AgentRegistryService standingAgents) {
         this.server = server;
+        this.standingAgents = standingAgents;
     }
 
     /** Starts the server on {@code port} (0 picks a free port) and returns it running. */
@@ -128,6 +130,33 @@ public final class WebServer {
                     }
                     return notes;
                 });
+        // Standing agents: named, persistent agents (Agents page). An agent bound to a configured
+        // provider runs through the orchestration layer (its own model); an unbound agent uses the
+        // governed chat brain. Interval agents run autonomously on a background daemon tick.
+        final ProviderSettingsService providersForAgents = providers;
+        final OrchestrationService orchForAgents = orchestration;
+        AgentRegistryService standingAgents = new AgentRegistryService(
+                memory != null ? memory : new com.jarvis.memory.InMemoryStore<>(),
+                auditLog,
+                (agent, system, prompt) -> {
+                    if (providersForAgents != null && orchForAgents != null
+                            && !agent.provider().isBlank()) {
+                        for (ProviderSettingsService.Active a : providersForAgents.allConfigured()) {
+                            if (a.name().equals(agent.provider())) {
+                                OrchestrationService.ModelResult r = orchForAgents.callOne(
+                                        a, system, prompt, 1024, "standing:" + agent.name());
+                                if (!r.ok()) {
+                                    throw new java.io.IOException(
+                                            r.error().isBlank() ? "model call failed" : r.error());
+                                }
+                                return r.text();
+                            }
+                        }
+                    }
+                    return api.chat(new com.jarvis.api.ChatRequest("agents",
+                            system + "\n\n" + prompt)).response();
+                });
+        standingAgents.startScheduler(30_000);
         byte[] page = loadDashboard();
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.setExecutor(Executors.newFixedThreadPool(4));
@@ -670,6 +699,75 @@ public final class WebServer {
                 }
             }
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Standing agents: the persistent multi-agent registry behind the Agents page. GET lists
+        // every agent with live state; POST dispatches {action: save|delete|toggle|run}. A run is
+        // synchronous (like /agents/team/run) so the UI can render the result immediately.
+        server.createContext("/agents/standing", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod())) {
+                String action;
+                String id;
+                String name;
+                String role;
+                String providerName;
+                String brief;
+                int intervalMinutes;
+                boolean enabled;
+                String input;
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    action = j.path("action").asText("");
+                    id = j.path("id").asText("");
+                    name = j.path("name").asText("");
+                    role = j.path("role").asText("");
+                    providerName = j.path("provider").asText("");
+                    brief = j.path("brief").asText("");
+                    intervalMinutes = j.path("intervalMinutes").asInt(0);
+                    enabled = j.path("enabled").asBoolean(true);
+                    input = j.path("input").asText("");
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+                if ("save".equals(action)) {
+                    if (standingAgents.save(id, name, role, providerName, brief, intervalMinutes,
+                            enabled).isEmpty()) {
+                        respond(exchange, 400, "text/plain",
+                                "name required".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                } else if ("delete".equals(action)) {
+                    if (!standingAgents.delete(id)) {
+                        respond(exchange, 404, "text/plain",
+                                "no such agent".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                } else if ("toggle".equals(action)) {
+                    if (standingAgents.toggle(id).isEmpty()) {
+                        respond(exchange, 404, "text/plain",
+                                "no such agent".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                } else if ("run".equals(action)) {
+                    if (standingAgents.runOnce(id, input).isEmpty()) {
+                        respond(exchange, 409, "text/plain",
+                                "unknown agent or already running".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                } else {
+                    respond(exchange, 400, "text/plain",
+                            "unknown action".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode list = root.putArray("agents");
+            for (AgentRegistryService.AgentSpec a : standingAgents.list()) {
+                list.add(standingAgentJson(a, standingAgents.stateOf(a.id())));
+            }
+            respond(exchange, 200, "application/json",
+                    root.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/kb", exchange -> {
@@ -1829,7 +1927,7 @@ public final class WebServer {
         });
 
         server.start();
-        return new WebServer(server);
+        return new WebServer(server, standingAgents);
     }
 
     /** The port the server is actually listening on. */
@@ -1838,7 +1936,31 @@ public final class WebServer {
     }
 
     public void stop() {
+        if (standingAgents != null) {
+            standingAgents.stopScheduler();
+        }
         server.stop(0);
+    }
+
+    /** One standing agent (definition + live run state) as the Agents page consumes it. */
+    private static ObjectNode standingAgentJson(AgentRegistryService.AgentSpec a,
+            AgentRegistryService.StateView s) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("id", a.id());
+        o.put("name", a.name());
+        o.put("role", a.role());
+        o.put("provider", a.provider());
+        o.put("brief", a.brief());
+        o.put("intervalMinutes", a.intervalMinutes());
+        o.put("enabled", a.enabled());
+        o.put("status", s.status());
+        o.put("lastRunAt", s.lastRunAt());
+        o.put("lastLatencyMs", s.lastLatencyMs());
+        o.put("lastOk", s.lastOk());
+        o.put("lastOutput", s.lastOutput());
+        o.put("lastError", s.lastError());
+        o.put("totalRuns", s.totalRuns());
+        return o;
     }
 
     private static byte[] loadDashboard() throws IOException {

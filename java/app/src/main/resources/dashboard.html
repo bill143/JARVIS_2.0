@@ -856,6 +856,18 @@
   <div class="page-head"><h2>🤖  MULTI-AGENT</h2><span style="margin-left:auto;"></span>
     <button class="hbtn pgclose" type="button">CLOSE</button></div>
   <div class="page-body" style="max-width:900px;">
+    <div class="pcard">
+      <h4>🕹 STANDING AGENTS <span class="hint" style="text-transform:none;letter-spacing:0;">— named agents that live in JARVIS: run on demand or on a schedule</span></h4>
+      <div class="hint" style="margin-bottom:8px;">Create as many agents as you like. Bind each to a saved provider from APIs &amp; Models (or leave it on the active brain). An agent with an interval runs itself in the background and keeps its latest report here. Consult-only: agents produce text, never actions.</div>
+      <div class="row"><label for="sagName">Name</label><input id="sagName" class="minput" placeholder="e.g. Market Watcher"></div>
+      <div class="row"><label for="sagRole">Role</label><input id="sagRole" class="minput" placeholder="e.g. researcher / analyst / critic"></div>
+      <div class="row"><label for="sagProv">Model</label><select id="sagProv" class="minput"><option value="">(active brain)</option></select></div>
+      <div class="row"><label for="sagInterval">Interval (min)</label><input id="sagInterval" class="minput" type="number" min="0" placeholder="0 = on demand"></div>
+      <div class="row"><label for="sagBrief">Standing brief</label><textarea id="sagBrief" class="minput" style="min-height:52px;" placeholder="What this agent is responsible for…"></textarea></div>
+      <div style="margin:6px 2px;"><button class="hbtn" id="sagSave" type="button" style="border-color:var(--cyan);">＋ Save agent</button>
+        <span id="sagMsg" style="margin-left:10px;font-size:12.5px;"></span></div>
+      <div id="sagList" style="margin-top:10px;"></div>
+    </div>
     <div class="hint" style="margin-bottom:10px;">Give a goal — a planner, executor, and critic collaborate under a hard turn budget. Every turn is gated by the permission layer and written to the audit log.</div>
     <div style="display:flex;gap:8px;"><input id="agGoal" class="minput" style="flex:1;" placeholder="Goal for the team…">
       <button class="hbtn" id="agRun" type="button">▶ Team</button>
@@ -2945,6 +2957,65 @@
     $('wfName').value=''; $('wfSteps').value='';
   });
   pageLoaders.workflows=loadWorkflows;
+
+  // ---- Standing agents (Agents page) ----
+  let sagEditing='';
+  async function sagPost(body){
+    const r=await fetch('/agents/standing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){ try{ $('sagMsg').textContent=await r.text(); }catch(e){} setTimeout(()=>$('sagMsg').textContent='',4000); }
+    await loadStandingAgents();
+  }
+  async function loadStandingAgents(){
+    try{
+      const ps=await (await fetch('/providers')).json();
+      const sel=$('sagProv'); const cur=sel.value;
+      sel.innerHTML='<option value="">(active brain)</option>';
+      (ps.configured||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p.name;
+        o.textContent=p.name+(p.model?' · '+p.model:''); sel.appendChild(o); });
+      sel.value=cur;
+    }catch(e){}
+    let data={agents:[]}; try{ data=await (await fetch('/agents/standing')).json(); }catch(e){ return; }
+    const box=$('sagList'); box.innerHTML='';
+    if(!data.agents.length){ box.innerHTML='<div class="hint">No standing agents yet — create your first above.</div>'; return; }
+    data.agents.forEach(a=>{
+      const d=document.createElement('div'); d.className='pcard'; d.style.padding='12px 14px'; d.style.marginBottom='10px';
+      const head=document.createElement('div'); head.style.display='flex'; head.style.alignItems='center'; head.style.gap='8px';
+      const nm=document.createElement('b'); nm.textContent=a.name; nm.style.color='var(--text)'; head.appendChild(nm);
+      const chip=document.createElement('span'); chip.className='hint';
+      chip.textContent=(a.role||'agent')+' · '+(a.provider||'active brain')+(a.intervalMinutes>0?' · every '+a.intervalMinutes+'m':' · on demand');
+      head.appendChild(chip);
+      const st=document.createElement('span'); st.style.marginLeft='auto'; st.style.fontSize='11px'; st.style.letterSpacing='1px';
+      st.textContent=a.status==='running'?'● RUNNING':(a.enabled?(a.status==='error'?'● ERROR':'● READY'):'● PAUSED');
+      st.style.color=a.status==='running'?'var(--cyan)':(a.status==='error'?'var(--red)':(a.enabled?'var(--green)':'var(--dim)'));
+      head.appendChild(st); d.appendChild(head);
+      const act=document.createElement('div'); act.style.margin='8px 0 0';
+      act.appendChild(mkbtn('▶ Run',async()=>{ st.textContent='● RUNNING'; st.style.color='var(--cyan)'; await sagPost({action:'run',id:a.id}); }));
+      act.appendChild(mkbtn(a.enabled?'⏸ Pause':'⏵ Resume',()=>sagPost({action:'toggle',id:a.id})));
+      act.appendChild(mkbtn('✎ Edit',()=>{ sagEditing=a.id; $('sagName').value=a.name; $('sagRole').value=a.role;
+        $('sagProv').value=a.provider; $('sagInterval').value=a.intervalMinutes||''; $('sagBrief').value=a.brief;
+        $('sagMsg').textContent='editing '+a.name; }));
+      act.appendChild(mkbtn('✕',()=>sagPost({action:'delete',id:a.id}),'del'));
+      d.appendChild(act);
+      if(a.lastRunAt>0){
+        const meta=document.createElement('div'); meta.className='hint'; meta.style.marginTop='6px';
+        meta.textContent='last run '+new Date(a.lastRunAt).toLocaleString()+' · '+a.lastLatencyMs+'ms · '+a.totalRuns+' total';
+        d.appendChild(meta);
+        const out=document.createElement('div');
+        out.style.cssText='margin-top:6px;font-size:12.5px;white-space:pre-wrap;max-height:220px;overflow:auto;';
+        out.style.color=a.lastOk?'var(--text)':'var(--red)';
+        out.textContent=a.lastOk?a.lastOutput:('⚠ '+a.lastError);
+        d.appendChild(out);
+      }
+      box.appendChild(d);
+    });
+  }
+  $('sagSave').addEventListener('click',()=>{
+    const name=$('sagName').value.trim(); if(!name){ $('sagMsg').textContent='name required'; return; }
+    sagPost({action:'save',id:sagEditing,name,role:$('sagRole').value.trim(),provider:$('sagProv').value,
+      brief:$('sagBrief').value.trim(),intervalMinutes:parseInt($('sagInterval').value||'0',10)||0,enabled:true});
+    sagEditing=''; $('sagName').value=''; $('sagRole').value=''; $('sagBrief').value=''; $('sagInterval').value=''; $('sagMsg').textContent='';
+  });
+  pageLoaders.agents=loadStandingAgents;
 
   // ---- Knowledge Base page ----
   async function kbPost(body){ await fetch('/kb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); loadKB(); }
