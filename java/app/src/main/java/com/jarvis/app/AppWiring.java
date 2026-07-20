@@ -309,8 +309,11 @@ final class AppWiring {
         UploadedDocsService uploads = new UploadedDocsService(auditLog);
 
         // MCP connections: talk to Model Context Protocol servers over HTTP. Dormant until the user
-        // adds one; configs persist locally (scope 'mcp'), tokens never returned/logged, all audited.
-        McpService mcp = new McpService(auditLog);
+        // adds one; configs persist in the local memory store (surviving restarts), tokens never
+        // returned/logged, all audited. Discovered tools are bridged into the brain's registry as
+        // mcp_<server>_<tool> — the policy re-reads the registry each turn, so they appear live.
+        // (Bridged calls are audited inside McpService; MCP tools are consult-style/READ_ONLY.)
+        McpService mcp = new McpService(auditLog, governedTools, memory);
 
         return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
