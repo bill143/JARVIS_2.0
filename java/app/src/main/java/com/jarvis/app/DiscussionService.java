@@ -19,10 +19,16 @@ import java.util.Objects;
 
 /**
  * App facade for "Project Discussion" mode: JARVIS <em>chairs</em> (via the governed
- * {@link JarvisApi#chat}) a bounded discussion with the OpenHuman advisor
- * ({@link OpenHumanClient#consult}), then synthesizes an outcome. The whole exchange is read-only —
- * the advisor is consulted, never asked to act — and every advisor turn is audited as an outbound
- * consult. Transcripts persist to the append-only {@link RecordStore} seam.
+ * {@link JarvisApi#chat}) a bounded discussion with an advisor, then synthesizes an outcome. The
+ * whole exchange is read-only — the advisor is consulted, never asked to act — and every advisor
+ * turn is audited as an outbound consult. Transcripts persist to the append-only
+ * {@link RecordStore} seam.
+ *
+ * <p><b>Who advises.</b> The OpenHuman core ({@link OpenHumanClient#consult}) is preferred when it
+ * is configured and healthy. When it is not (the common case — the public OpenHuman ships no local
+ * HTTP core), the advisor falls back to one of the user's configured model providers, preferring
+ * one that is <em>not</em> the active chat brain so the chair gets a genuinely second opinion.
+ * With neither available the feature stays dormant.
  *
  * <p>The {@link DiscussionRunner#MAX_ROUNDS} ceiling is the hard budget so two models can't talk
  * forever.
@@ -31,24 +37,67 @@ final class DiscussionService {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private static final String ADVISOR_SYSTEM = "You are the ADVISOR in a bounded project"
+            + " discussion chaired by another AI. Answer the chair's question directly and"
+            + " concisely from your own knowledge and reasoning. Challenge weak assumptions."
+            + " You are consulted for text only — you cannot run tools or take actions.";
+
     private final DiscussionRunner runner = new DiscussionRunner();
     private final JarvisApi api;
-    private final OpenHumanClient advisor;   // nullable → advisor dormant
-    private final AuditLog audit;            // nullable
-    private final RecordStore store;         // nullable → not persisted
+    private final OpenHumanClient advisor;            // nullable → OpenHuman path dormant
+    private final AuditLog audit;                     // nullable
+    private final RecordStore store;                  // nullable → not persisted
+    private final ProviderSettingsService providers;  // nullable → no model fallback
+    private final OrchestrationService orchestration; // nullable → no model fallback
     private final String collection;
 
     DiscussionService(JarvisApi api, OpenHumanClient advisor, AuditLog audit, RecordStore store) {
+        this(api, advisor, audit, store, null, null);
+    }
+
+    DiscussionService(JarvisApi api, OpenHumanClient advisor, AuditLog audit, RecordStore store,
+            ProviderSettingsService providers, OrchestrationService orchestration) {
         this.api = Objects.requireNonNull(api, "api");
         this.advisor = advisor;
         this.audit = audit;
         this.store = store;
+        this.providers = providers;
+        this.orchestration = orchestration;
         this.collection = "discussions";
     }
 
-    /** Whether the OpenHuman advisor is configured (dormant otherwise). */
+    /** Whether any advisor is available (OpenHuman core, else a fallback roster model). */
     boolean advisorAvailable() {
+        return openHumanAvailable() || modelAdvisor().isPresent();
+    }
+
+    /** Where advice comes from right now: {@code openhuman}, {@code model:<name>}, or empty. */
+    String advisorSource() {
+        if (openHumanAvailable()) {
+            return "openhuman";
+        }
+        return modelAdvisor().map(a -> "model:" + a.name()).orElse("");
+    }
+
+    private boolean openHumanAvailable() {
         return advisor != null && advisor.available();
+    }
+
+    /**
+     * The roster model that stands in as advisor when OpenHuman is dormant: the first configured
+     * provider that is not the active chat brain (a real second opinion), else the active one.
+     */
+    private java.util.Optional<ProviderSettingsService.Active> modelAdvisor() {
+        if (providers == null || orchestration == null) {
+            return java.util.Optional.empty();
+        }
+        List<ProviderSettingsService.Active> all = providers.allConfigured();
+        if (all.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        String activeName = providers.active().map(ProviderSettingsService.Active::name).orElse("");
+        return all.stream().filter(a -> !a.name().equals(activeName)).findFirst()
+                .or(() -> all.stream().findFirst());
     }
 
     /** Runs a bounded discussion on {@code topic} and returns the transcript + synthesized outcome. */
@@ -76,16 +125,31 @@ final class DiscussionService {
         };
 
         DiscussionRunner.Advisor advisorFn = question -> {
-            if (advisor == null || !advisor.available()) {
-                throw new IllegalStateException("OpenHuman advisor is not configured");
+            if (openHumanAvailable()) {
+                String reply = advisor.consult(question, topic);
+                if (audit != null) {
+                    audit.record(new AuditEvent(AuditCategory.EXTERNAL_API, "openhuman-consult",
+                            AuditTrigger.AUTONOMOUS, RiskTier.READ_ONLY, AuditOutcome.SUCCESS,
+                            "topic: " + topic));
+                }
+                return reply;
             }
-            String reply = advisor.consult(question, topic);
+            ProviderSettingsService.Active model = modelAdvisor().orElseThrow(
+                    () -> new IllegalStateException("no advisor available — connect the OpenHuman"
+                            + " core or add a model provider on the APIs & Models page"));
+            OrchestrationService.ModelResult r = orchestration.callOne(model, ADVISOR_SYSTEM,
+                    "Discussion topic: " + topic + "\n\nChair's question: " + question,
+                    1024, "discussion:advisor");
+            if (!r.ok()) {
+                throw new IllegalStateException("model advisor '" + model.name() + "' failed: "
+                        + (r.error().isBlank() ? "no reply" : r.error()));
+            }
             if (audit != null) {
-                audit.record(new AuditEvent(AuditCategory.EXTERNAL_API, "openhuman-consult",
+                audit.record(new AuditEvent(AuditCategory.EXTERNAL_API, "model-advisor-consult",
                         AuditTrigger.AUTONOMOUS, RiskTier.READ_ONLY, AuditOutcome.SUCCESS,
-                        "topic: " + topic));
+                        model.name() + " · topic: " + topic));
             }
-            return reply;
+            return r.text();
         };
 
         DiscussionRunner.Discussion discussion = runner.run(topic, chair, advisorFn);

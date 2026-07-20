@@ -1009,7 +1009,7 @@
     <span style="margin-left:auto;"></span>
     <button class="hbtn pgclose" type="button">CLOSE</button></div>
   <div class="page-body" style="max-width:900px;">
-    <div class="hint" id="discBanner" style="margin-bottom:10px;">JARVIS chairs a bounded discussion and consults the OpenHuman advisor, then synthesizes an outcome. Read-only — the advisor is consulted, never asked to act. Connect it by running <b>openhuman-core serve</b> and setting JARVIS_OPENHUMAN_URL + OPENHUMAN_CORE_TOKEN.</div>
+    <div class="hint" id="discBanner" style="margin-bottom:10px;">JARVIS chairs a bounded discussion with an advisor, then synthesizes an outcome. Read-only — the advisor is consulted, never asked to act. The advisor is the OpenHuman core when connected; otherwise one of your saved model providers stands in automatically (preferring one that isn't the active brain).</div>
     <div class="pcard"><h4>Start a discussion</h4>
       <div style="display:flex;gap:8px;"><input id="discTopic" class="minput" style="flex:1;" placeholder="Topic or question about a project…">
         <button class="hbtn" id="discRun" type="button">Discuss</button></div>
@@ -3327,9 +3327,12 @@
   pageLoaders.intel=loadIntel;
 
   // ---- Project Discussion page (JARVIS chairs, OpenHuman advises) ----
-  function discSetAdvisor(online){
+  let discAdvisorLabel='Advisor';
+  function discSetAdvisor(online, source){
     const b=$('discMode');
-    b.textContent = online ? 'ADVISOR ONLINE' : 'ADVISOR OFFLINE';
+    discAdvisorLabel = !source ? 'Advisor'
+      : (source==='openhuman' ? 'OpenHuman' : source.replace(/^model:/,'')+' (model advisor)');
+    b.textContent = online ? ('ADVISOR ONLINE — '+discAdvisorLabel) : 'ADVISOR OFFLINE';
     b.style.color = online ? 'var(--accent)' : 'var(--dim)';
     b.style.borderColor = online ? 'var(--accent)' : 'var(--dim)';
   }
@@ -3344,23 +3347,23 @@
       const role=document.createElement('div'); role.className='agrole'; role.textContent='ROUND '+r.index;
       const q=document.createElement('div'); q.className='agc'; q.textContent='JARVIS: '+(r.question||'');
       const a=document.createElement('div'); a.className='agc'; a.style.color=r.error?'var(--bad,#e66)':'';
-      a.textContent='OpenHuman: '+(r.error?('[error: '+r.error+']'):(r.answer||''));
+      a.textContent=discAdvisorLabel+': '+(r.error?('[error: '+r.error+']'):(r.answer||''));
       d.appendChild(role); d.appendChild(q); d.appendChild(a); container.appendChild(d);
     });
   }
   async function discRun(){
     const topic=$('discTopic').value.trim(); if(!topic) return;
-    const out=$('discOut'); out.innerHTML='<div class="hint">Discussion in progress… (JARVIS chairs, OpenHuman advises)</div>';
+    const out=$('discOut'); out.innerHTML='<div class="hint">Discussion in progress… (JARVIS chairs, '+discAdvisorLabel+' advises)</div>';
     try{
       const j=await (await fetch('/discussion/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic})})).json();
-      discSetAdvisor(!!j.advisorAvailable);
+      discSetAdvisor(!!j.advisorAvailable, j.advisorSource||'');
       discRenderRounds(out, j);
       loadDiscussions();
-    }catch(e){ out.innerHTML='<div class="hint">Discussion failed. Is JARVIS online, and is the OpenHuman advisor connected?</div>'; }
+    }catch(e){ out.innerHTML='<div class="hint">Discussion failed. Is JARVIS online, and is an advisor available (OpenHuman core or a saved model provider)?</div>'; }
   }
   async function loadDiscussions(){
     let j={items:[],advisorAvailable:false}; try{ j=await (await fetch('/discussion')).json(); }catch(e){ return; }
-    discSetAdvisor(!!j.advisorAvailable);
+    discSetAdvisor(!!j.advisorAvailable, j.advisorSource||'');
     const box=$('discList'); const items=j.items||[]; box.innerHTML='';
     if(!items.length){ box.innerHTML='<div class="hint">None yet.</div>'; return; }
     items.forEach(it=>{ const row=document.createElement('div'); row.className='memrow';

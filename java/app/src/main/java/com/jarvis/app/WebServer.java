@@ -1542,6 +1542,7 @@ public final class WebServer {
             o.put("converged", d.converged());
             o.put("outcome", d.outcome());
             o.put("advisorAvailable", discussion.advisorAvailable());
+            o.put("advisorSource", discussion.advisorSource());
             ArrayNode rounds = o.putArray("rounds");
             d.rounds().forEach(r -> {
                 ObjectNode ro = rounds.addObject();
@@ -1558,6 +1559,7 @@ public final class WebServer {
         server.createContext("/discussion", exchange -> {
             ObjectNode root = MAPPER.createObjectNode();
             root.put("advisorAvailable", discussion != null && discussion.advisorAvailable());
+            root.put("advisorSource", discussion == null ? "" : discussion.advisorSource());
             ArrayNode arr = root.putArray("items");
             if (discussion != null) {
                 int limit = parseInt(param(exchange, "limit", "20"), 20);
