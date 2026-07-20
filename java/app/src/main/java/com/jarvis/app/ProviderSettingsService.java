@@ -116,8 +116,11 @@ final class ProviderSettingsService {
             boolean makeActive) {
         Objects.requireNonNull(name, "name");
         ObjectNode c = MAPPER.createObjectNode();
-        c.put("kind", kind == null || kind.isBlank() ? "openai" : kind);
-        c.put("baseUrl", baseUrl == null ? "" : baseUrl.strip());
+        String k = kind == null || kind.isBlank() ? "openai" : kind;
+        c.put("kind", k);
+        // Anthropic-native ignores a base URL; a leftover foreign URL (e.g. after switching
+        // presets) only misleads later edits, so it is normalized away on save.
+        c.put("baseUrl", "anthropic".equals(k) || baseUrl == null ? "" : baseUrl.strip());
         c.put("model", model == null ? "" : model.strip());
         String key = apiKey == null ? "" : apiKey.strip();
         if (key.isBlank()) {

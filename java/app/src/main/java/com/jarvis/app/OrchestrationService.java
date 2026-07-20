@@ -368,6 +368,16 @@ final class OrchestrationService {
      */
     ModelResult callOne(ProviderSettingsService.Active a, String system, String prompt,
             int maxTokens, String stage) {
+        // A blank model only has a safe fallback on Anthropic-native (the app default is a
+        // Claude id). For an OpenAI-compatible endpoint, guessing guarantees a confusing
+        // model_not_found — fail fast with an actionable message instead.
+        if ((a.model() == null || a.model().isBlank()) && !"anthropic".equals(a.kind())) {
+            record("orchestrate_call", a.name() + " skipped: no model selected",
+                    AuditOutcome.FAILURE);
+            return new ModelResult(a.name(), "", providers.roleOf(a.name()), stage, false, "", 0,
+                    "no model selected for provider '" + a.name()
+                            + "' — use Fetch live models on the APIs & Models page");
+        }
         if (routeSelector != null && routingSettings != null
                 && routingSettings.snapshot().openHumanEnabled()) {
             return callOneRouted(a, system, prompt, maxTokens, stage);

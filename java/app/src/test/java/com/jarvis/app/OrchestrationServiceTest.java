@@ -266,4 +266,37 @@ class OrchestrationServiceTest {
         assertEquals(2, primaryCalls.get()); // breaker short-circuited the primary — no 3rd call
         assertTrue(third.answer().contains("fallback reply")); // still failed over to OpenHuman
     }
+
+    // ---- blank-model guard (regression: claude-sonnet-5 sent to an OpenAI endpoint = 404) ----
+
+    @Test
+    void blankModelOnOpenAiKindFailsFastInsteadOfGuessing() {
+        ProviderSettingsService p = providersWith();
+        p.save("NoModel", "openai", "https://x/v1", "key", "", false);   // blank model
+        AtomicInteger factoryCalls = new AtomicInteger();
+        OrchestrationService o = new OrchestrationService(p, null, "claude-sonnet-5", a -> {
+            factoryCalls.incrementAndGet();
+            return req -> new LlmProvider.Result("should never run", 1, 1);
+        });
+        ProviderSettingsService.Active noModel = p.allConfigured().stream()
+                .filter(a -> a.name().equals("NoModel")).findFirst().orElseThrow();
+        OrchestrationService.ModelResult r = o.callOne(noModel, "sys", "hi", 64, "test");
+        assertFalse(r.ok());
+        assertTrue(r.error().contains("no model selected"));
+        assertTrue(r.error().contains("Fetch live models"));
+        assertEquals(0, factoryCalls.get());   // the doomed call was never even attempted
+    }
+
+    @Test
+    void blankModelOnAnthropicKindStillFallsBackToDefault() {
+        ProviderSettingsService p = providersWith();
+        p.save("Claude", "anthropic", "", "sk-ant-key", "", false);
+        OrchestrationService o = new OrchestrationService(p, null, "claude-sonnet-5",
+                a -> req -> new LlmProvider.Result("model=" + req.model(), 1, 1));
+        ProviderSettingsService.Active claude = p.allConfigured().stream()
+                .filter(a -> a.name().equals("Claude")).findFirst().orElseThrow();
+        OrchestrationService.ModelResult r = o.callOne(claude, "sys", "hi", 64, "test");
+        assertTrue(r.ok());
+        assertTrue(r.text().contains("claude-sonnet-5"));   // default id valid here, and only here
+    }
 }

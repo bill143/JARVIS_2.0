@@ -211,7 +211,21 @@ final class AppWiring {
             java.util.Optional<ProviderSettingsService.Active> cp = providerSettings.active();
             if (cp.isPresent()) {
                 ProviderSettingsService.Active a = cp.get();
-                String m = a.model() == null || a.model().isBlank() ? model : a.model();
+                String m = a.model() == null ? "" : a.model().strip();
+                if (m.isBlank()) {
+                    if ("anthropic".equals(a.kind())) {
+                        m = model;   // Anthropic-native: the app default is a valid Claude id.
+                    } else {
+                        // Never guess a model for an OpenAI-compatible endpoint — the app
+                        // default is a Claude id and would 404 (model_not_found). Fail with
+                        // an actionable message instead of a doomed API call.
+                        final String who = a.name();
+                        return context -> new Decision.Respond("Provider '" + who
+                                + "' has no model selected, sir. Open APIs & Models, click "
+                                + "Fetch live models on that provider, pick one, and Save — "
+                                + "the brain swaps live.");
+                    }
+                }
                 com.jarvis.integrations.llm.LlmProvider prov = "anthropic".equals(a.kind())
                         ? new com.jarvis.integrations.llm.AnthropicProvider(
                                 AnthropicPolicy.anthropicTransport(a.apiKey()))

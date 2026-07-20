@@ -186,4 +186,29 @@ class ProviderSettingsServiceTest {
         f404.save("P", "openai", "https://a/v1", "k", "m", false);
         assertTrue(f404.test("P").message().contains("404"));
     }
+
+    // ---- kind/baseUrl normalization (regression: "Claude" entry carrying Groq's URL) ----
+
+    @Test
+    void anthropicSaveNormalizesAwayForeignBaseUrl() {
+        ProviderSettingsService svc = new ProviderSettingsService(new InMemoryStore<>(),
+                (b, k) -> java.util.List.of());
+        // The preset-switch hazard: entry saved as Anthropic while an OpenAI-compatible base
+        // URL is still sitting in the form.
+        svc.save("Claude", "anthropic", "https://api.groq.com/openai/v1", "sk-ant-x",
+                "claude-sonnet-5", true);
+        ProviderSettingsService.Active a = svc.active().orElseThrow();
+        assertEquals("anthropic", a.kind());
+        assertEquals("", a.baseUrl());   // foreign URL normalized away on save
+    }
+
+    @Test
+    void openAiKindKeepsItsBaseUrl() {
+        ProviderSettingsService svc = new ProviderSettingsService(new InMemoryStore<>(),
+                (b, k) -> java.util.List.of());
+        svc.save("Groq", "openai", "https://api.groq.com/openai/v1", "gsk-x",
+                "llama-3.3-70b-versatile", false);
+        assertEquals("https://api.groq.com/openai/v1",
+                svc.allConfigured().get(0).baseUrl());
+    }
 }
