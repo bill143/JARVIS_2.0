@@ -134,8 +134,16 @@
   .hbtn.alert.show { display:inline-block; }
 
   /* Main 3-column grid */
-  #main { display:grid; grid-template-columns:288px 1fr 380px; gap:16px; padding:16px; min-height:0; }
-  .col { min-height:0; display:flex; flex-direction:column; gap:14px; }
+  #main { display:grid; grid-template-columns:288px 1fr 380px; gap:16px; padding:16px; min-height:0;
+          transition:grid-template-columns .35s ease, column-gap .35s ease; }
+  .col { min-height:0; min-width:0; display:flex; flex-direction:column; gap:14px; }
+
+  /* Focus Mode (HUD toggle): collapse the side widget columns, let the center hub take the space */
+  #main.focus-mode { grid-template-columns:0px 1fr 0px; column-gap:0; }
+  #main.focus-mode > .col:not(.center) {
+    opacity:0; overflow:hidden; pointer-events:none; transition:opacity .2s ease;
+  }
+  #main > .col:not(.center) { transition:opacity .25s ease; }
 
   .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px;
           backdrop-filter:blur(3px); }
@@ -606,6 +614,7 @@
       <button class="hbtn" id="camera" type="button" title="Look through the webcam">📷 CAMERA</button>
       <button class="hbtn" id="peopleTab" type="button" title="People & About Me">👥 PEOPLE</button>
       <button class="hbtn" id="auditTab" type="button" title="Audit log — every action JARVIS takes">🛡 AUDIT</button>
+      <button class="hbtn" id="focusMode" type="button" title="Focus Mode — hide side panels (F to toggle, Esc to exit)">👁 FOCUS</button>
       <button class="hbtn" id="settings" type="button" title="All settings">⚙ SETTINGS</button>
       <button class="hbtn alert" id="interrupt" type="button" title="Stop JARVIS (or press ESC)">✋ STOP</button>
     </div>
@@ -1887,6 +1896,24 @@
   interruptBtn.addEventListener('click', interrupt);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') interrupt(); });
   if (window.speechSynthesis) speechSynthesis.getVoices();
+
+  // ---------- Focus Mode (HUD toggle) ----------
+  // Hides the side metric/log widgets so the center orb + input become the whole show. Purely a
+  // display state — nothing it hides stops running, so audit/usage/etc. keep updating underneath.
+  let isFocusMode = false;
+  const focusBtn = document.getElementById('focusMode');
+  function setFocusMode(on) {
+    isFocusMode = on;
+    document.getElementById('main').classList.toggle('focus-mode', on);
+    focusBtn.classList.toggle('on', on);
+  }
+  focusBtn.addEventListener('click', () => setFocusMode(!isFocusMode));
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName) || '';
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable;
+    if (!typing && (e.key === 'f' || e.key === 'F')) { setFocusMode(!isFocusMode); return; }
+    if (e.key === 'Escape' && isFocusMode) setFocusMode(false);
+  });
 
   // ---------- Webcam vision (gated behind a live-preview confirmation) ----------
   // The camera opens a preview modal first; NO frame is captured and NO facial-recognition request
