@@ -1951,6 +1951,37 @@ public final class WebServer {
                 respond(exchange, 400, "text/plain", "empty prompt".getBytes(StandardCharsets.UTF_8));
                 return;
             }
+            // TOTAL RECALL: "remember that …" writes straight into the unified knowledge store and
+            // confirms — no LLM round-trip. The new note is a knowledge node, so it grounds the next
+            // question (Stage A) and appears in the galaxy (Stage B); the reply carries a "remembered"
+            // marker so the UI can spawn/refresh the node live.
+            if (semantic != null) {
+                java.util.Optional<RecallCapture.Fact> cap = RecallCapture.parse(prompt);
+                if (cap.isPresent()) {
+                    RecallCapture.Fact f = cap.get();
+                    String newId = semantic.rememberSource(f.title(), f.content(), "knowledge",
+                            System.currentTimeMillis());
+                    int nodeId = indexInStore(semantic, newId);
+                    System.out.println("[chat] remembered #" + nodeId + " -> " + oneLine(f.title()));
+                    ObjectNode reply = MAPPER.createObjectNode();
+                    reply.put("answer", "Noted, sir — I'll remember that: " + f.content());
+                    ArrayNode sources = reply.putArray("sources");
+                    if (nodeId >= 0) {
+                        ObjectNode so = sources.addObject();
+                        so.put("id", nodeId);
+                        so.put("title", f.title());
+                        so.put("score", 1.0);
+                    }
+                    ObjectNode rem = reply.putObject("remembered");
+                    rem.put("id", nodeId);
+                    rem.put("title", f.title());
+                    reply.put("toolSteps", 0);
+                    respond(exchange, 200, "application/json",
+                            reply.toString().getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+
             String preamble = modePreamble(mode);
             String effective = preamble.isEmpty() ? prompt.strip() : preamble + "\n\n" + prompt.strip();
 
@@ -2068,6 +2099,17 @@ public final class WebServer {
         } catch (NumberFormatException e) {
             return dflt;
         }
+    }
+
+    /** The index of the document with {@code id} in the unified store — its galaxy node id, or -1. */
+    private static int indexInStore(SemanticMemoryService semantic, String id) {
+        java.util.List<com.jarvis.rag.Document> all = semantic.all();
+        for (int i = 0; i < all.size(); i++) {
+            if (all.get(i).id().equals(id)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /** A unified-store node that belongs in the Knowledge view / galaxy (connector knowledge or vault). */

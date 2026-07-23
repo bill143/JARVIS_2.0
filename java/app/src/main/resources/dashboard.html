@@ -1746,6 +1746,7 @@
         const j = await r.json(); answer = (j.answer!==undefined ? j.answer : j.response);
         sources = Array.isArray(j.sources) ? j.sources : [];
         if (j.toolSteps > 0 && S.showDetails!==false) trace={toolSteps:j.toolSteps};
+        if (j.remembered) onRemembered();
       }
       pending.className = '';
       if (A.motion.streaming && A.motion.animations!=='off' && answer) {
@@ -1781,6 +1782,15 @@
       wrap.appendChild(chip);
     });
     return wrap;
+  }
+
+  // Total Recall: a "remember that…" just added a knowledge node. Refresh the galaxy so it appears
+  // live (and reload it immediately if the galaxy is the open page).
+  function onRemembered(){
+    try {
+      Galaxy.invalidate();
+      if (document.getElementById('cpage-galaxy').classList.contains('open')) Galaxy.load(true);
+    } catch(e) {}
   }
 
   document.getElementById('form').addEventListener('submit', (e) => {
@@ -3018,7 +3028,7 @@
     try{
       const j=await (await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({prompt:msg,mode:convMode})})).json();
-      thinking.remove(); convAppend(j.answer||j.response||'(no answer)','bot');
+      thinking.remove(); convAppend(j.answer||j.response||'(no answer)','bot'); if(j.remembered) onRemembered();
     }catch(err){ thinking.remove(); convAppend('Something went wrong. Please try again.','bot'); }
   });
   pageLoaders.conv=()=>$('convBox').focus();

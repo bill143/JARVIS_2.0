@@ -590,6 +590,37 @@ class WebServerTest {
     }
 
     @Test
+    void chatRemembersAFactIntoTheStoreAndReturnsTheNewNode() throws Exception {
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null));
+        try {
+            String base = "http://localhost:" + wired.port();
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(URI.create(base + "/chat"))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"prompt\":\"remember that the gate code is 4417\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("\"remembered\":"), r.body());   // live-node marker
+            assertTrue(r.body().contains("Noted, sir"), r.body());
+            // The fact is now a knowledge node in the unified store — grounds chat + appears in galaxy.
+            assertTrue(semantic.all().stream().anyMatch(d -> d.content().contains("gate code is 4417")
+                    && "knowledge".equals(SemanticMemoryService.sourceOf(d))));
+            // And it is retrievable by the next question (Stage A grounding).
+            assertTrue(KnowledgeGrounding.retrieve(semantic.all(), "what is the gate code", 6)
+                    .stream().anyMatch(h -> h.content().contains("4417")));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void statusReportsLiveNoteCountForTheGreeting() throws Exception {
         SemanticMemoryService semantic = new SemanticMemoryService(
                 new com.jarvis.memory.InMemoryRecordStore(),
