@@ -1878,6 +1878,18 @@
   let voiceOn = false, speaking = false, recog = null;
   function voiceLang() { return S.lang || 'en-US'; }
 
+  // Voice list loads asynchronously; getVoices() is often empty on first call. We cache it and pin
+  // the butler voice on the 'voiceschanged' event so speak() always has a real en-GB voice ready.
+  let availableVoices = [], pinnedVoice = null;
+  // Primes the voice cache and pins the butler voice. Deliberately does NOT touch the settings
+  // dropdown here — this runs during init, before the DOM helpers/settings ($ / S) are initialized;
+  // the dropdown is refreshed by the 'voiceschanged' handler (async, post-init) and when Settings open.
+  function refreshVoices() {
+    if (!window.speechSynthesis) return;
+    availableVoices = speechSynthesis.getVoices() || [];
+    pinnedVoice = pickVoice(availableVoices, voiceLang());
+  }
+
   function pickVoice(voices, lang) {
     if (!voices || !voices.length) return null;
     if (S.voiceName) { const b = voices.find(v => v.name === S.voiceName); if (b) return b; }
@@ -1892,13 +1904,17 @@
   }
 
   function speak(text) {
-    if (!voiceOn || !window.speechSynthesis || !text) { setOrb(restState()); return; }
-    stopListening();
+    // TTS is independent of the microphone: typed answers speak too (gated only by S.autoSpeak at
+    // the call site). The mic (voiceOn) only governs pausing/resuming listening around speech.
+    if (!window.speechSynthesis || !text) { setOrb(restState()); return; }
+    if (voiceOn) stopListening();
     try { speechSynthesis.cancel(); } catch (e) {}
     const u = new SpeechSynthesisUtterance(text);
     u.rate = S.rate || 1.05;
-    const chosen = pickVoice(speechSynthesis.getVoices(), voiceLang());
-    u.voice = chosen; u.lang = chosen ? chosen.lang : voiceLang();
+    if (!pinnedVoice) refreshVoices();
+    const chosen = pinnedVoice || pickVoice(availableVoices, voiceLang());
+    u.voice = chosen || null;
+    u.lang = chosen ? chosen.lang : (voiceLang().slice(0,2) === 'en' ? 'en-GB' : voiceLang());
     speaking = true; setOrb('speaking'); interruptBtn.classList.add('show');
     let finished = false;
     const finish = () => { if (finished) return; finished = true;
@@ -1934,6 +1950,10 @@
 
   function startListening() {
     if (!SR || recog || !voiceOn || speaking) return;
+    // Speech recognition requires a secure context (HTTPS or localhost); on a plain-http LAN address
+    // the browser silently refuses. Fail loudly instead of leaving a dead mic. (TTS still works.)
+    if (!window.isSecureContext) { sbMic.textContent = 'NO MIC';
+      statusHint.textContent = 'Microphone needs HTTPS or localhost'; return; }
     recog = new SR(); recog.continuous = true; recog.lang = voiceLang();
     recog.onresult = (e) => {
       const t = e.results[e.results.length-1][0].transcript.trim();
@@ -1950,8 +1970,17 @@
       if (prompt) ask(prompt, '🎤 ' + prompt); else speak('Yes, sir?');
     };
     recog.onend = () => { recog = null; if (voiceOn && !speaking) setTimeout(startListening, 250); };
-    recog.onerror = (e) => { if (e.error === 'not-allowed') { voiceOn=false; voiceBtn.classList.remove('on');
-      sbMic.textContent='BLOCKED'; setOrb('idle'); } };
+    recog.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        voiceOn=false; voiceBtn.classList.remove('on');
+        document.getElementById('ssVoice').className='sdot off';
+        sbMic.textContent='BLOCKED'; statusHint.textContent='Microphone permission blocked'; setOrb('idle');
+      } else if (e.error === 'audio-capture') {
+        voiceOn=false; voiceBtn.classList.remove('on');
+        sbMic.textContent='NO MIC'; statusHint.textContent='No microphone found'; setOrb('idle');
+      }
+      // Transient errors (no-speech, aborted, network) fall through — onend restarts the loop.
+    };
     try { recog.start(); beginListeningState(); } catch (err) { recog = null; }
   }
   function stopListening() { if (recog) { const r=recog; recog=null; r.onend=null; try{r.stop();}catch(e){} } }
@@ -1968,7 +1997,12 @@
   document.getElementById('ssVoice').className = 'sdot off';
   interruptBtn.addEventListener('click', interrupt);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') interrupt(); });
-  if (window.speechSynthesis) speechSynthesis.getVoices();
+  if (window.speechSynthesis) {
+    refreshVoices();   // primes the cache; voices may still arrive async via 'voiceschanged' below
+    const onVoices = () => { refreshVoices(); if (typeof populateVoiceList === 'function') populateVoiceList(); };
+    try { speechSynthesis.addEventListener('voiceschanged', onVoices); }
+    catch (e) { speechSynthesis.onvoiceschanged = onVoices; }
+  }
 
   // ---------- Webcam vision (gated behind a live-preview confirmation) ----------
   // The camera opens a preview modal first; NO frame is captured and NO facial-recognition request
@@ -2374,15 +2408,15 @@
     voices.forEach(v=>{ const o=document.createElement('option'); o.value=v.name; o.textContent=v.name+' ('+v.lang+')';
       if (v.name===S.voiceName) o.selected=true; sel.appendChild(o); });
   }
-  if (window.speechSynthesis) speechSynthesis.onvoiceschanged = populateVoiceList;
+  // (voice list refresh + butler-voice pinning is wired via refreshVoices on 'voiceschanged' above)
   function pushServerConfig(){ fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({cpuThreshold:S.cpu,ramThreshold:S.ram})}).catch(()=>{}); }
   function clampPct(v,d){ const n=parseInt(v,10); return isNaN(n)?d:Math.max(1,Math.min(100,n)); }
 
   $('s_voiceOnStart').addEventListener('change',e=>{S.voiceOnStart=e.target.checked;saveSettings();});
   $('s_autoSpeak').addEventListener('change',e=>{S.autoSpeak=e.target.checked;saveSettings();});
-  $('s_lang').addEventListener('change',e=>{S.lang=e.target.value;saveSettings();});
-  $('s_voiceName').addEventListener('change',e=>{S.voiceName=e.target.value;saveSettings();if(voiceOn)speak('Voice updated, sir.');});
+  $('s_lang').addEventListener('change',e=>{S.lang=e.target.value;saveSettings();refreshVoices();});
+  $('s_voiceName').addEventListener('change',e=>{S.voiceName=e.target.value;saveSettings();refreshVoices();speak('Voice updated, sir.');});
   $('s_rate').addEventListener('input',e=>{S.rate=parseFloat(e.target.value);saveSettings();});
   $('s_wake').addEventListener('change',e=>{S.wakeWord=(e.target.value.trim()||'jarvis');saveSettings();});
   $('s_convo').addEventListener('change',e=>{S.convoMode=e.target.checked;saveSettings();
