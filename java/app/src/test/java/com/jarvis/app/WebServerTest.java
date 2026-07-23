@@ -67,6 +67,10 @@ class WebServerTest {
         assertTrue(response.body().contains("data-nav=\"discussion\"")); // and its nav entry
         assertTrue(response.body().contains("data-nav=\"brain\""));      // BRAIN (Obsidian) tab
         assertTrue(response.body().contains("OBSIDIAN VAULT"));          // and its page
+        assertTrue(response.body().contains("data-nav=\"galaxy\""));     // Knowledge Galaxy tab
+        assertTrue(response.body().contains("KNOWLEDGE GALAXY"));        // and its page
+        assertTrue(response.body().contains("galaxyCanvas"));            // the 3D canvas
+        assertTrue(response.body().contains("jarvis:flyto"));            // fly-to wiring
         assertTrue(response.body().contains("data-nav=\"solicitations\""));   // Solicitations tab
         assertTrue(response.body().contains("SOLICITATIONS COMMAND CENTER"));  // and its page
     }
@@ -580,6 +584,34 @@ class WebServerTest {
                     HttpResponse.BodyHandlers.ofString());
             assertTrue(found.body().contains("Go-kart"));
             assertTrue(found.body().contains("\"score\":"));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void knowledgeGraphEndpointReturnsNodesAndLinksAlignedWithSourceIds() throws Exception {
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        semantic.rememberSource("Marina permits", "coastal review for the marina", "knowledge", 1L);
+        semantic.rememberSource("Marina schedule", "the marina opens in June", "knowledge", 2L);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null));
+        try {
+            String base = "http://localhost:" + wired.port();
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(
+                            URI.create(base + "/knowledge/graph")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("\"nodes\":"), r.body());
+            assertTrue(r.body().contains("\"links\":"), r.body());
+            assertTrue(r.body().contains("Marina permits"), r.body());
+            assertTrue(r.body().contains("\"source\":\"knowledge\""), r.body());
+            assertTrue(r.body().contains("\"count\":2"), r.body());
         } finally {
             wired.stop();
         }

@@ -816,6 +816,33 @@ public final class WebServer {
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // The knowledge galaxy: the unified store as nodes (one per document) + keyword co-occurrence
+        // links. Node id == the document's index in semantic.all() == the sources[].id the chat
+        // handler returns, so a cited source flies straight to its node.
+        server.createContext("/knowledge/graph", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode nodes = root.putArray("nodes");
+            ArrayNode links = root.putArray("links");
+            if (semantic != null) {
+                KnowledgeGraph.Graph g = KnowledgeGraph.build(semantic.all());
+                for (KnowledgeGraph.Node node : g.nodes()) {
+                    ObjectNode o = nodes.addObject();
+                    o.put("id", node.id());
+                    o.put("title", node.title().isBlank() ? ("note " + node.id()) : node.title());
+                    o.put("source", node.source());
+                    o.put("val", node.val());
+                }
+                for (KnowledgeGraph.Link link : g.links()) {
+                    ObjectNode o = links.addObject();
+                    o.put("source", link.source());
+                    o.put("target", link.target());
+                }
+                root.put("truncated", g.truncated());
+            }
+            root.put("count", nodes.size());
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/providers/models", exchange -> {
             ObjectNode root = MAPPER.createObjectNode();
             ArrayNode arr = root.putArray("models");

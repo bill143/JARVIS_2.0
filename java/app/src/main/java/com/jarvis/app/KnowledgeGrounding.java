@@ -112,6 +112,11 @@ final class KnowledgeGrounding {
         return sb.toString().strip();
     }
 
+    /** Query/document tokenizer (lowercase, stopword-filtered) — shared with the graph builder. */
+    static List<String> tokens(String s) {
+        return terms(s);
+    }
+
     private static List<String> terms(String s) {
         List<String> out = new ArrayList<>();
         if (s == null || s.isBlank()) {

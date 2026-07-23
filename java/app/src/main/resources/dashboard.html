@@ -244,6 +244,30 @@
     border:1px solid rgba(120,170,255,.35); border-radius:999px; padding:2px 9px; cursor:pointer;
     max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .source-chip:hover { background:rgba(120,170,255,.22); border-color:rgba(120,170,255,.6); }
+  /* ---- Knowledge Galaxy ---- */
+  .galaxy-body { max-width:none; padding:0; height:calc(100vh - 118px); }
+  .galaxy-wrap { position:relative; width:100%; height:100%; overflow:hidden;
+    background:radial-gradient(120% 90% at 50% 40%, #0a1220 0%, #05080f 60%, #03050a 100%); }
+  #galaxyCanvas { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab; }
+  #galaxyCanvas:active { cursor:grabbing; }
+  .galaxy-hud { position:absolute; top:14px; left:14px; right:14px; display:flex; gap:10px;
+    align-items:flex-start; flex-wrap:wrap; pointer-events:none; }
+  .galaxy-filters { display:flex; gap:6px; flex-wrap:wrap; pointer-events:auto; }
+  .gfilter { font-size:11px; letter-spacing:.4px; padding:3px 10px; border-radius:999px; cursor:pointer;
+    border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.05); color:var(--dim);
+    display:inline-flex; align-items:center; gap:6px; user-select:none; transition:all .15s ease; }
+  .gfilter .dot { width:8px; height:8px; border-radius:50%; box-shadow:0 0 6px currentColor; }
+  .gfilter.on { color:#eaf2ff; background:rgba(255,255,255,.10); border-color:rgba(255,255,255,.4); }
+  .gfilter.off { opacity:.45; }
+  .galaxy-search { pointer-events:auto; width:200px; max-width:40vw; margin-left:auto; }
+  .galaxy-tip { position:absolute; pointer-events:none; padding:6px 10px; border-radius:8px;
+    background:rgba(6,12,22,.92); border:1px solid rgba(120,170,255,.4); color:#eaf2ff; font-size:12px;
+    max-width:280px; opacity:0; transform:translateY(4px); transition:opacity .1s ease; z-index:5;
+    box-shadow:0 6px 24px rgba(0,0,0,.5); }
+  .galaxy-tip.show { opacity:1; transform:translateY(0); }
+  .galaxy-empty { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    color:var(--dim); font-size:14px; text-align:center; padding:20px; }
+  .galaxy-empty.show { display:flex; }
 
   /* Bottom status bar */
   .statusbar { display:flex; align-items:center; gap:20px; padding:8px 22px; font-size:11px;
@@ -603,6 +627,7 @@
   <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
   <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
   <div class="navitem" data-nav="kb"><span class="ic">📚</span> Knowledge</div>
+  <div class="navitem" data-nav="galaxy"><span class="ic">🌌</span> Galaxy</div>
   <div class="navitem" data-nav="brain"><span class="ic">🧩</span> Brain</div>
   <div class="navitem" data-nav="solicitations"><span class="ic">📑</span> Solicitations</div>
   <div class="navitem" data-nav="intel"><span class="ic">✨</span> Intelligence</div>
@@ -924,6 +949,24 @@
       <div id="kbResults" style="margin-top:10px;"></div>
     </div>
     <div class="pcard"><h4>All documents</h4><div id="kbList"><div class="hint">None yet.</div></div></div>
+  </div>
+</div>
+<div class="page cpage" id="cpage-galaxy">
+  <div class="page-head"><h2>🌌  KNOWLEDGE GALAXY</h2>
+    <span id="galaxyStatus" class="hint" style="margin-left:14px;"></span>
+    <span style="margin-left:auto;"></span>
+    <button class="hbtn" id="galaxyRefresh" type="button">⟳ REFRESH</button>
+    <button class="hbtn pgclose" type="button">CLOSE</button></div>
+  <div class="page-body galaxy-body">
+    <div class="galaxy-wrap">
+      <canvas id="galaxyCanvas"></canvas>
+      <div class="galaxy-hud">
+        <div class="galaxy-filters" id="galaxyFilters"></div>
+        <input id="galaxySearch" class="minput galaxy-search" placeholder="Find a node…" autocomplete="off">
+      </div>
+      <div class="galaxy-tip" id="galaxyTip"></div>
+      <div class="galaxy-empty" id="galaxyEmpty">No knowledge yet — connect your vault (Brain) or add to Knowledge, then refresh.</div>
+    </div>
   </div>
 </div>
 <div class="page cpage" id="cpage-brain">
@@ -3116,6 +3159,122 @@
   $('kbSearchBtn').addEventListener('click',kbSearch);
   $('kbQuery').addEventListener('keydown',e=>{ if(e.key==='Enter') kbSearch(); });
   pageLoaders.kb=loadKB;
+
+  // ---- Knowledge Galaxy: a dependency-free 3D force-directed constellation of the unified store.
+  //      Node id == the document's index in semantic.all() == the chat handler's sources[].id, so a
+  //      cited source (or a search) flies the camera straight to its node. Pure canvas; no CDN. ----
+  const Galaxy=(function(){
+    const SRC={ vault:[56,225,255], knowledge:[255,207,107], memory:[199,155,255], other:[143,163,191] };
+    const LABEL={ vault:'Vault', knowledge:'Knowledge', memory:'Memory', other:'Other' };
+    const CAM=3.2;
+    let canvas,ctx,W=0,H=0,dpr=1;
+    let nodes=[],links=[],visible=new Set(),present=new Set();
+    let rotX=0.35,rotY=0,autoRot=0.0016,zoom=1,targetZoom=1;
+    let dragging=false,lastX=0,lastY=0,spinVel=0,dragMoved=false;
+    let raf=null,ready=false,hoverId=-1,selectedId=-1,flyTarget=null,pendingFly=null;
+    const $g=id=>document.getElementById(id);
+    const skey=s=>SRC[s]?s:'other';
+    const rgba=(s,a)=>{ const c=SRC[skey(s)]; return 'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')'; };
+    const isOpen=()=>{ const p=$g('cpage-galaxy'); return p&&p.classList.contains('open'); };
+    function wrapAngle(d){ while(d>Math.PI)d-=2*Math.PI; while(d<-Math.PI)d+=2*Math.PI; return d; }
+
+    function resize(){
+      if(!canvas) return; const wrap=canvas.parentElement; dpr=Math.min(2,window.devicePixelRatio||1);
+      W=wrap.clientWidth; H=wrap.clientHeight;
+      canvas.width=Math.max(1,Math.round(W*dpr)); canvas.height=Math.max(1,Math.round(H*dpr));
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+    function settle(){
+      const n=nodes.length; if(!n) return;
+      for(const a of nodes){ const u=Math.random(),v=Math.random(); const th=2*Math.PI*u,ph=Math.acos(2*v-1),r=0.5+Math.random()*0.7;
+        a.x=r*Math.sin(ph)*Math.cos(th); a.y=r*Math.sin(ph)*Math.sin(th); a.z=r*Math.cos(ph); }
+      const ITER=n>350?110:200, k=0.02, spring=0.02, rest=0.55;
+      for(let it=0; it<ITER; it++){
+        for(let i=0;i<n;i++){ const a=nodes[i]; let fx=0,fy=0,fz=0;
+          for(let j=0;j<n;j++){ if(i===j)continue; const b=nodes[j]; let dx=a.x-b.x,dy=a.y-b.y,dz=a.z-b.z; const d2=dx*dx+dy*dy+dz*dz+0.02; const inv=k/d2; fx+=dx*inv; fy+=dy*inv; fz+=dz*inv; }
+          a.fx=fx; a.fy=fy; a.fz=fz; }
+        for(const l of links){ const a=nodes[l.source],b=nodes[l.target]; if(!a||!b)continue;
+          let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z; const d=Math.sqrt(dx*dx+dy*dy+dz*dz)+1e-4; const f=spring*(d-rest)/d;
+          a.fx+=dx*f; a.fy+=dy*f; a.fz+=dz*f; b.fx-=dx*f; b.fy-=dy*f; b.fz-=dz*f; }
+        const cl=v=>Math.max(-0.1,Math.min(0.1,v));
+        for(const a of nodes){ a.fx-=a.x*0.01; a.fy-=a.y*0.01; a.fz-=a.z*0.01; a.x+=cl(a.fx); a.y+=cl(a.fy); a.z+=cl(a.fz); }
+      }
+      let max=0.001; for(const a of nodes){ const r=Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z); if(r>max)max=r; }
+      const sc=1.35/max; for(const a of nodes){ a.x*=sc; a.y*=sc; a.z*=sc; }
+    }
+    function project(a,cx,cy,unit){
+      const cy1=Math.cos(rotY),sy=Math.sin(rotY); let x=a.x*cy1-a.z*sy, z=a.x*sy+a.z*cy1, y=a.y;
+      const cx1=Math.cos(rotX),sx=Math.sin(rotX); const y2=y*cx1-z*sx, z2=y*sx+z*cx1;
+      const s=CAM/Math.max(0.2,CAM-z2)*zoom;
+      return { sx:cx+x*s*unit, sy:cy-y2*s*unit, scale:s, depth:z2 };
+    }
+    function frame(){
+      if(!isOpen()){ raf=null; return; } raf=requestAnimationFrame(frame);
+      if(flyTarget){ rotY+=wrapAngle(flyTarget.ry-rotY)*0.12; rotX+=(flyTarget.rx-rotX)*0.12;
+        if(Math.abs(wrapAngle(flyTarget.ry-rotY))<0.004 && Math.abs(flyTarget.rx-rotX)<0.004){ flyTarget=null; } }
+      else if(!dragging){ rotY+=autoRot+spinVel; spinVel*=0.94; }
+      rotX=Math.max(-1.45,Math.min(1.45,rotX)); zoom+=(targetZoom-zoom)*0.1;
+      ctx.clearRect(0,0,W,H);
+      const cx=W/2, cy=H/2, unit=Math.min(W,H)*0.34, pts=[];
+      for(const nd of nodes){ if(!visible.has(skey(nd.source))){ nd._p=null; continue; } nd._p=project(nd,cx,cy,unit); pts.push(nd); }
+      for(const l of links){ const a=nodes[l.source],b=nodes[l.target]; if(!a||!b||!a._p||!b._p)continue;
+        const al=0.05+0.06*Math.min(a._p.scale,b._p.scale); ctx.strokeStyle='rgba(120,160,220,'+al.toFixed(3)+')';
+        ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(a._p.sx,a._p.sy); ctx.lineTo(b._p.sx,b._p.sy); ctx.stroke(); }
+      pts.sort((a,b)=>a._p.depth-b._p.depth);
+      for(const nd of pts){ const p=nd._p, hi=nd.id===hoverId||nd.id===selectedId; const r=(1.5+nd.val)*p.scale;
+        const fade=Math.max(0.25,Math.min(1,p.scale*0.8));
+        const g=ctx.createRadialGradient(p.sx,p.sy,0,p.sx,p.sy,Math.max(2,r*3.6));
+        g.addColorStop(0,rgba(nd.source,0.9*fade)); g.addColorStop(0.3,rgba(nd.source,0.32*fade)); g.addColorStop(1,rgba(nd.source,0));
+        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p.sx,p.sy,Math.max(2,r*3.6),0,6.2832); ctx.fill();
+        ctx.fillStyle=hi?'#ffffff':rgba(nd.source,Math.min(1,0.85*fade+0.15)); ctx.beginPath(); ctx.arc(p.sx,p.sy,hi?r*1.6:r,0,6.2832); ctx.fill();
+        if(hi){ ctx.strokeStyle=rgba(nd.source,0.9); ctx.lineWidth=1.6; ctx.beginPath(); ctx.arc(p.sx,p.sy,r*2.6+3,0,6.2832); ctx.stroke(); } }
+    }
+    function pick(mx,my){ let best=-1,bd=16*16; for(const nd of nodes){ const p=nd._p; if(!p)continue; const dx=p.sx-mx,dy=p.sy-my,d=dx*dx+dy*dy; if(d<bd){ bd=d; best=nd.id; } } return best; }
+    function showTip(nd,mx,my){ const t=$g('galaxyTip'); if(!nd){ t.classList.remove('show'); return; }
+      t.textContent=(nd.title||('note '+nd.id))+'  ·  '+(LABEL[skey(nd.source)]); t.classList.add('show');
+      const tw=t.offsetWidth||160; t.style.left=Math.min(W-tw-10,mx+14)+'px'; t.style.top=Math.max(6,my+14)+'px'; }
+    function applyFly(id){ const nd=nodes[id]; if(!nd) return; selectedId=id; visible.add(skey(nd.source)); syncFilters();
+      const R=Math.sqrt(nd.x*nd.x+nd.z*nd.z); flyTarget={ ry:Math.atan2(nd.x,nd.z), rx:Math.atan2(nd.y,R) }; targetZoom=1.85; }
+    function syncFilters(){ document.querySelectorAll('#galaxyFilters .gfilter').forEach(c=>{ const on=visible.has(c.dataset.src); c.classList.toggle('on',on); c.classList.toggle('off',!on); }); }
+    function buildFilters(){ const box=$g('galaxyFilters'); box.innerHTML=''; ['vault','knowledge','memory','other'].forEach(s=>{ if(!present.has(s))return;
+      const c=document.createElement('div'); c.className='gfilter on'; c.dataset.src=s;
+      const dot=document.createElement('span'); dot.className='dot'; dot.style.color=rgba(s,1); c.appendChild(dot);
+      c.appendChild(document.createTextNode(LABEL[s])); c.addEventListener('click',()=>{ if(visible.has(s))visible.delete(s); else visible.add(s); syncFilters(); });
+      box.appendChild(c); }); }
+    function bind(){ if(canvas) return; canvas=$g('galaxyCanvas'); ctx=canvas.getContext('2d');
+      canvas.addEventListener('mousedown',e=>{ dragging=true; dragMoved=false; lastX=e.offsetX; lastY=e.offsetY; });
+      window.addEventListener('mouseup',()=>{ dragging=false; });
+      canvas.addEventListener('mousemove',e=>{ const mx=e.offsetX,my=e.offsetY;
+        if(dragging){ const dx=mx-lastX,dy=my-lastY; if(Math.abs(dx)+Math.abs(dy)>2)dragMoved=true; rotY+=dx*0.006; rotX+=dy*0.006; spinVel=dx*0.0006; lastX=mx; lastY=my; flyTarget=null; }
+        else { hoverId=pick(mx,my); showTip(hoverId>=0?nodes[hoverId]:null,mx,my); canvas.style.cursor=hoverId>=0?'pointer':'grab'; } });
+      canvas.addEventListener('mouseleave',()=>{ hoverId=-1; showTip(null); });
+      canvas.addEventListener('click',e=>{ if(dragMoved)return; const id=pick(e.offsetX,e.offsetY); if(id>=0)applyFly(id); });
+      canvas.addEventListener('wheel',e=>{ e.preventDefault(); targetZoom=Math.max(0.4,Math.min(4,targetZoom*(1-e.deltaY*0.0012))); },{passive:false});
+      $g('galaxyRefresh').addEventListener('click',()=>load(true));
+      const search=$g('galaxySearch'); search.addEventListener('keydown',e=>{ if(e.key!=='Enter')return; const q=search.value.trim().toLowerCase(); if(!q)return;
+        const hit=nodes.find(n=>(n.title||'').toLowerCase().includes(q)); if(hit)applyFly(hit.id); });
+      window.addEventListener('resize',()=>{ if(isOpen())resize(); });
+    }
+    async function load(force){ bind(); resize();
+      if(ready && !force){ if(!raf)frame(); if(pendingFly!=null){ applyFly(pendingFly); pendingFly=null; } return; }
+      try{ const j=await (await fetch('/knowledge/graph')).json();
+        nodes=(j.nodes||[]).map(n=>({id:n.id,title:n.title,source:n.source,val:n.val||1}));
+        const byId={}; nodes.forEach(n=>byId[n.id]=n);
+        links=(j.links||[]).filter(l=>byId[l.source]&&byId[l.target]);
+        present=new Set(nodes.map(n=>skey(n.source))); visible=new Set(present);
+        $g('galaxyEmpty').classList.toggle('show',nodes.length===0);
+        $g('galaxyStatus').textContent=nodes.length?(nodes.length+' notes · '+links.length+' links'+(j.truncated?' · capped':'')):'';
+        buildFilters(); settle(); ready=true; resize(); if(!raf)frame();
+        if(pendingFly!=null){ applyFly(pendingFly); pendingFly=null; }
+      }catch(err){ $g('galaxyStatus').textContent='could not load graph'; }
+    }
+    function requestFly(id){ pendingFly=(typeof id==='number')?id:parseInt(id,10); if(ready){ applyFly(pendingFly); pendingFly=null; } }
+    return { load, requestFly, invalidate:()=>{ ready=false; } };
+  })();
+  pageLoaders.galaxy=()=>Galaxy.load();
+  // THE MAGIC: clicking a cited source chip (or any jarvis:flyto emitter) opens the galaxy and flies
+  // the camera to that knowledge node.
+  document.addEventListener('jarvis:flyto',e=>{ navTo('galaxy'); Galaxy.requestFly(e.detail&&e.detail.id); });
 
   // ---- BRAIN (Obsidian vault, read-only) page ----
   let brainCurrent=null;   // {path,title,markdown}
