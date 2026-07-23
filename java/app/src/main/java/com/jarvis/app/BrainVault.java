@@ -142,6 +142,62 @@ final class BrainVault {
         return root != null;
     }
 
+    /** The configured vault root (or {@code null} when unconfigured). For the background watcher. */
+    Path root() {
+        return root;
+    }
+
+    /**
+     * Re-walks the vault into a fresh index in place — no reconnect, no audit "connect" event, no
+     * change to root/writable/pending. Called by the background watcher when files change on disk so
+     * grounding stays current without a manual Connect click. Restores the old index if the walk fails.
+     */
+    synchronized void reindexNow() {
+        if (!configured()) {
+            return;
+        }
+        KeywordIndex previous = this.index;
+        this.index = new KeywordIndex();
+        try {
+            reindex();
+        } catch (RuntimeException e) {
+            this.index = previous;
+            throw e;
+        }
+    }
+
+    /**
+     * A cheap change-fingerprint over the vault's markdown files (relative path + size + mtime), used
+     * by the watcher to detect edits without reading file contents. Returns 0 when unconfigured.
+     */
+    long fingerprint() {
+        Path r = this.root;
+        if (r == null) {
+            return 0L;
+        }
+        long[] h = {1L};
+        try (Stream<Path> walk = Files.walk(r)) {
+            walk.filter(Files::isRegularFile)
+                    .filter(BrainVault::isMarkdown)
+                    .filter(p -> !isHidden(r.relativize(p)))
+                    .forEach(p -> {
+                        try {
+                            long m = Files.getLastModifiedTime(p).toMillis();
+                            long s = Files.size(p);
+                            int nameHash = r.relativize(p).toString().hashCode();
+                            h[0] = h[0] * 1000003L + nameHash;
+                            h[0] = h[0] * 1000003L + m;
+                            h[0] = h[0] * 1000003L + s;
+                        } catch (IOException | RuntimeException ignore) {
+                            // Unreadable file — skip its contribution, still fingerprint the rest.
+                        }
+                    });
+        } catch (IOException e) {
+            return h[0];
+        }
+        return h[0];
+    }
+
     boolean readOnly() {
         // Writes are gated: read-only unless the vault was connected with writes enabled.
         return !writable;

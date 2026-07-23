@@ -96,7 +96,6 @@ public final class WebServer {
         com.jarvis.tasks.TaskBoard tasks =
                 governance == null ? null : governance.tasks();
         WorkflowService workflows = governance == null ? null : governance.workflows();
-        com.jarvis.kb.KnowledgeBase knowledge = governance == null ? null : governance.knowledge();
         MultiAgentService agents = governance == null ? null : governance.agents();
         AutonomousService autonomous = governance == null ? null : governance.autonomous();
         SemanticMemoryService semantic = governance == null ? null : governance.semantic();
@@ -685,17 +684,26 @@ public final class WebServer {
             respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // Knowledge tab search — reads the SAME unified store the chat brain grounds on (req: one
+        // index, no second store), scoped to knowledge/vault entries so it stays a knowledge view.
         server.createContext("/kb/search", exchange -> {
             ArrayNode arr = MAPPER.createArrayNode();
-            if (knowledge != null) {
+            if (semantic != null) {
                 int k = parseInt(param(exchange, "k", "5"), 5);
-                for (com.jarvis.rag.ScoredDocument s : knowledge.search(param(exchange, "q", ""), k)) {
+                int added = 0;
+                for (com.jarvis.rag.ScoredDocument s : semantic.recall(param(exchange, "q", ""), k * 4)) {
+                    if (!isKnowledgeNode(s.document())) {
+                        continue;
+                    }
                     ObjectNode o = arr.addObject();
                     o.put("id", s.document().id());
-                    o.put("title", com.jarvis.kb.KnowledgeBase.titleOf(s.document()));
+                    o.put("title", SemanticMemoryService.titleOf(s.document()));
                     o.put("score", s.score());
                     String c = s.document().content();
                     o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
+                    if (++added >= k) {
+                        break;
+                    }
                 }
             }
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
@@ -770,19 +778,22 @@ public final class WebServer {
                     root.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // Knowledge tab list/add/delete — backed by the SAME unified store as chat grounding. New
+        // entries are tagged source="knowledge" so they group into the Knowledge view and galaxy.
         server.createContext("/kb", exchange -> {
-            if ("POST".equals(exchange.getRequestMethod()) && knowledge != null) {
+            if ("POST".equals(exchange.getRequestMethod()) && semantic != null) {
                 try (InputStream body = exchange.getRequestBody()) {
                     JsonNode j = MAPPER.readTree(body);
                     String action = j.path("action").asText("");
                     if ("add".equals(action)) {
                         if (!j.path("content").asText("").isBlank()
                                 || !j.path("title").asText("").isBlank()) {
-                            knowledge.add(j.path("title").asText(""), j.path("content").asText(""),
+                            semantic.rememberSource(j.path("title").asText(""),
+                                    j.path("content").asText(""), "knowledge",
                                     System.currentTimeMillis());
                         }
                     } else if ("delete".equals(action)) {
-                        knowledge.delete(j.path("id").asText(""));
+                        semantic.forget(j.path("id").asText(""));
                     }
                 } catch (IOException e) {
                     respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
@@ -790,11 +801,14 @@ public final class WebServer {
                 }
             }
             ArrayNode arr = MAPPER.createArrayNode();
-            if (knowledge != null) {
-                for (com.jarvis.rag.Document d : knowledge.list()) {
+            if (semantic != null) {
+                for (com.jarvis.rag.Document d : semantic.all()) {
+                    if (!isKnowledgeNode(d)) {
+                        continue;
+                    }
                     ObjectNode o = arr.addObject();
                     o.put("id", d.id());
-                    o.put("title", com.jarvis.kb.KnowledgeBase.titleOf(d));
+                    o.put("title", SemanticMemoryService.titleOf(d));
                     String c = d.content();
                     o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
                 }
@@ -1910,6 +1924,22 @@ public final class WebServer {
             }
             String preamble = modePreamble(mode);
             String effective = preamble.isEmpty() ? prompt.strip() : preamble + "\n\n" + prompt.strip();
+
+            // PER-QUESTION GROUNDING: score the unified store against THIS question (title-weighted
+            // keyword overlap) and ground on the top few — no more whole-store dump. The node id is the
+            // note's index in the unified store, i.e. its node id in the Knowledge galaxy.
+            java.util.List<com.jarvis.rag.Document> nodes =
+                    semantic == null ? java.util.List.of() : semantic.all();
+            java.util.List<KnowledgeGrounding.Scored> grounded =
+                    KnowledgeGrounding.retrieve(nodes, prompt, KnowledgeGrounding.DEFAULT_TOP_K);
+            // Console trace so grounding is verifiable from the server log, no devtools needed.
+            System.out.println("[chat] grounding \"" + oneLine(prompt) + "\" -> " + grounded.size()
+                    + " note(s) of " + nodes.size());
+            for (KnowledgeGrounding.Scored s : grounded) {
+                System.out.printf(java.util.Locale.ROOT, "        #%d  score=%.3f  %s%n",
+                        s.id(), s.score(), s.title().isBlank() ? "(untitled)" : s.title());
+            }
+
             // Prepend the text of any attached uploads so the assistant can read them.
             if (uploads != null && !docIds.isEmpty()) {
                 String context = uploads.contextFor(docIds, UploadedDocsService.DEFAULT_CONTEXT_BUDGET);
@@ -1918,13 +1948,25 @@ public final class WebServer {
                             + context + "\n\n" + effective;
                 }
             }
+            // Grounding sits at the very top of the prompt, above uploads and the question.
+            String groundingBlock = KnowledgeGrounding.contextBlock(grounded);
+            if (!groundingBlock.isBlank()) {
+                effective = groundingBlock + "\n\n" + effective;
+            }
+
             ChatResponse chat = api.chat(new ChatRequest("dashboard", effective));
+            String answer = chat.completed() ? chat.response()
+                    : "(no answer - my step budget ran out; please try rephrasing)";
             ObjectNode reply = MAPPER.createObjectNode();
-            reply.put("completed", chat.completed());
-            reply.put("response", chat.completed()
-                    ? chat.response()
-                    : "(no answer - my step budget ran out; please try rephrasing)");
-            reply.put("toolSteps", chat.toolSteps());
+            reply.put("answer", answer);
+            ArrayNode sources = reply.putArray("sources");
+            for (KnowledgeGrounding.Scored s : grounded) {
+                ObjectNode so = sources.addObject();
+                so.put("id", s.id());
+                so.put("title", s.title().isBlank() ? ("note " + s.id()) : s.title());
+                so.put("score", s.score());
+            }
+            reply.put("toolSteps", chat.toolSteps());   // retained for the tool-step indicator
             respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
         });
 
@@ -1997,6 +2039,21 @@ public final class WebServer {
         } catch (NumberFormatException e) {
             return dflt;
         }
+    }
+
+    /** A unified-store node that belongs in the Knowledge view / galaxy (connector knowledge or vault). */
+    private static boolean isKnowledgeNode(com.jarvis.rag.Document d) {
+        String src = SemanticMemoryService.sourceOf(d);
+        return "knowledge".equals(src) || "vault".equals(src);
+    }
+
+    /** Collapses whitespace and truncates a string for a single-line console trace. */
+    private static String oneLine(String s) {
+        if (s == null) {
+            return "";
+        }
+        String flat = s.replaceAll("\\s+", " ").strip();
+        return flat.length() > 120 ? flat.substring(0, 120) + "…" : flat;
     }
 
     /** Serializes one model's contribution to an orchestration run (for the trace tree). */

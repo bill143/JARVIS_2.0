@@ -238,6 +238,12 @@
   .who { font-size:9px; letter-spacing:2px; color:var(--dim); margin-bottom:3px; text-transform:uppercase; }
   .meta { font-size:10px; color:var(--dim); margin-top:4px; }
   .thinking { color:var(--dim); font-style:italic; }
+  .sources { margin-top:6px; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  .sources-label { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; }
+  .source-chip { font-size:11px; color:var(--fg); background:rgba(120,170,255,.10);
+    border:1px solid rgba(120,170,255,.35); border-radius:999px; padding:2px 9px; cursor:pointer;
+    max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .source-chip:hover { background:rgba(120,170,255,.22); border-color:rgba(120,170,255,.6); }
 
   /* Bottom status bar */
   .statusbar { display:flex; align-items:center; gap:20px; padding:8px 22px; font-size:11px;
@@ -1679,7 +1685,7 @@
       const hint=tones[S.personality];
       const sendPrompt = hint ? ('['+hint+']\n'+prompt) : prompt;
       const docIds = attachedDocs.filter(d=>d.readable).map(d=>d.id);
-      let answer, trace=null;
+      let answer, trace=null, sources=[];
       if (orchMode!=='single'){
         const r = await fetch('/orchestrate', { method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ mode:orchMode, prompt: sendPrompt }) });
@@ -1688,7 +1694,8 @@
       } else {
         const r = await fetch('/chat', { method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ prompt: sendPrompt, docs: docIds }) });
-        const j = await r.json(); answer = j.response;
+        const j = await r.json(); answer = (j.answer!==undefined ? j.answer : j.response);
+        sources = Array.isArray(j.sources) ? j.sources : [];
         if (j.toolSteps > 0 && S.showDetails!==false) trace={toolSteps:j.toolSteps};
       }
       pending.className = '';
@@ -1701,10 +1708,30 @@
       if (trace && trace.trace) pending.parentElement.appendChild(renderTrace(trace));
       else if (trace && trace.toolSteps) { const m=document.createElement('div'); m.className='meta';
         m.textContent='used '+trace.toolSteps+' tool step'+(trace.toolSteps>1?'s':''); pending.parentElement.appendChild(m); }
+      if (sources.length) pending.parentElement.appendChild(renderSources(sources));
       if (S.autoSpeak) speak(answer); else setOrb(restState());
     } catch (err) {
       pending.className=''; pending.textContent='Connection error: '+err.message; setOrb(restState());
     } finally { send.disabled = false; box.focus(); }
+  }
+
+  // Cited knowledge behind an answer: a compact row of chips. Each carries its node id (index in the
+  // unified knowledge list) so the Knowledge galaxy can fly straight to it (wired in a later stage).
+  function renderSources(sources){
+    const wrap=document.createElement('div'); wrap.className='sources';
+    const lbl=document.createElement('span'); lbl.className='sources-label'; lbl.textContent='Sources:';
+    wrap.appendChild(lbl);
+    sources.forEach(s=>{
+      const chip=document.createElement('button'); chip.type='button'; chip.className='source-chip';
+      chip.textContent=s.title||('note '+s.id);
+      if (typeof s.score==='number') chip.title='relevance '+s.score;
+      chip.dataset.nodeId=s.id;
+      chip.addEventListener('click',()=>{
+        document.dispatchEvent(new CustomEvent('jarvis:flyto',{detail:{id:s.id,title:s.title}}));
+      });
+      wrap.appendChild(chip);
+    });
+    return wrap;
   }
 
   document.getElementById('form').addEventListener('submit', (e) => {
@@ -2908,7 +2935,7 @@
     try{
       const j=await (await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({prompt:msg,mode:convMode})})).json();
-      thinking.remove(); convAppend(j.response||'(no answer)','bot');
+      thinking.remove(); convAppend(j.answer||j.response||'(no answer)','bot');
     }catch(err){ thinking.remove(); convAppend('Something went wrong. Please try again.','bot'); }
   });
   pageLoaders.conv=()=>$('convBox').focus();

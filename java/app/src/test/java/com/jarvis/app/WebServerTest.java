@@ -84,7 +84,9 @@ class WebServerTest {
     void chatAnswersThroughTheApi() throws Exception {
         HttpResponse<String> response = post("/chat", "{\"prompt\":\"hello dashboard\"}");
         assertEquals(200, response.statusCode());
-        assertTrue(response.body().contains("\"completed\":true"));
+        // Schema is {answer, sources:[...]} — the echoed prompt comes back as the answer.
+        assertTrue(response.body().contains("\"answer\":"), response.body());
+        assertTrue(response.body().contains("\"sources\":"), response.body());
         assertTrue(response.body().contains("hello dashboard"));
     }
 
@@ -93,7 +95,7 @@ class WebServerTest {
         HttpResponse<String> response = post("/chat",
                 "{\"prompt\":\"outline a plan\",\"mode\":\"research\"}");
         assertEquals(200, response.statusCode());
-        assertTrue(response.body().contains("\"completed\":true"));
+        assertTrue(response.body().contains("\"answer\":"), response.body());
         // Offline echo returns the effective prompt, so the mode preamble is applied.
         assertTrue(response.body().contains("Mode: Research"));
         assertTrue(response.body().contains("outline a plan"));
@@ -557,13 +559,16 @@ class WebServerTest {
 
     @Test
     void knowledgeBaseEndpointsAddSearchAndList() throws Exception {
-        com.jarvis.kb.KnowledgeBase kb =
-                new com.jarvis.kb.KnowledgeBase(new com.jarvis.memory.InMemoryRecordStore());
+        // The Knowledge tab is now backed by the unified semantic store (one index, no second store),
+        // so wire a SemanticMemoryService (Governance field #13) rather than a standalone KnowledgeBase.
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
         WebServer wired = WebServer.start(
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, kb, null, null, null, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             post2(base + "/kb",
@@ -575,6 +580,39 @@ class WebServerTest {
                     HttpResponse.BodyHandlers.ofString());
             assertTrue(found.body().contains("Go-kart"));
             assertTrue(found.body().contains("\"score\":"));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void chatGroundsOnTheUnifiedStoreAndCitesSources() throws Exception {
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        semantic.rememberSource("Riverfront bid", "the riverfront marina bid is due Friday",
+                "knowledge", 1L);
+        semantic.rememberSource("Coffee", "black, no sugar", "memory", 2L);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null));
+        try {
+            String base = "http://localhost:" + wired.port();
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(URI.create(base + "/chat"))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"prompt\":\"when is the riverfront marina bid due\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, r.statusCode());
+            // Schema: {answer, sources:[{id,title,score}]}.
+            assertTrue(r.body().contains("\"answer\":"), r.body());
+            assertTrue(r.body().contains("\"sources\":"), r.body());
+            assertTrue(r.body().contains("Riverfront bid"), r.body());       // cited source title
+            assertTrue(r.body().contains("\"id\":"), r.body());              // node id present
+            // Grounding is injected into the prompt (offline echo returns the effective prompt).
+            assertTrue(r.body().contains("Relevant notes from your knowledge"), r.body());
         } finally {
             wired.stop();
         }

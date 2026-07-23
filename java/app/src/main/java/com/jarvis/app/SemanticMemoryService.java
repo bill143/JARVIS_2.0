@@ -62,17 +62,55 @@ final class SemanticMemoryService {
 
     /** Stores a memory (title + content), embeds it when live, and audits it. Returns its id. */
     synchronized String remember(String title, String content, long nowMillis) {
+        return rememberSource(title, content, "memory", nowMillis);
+    }
+
+    /**
+     * Stores a memory tagged with an explicit provenance {@code source} (e.g. "knowledge"). Used so
+     * connector knowledge and the Knowledge tab write into this single store rather than a second one.
+     * Returns the generated id.
+     */
+    synchronized String rememberSource(String title, String content, String source, long nowMillis) {
         String id = "sm-" + Long.toHexString(nowMillis) + "-" + (++counter);
+        writeDoc(id, title, content, source);
+        record("semantic-remember", "title: " + (title == null ? "" : title));
+        return id;
+    }
+
+    /**
+     * Upserts a document under a caller-supplied stable {@code id} and {@code source}. Idempotent:
+     * calling again with the same id replaces the entry instead of duplicating it — used to fold
+     * legacy connector knowledge into this single store on startup without creating a second store.
+     * Returns the id, or {@code null} if the id was blank.
+     */
+    synchronized String ingest(String id, String title, String content, String source) {
+        if (id == null || id.isBlank()) {
+            return null;
+        }
+        writeDoc(id, title, content, source);
+        return id;
+    }
+
+    /** The single write path: append a save op (with provenance) and (re)index the document. */
+    private void writeDoc(String id, String title, String content, String source) {
+        String t = title == null ? "" : title;
+        String c = content == null ? "" : content;
+        String s = source == null ? "" : source;
         ObjectNode e = MAPPER.createObjectNode();
         e.put("op", "save");
         e.put("id", id);
-        e.put("title", title == null ? "" : title);
-        e.put("content", content == null ? "" : content);
+        e.put("title", t);
+        e.put("content", c);
+        e.put("source", s);
         store.append(collection, e.toString());
-        memory.add(new Document(id, content == null ? "" : content,
-                Map.of("title", title == null ? "" : title)));
-        record("semantic-remember", "title: " + (title == null ? "" : title));
-        return id;
+        memory.remove(id);
+        memory.add(new Document(id, c, docMeta(t, s)));
+    }
+
+    private static Map<String, String> docMeta(String title, String source) {
+        return source == null || source.isBlank()
+                ? Map.of("title", title)
+                : Map.of("title", title, "source", source);
     }
 
     /** Recalls up to {@code k} memories by meaning (or keyword when dormant); audits the recall. */
@@ -102,22 +140,18 @@ final class SemanticMemoryService {
      * consistent and recall reflects the new text immediately. Returns whether the id existed.
      */
     synchronized boolean update(String id, String title, String content, long nowMillis) {
-        if (id == null || id.isBlank() || !memory.all().stream().anyMatch(d -> d.id().equals(id))) {
+        if (id == null || id.isBlank() || memory.all().stream().noneMatch(d -> d.id().equals(id))) {
             return false;
         }
+        // Preserve the entry's provenance across an edit so it stays in its tab / galaxy grouping.
+        String source = memory.all().stream().filter(d -> d.id().equals(id)).findFirst()
+                .map(SemanticMemoryService::sourceOf).filter(s -> !s.isBlank()).orElse("memory");
         ObjectNode del = MAPPER.createObjectNode();
         del.put("op", "delete");
         del.put("id", id);
         store.append(collection, del.toString());
         memory.remove(id);
-        ObjectNode e = MAPPER.createObjectNode();
-        e.put("op", "save");
-        e.put("id", id);
-        e.put("title", title == null ? "" : title);
-        e.put("content", content == null ? "" : content);
-        store.append(collection, e.toString());
-        memory.add(new Document(id, content == null ? "" : content,
-                Map.of("title", title == null ? "" : title)));
+        writeDoc(id, title, content, source);
         record("semantic-update", "id: " + id);
         return true;
     }
@@ -133,14 +167,7 @@ final class SemanticMemoryService {
             String id = "vault-" + n.id();
             keep.add(id);
             String title = n.metadata().getOrDefault("title", n.id());
-            ObjectNode e = MAPPER.createObjectNode();
-            e.put("op", "save");
-            e.put("id", id);
-            e.put("title", title);
-            e.put("content", n.content());
-            store.append(collection, e.toString());
-            memory.remove(id);
-            memory.add(new Document(id, n.content(), Map.of("title", title, "source", "vault")));
+            writeDoc(id, title, n.content(), "vault");
         }
         // Forget vault notes that no longer exist on disk.
         for (Document d : memory.all()) {
@@ -163,6 +190,11 @@ final class SemanticMemoryService {
 
     static String titleOf(Document d) {
         return d.metadata().getOrDefault("title", "");
+    }
+
+    /** The stored provenance tag ("vault", "knowledge", "memory", …); empty when untagged. */
+    static String sourceOf(Document d) {
+        return d.metadata() == null ? "" : d.metadata().getOrDefault("source", "");
     }
 
     private void record(String action, String detail) {
@@ -188,7 +220,8 @@ final class SemanticMemoryService {
                 current.remove(e.path("id").asText());
             } else if (e.has("id")) {
                 current.put(e.path("id").asText(), new Document(e.path("id").asText(),
-                        e.path("content").asText(""), Map.of("title", e.path("title").asText(""))));
+                        e.path("content").asText(""),
+                        docMeta(e.path("title").asText(""), e.path("source").asText(""))));
             }
         }
         current.values().forEach(memory::add);

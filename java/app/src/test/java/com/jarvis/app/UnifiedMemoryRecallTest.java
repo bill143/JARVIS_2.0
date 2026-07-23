@@ -7,40 +7,59 @@ import com.jarvis.memory.InMemoryRecordStore;
 import com.jarvis.memory.InMemoryStore;
 import com.jarvis.memory.MemoryStore;
 import com.jarvis.rag.EmbeddingProvider;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Guards issue #2: chat recall draws user facts from the single unified store (the semantic
- * memory service), so a fact added in the Personal Intelligence tab reaches conversations — the
- * same store the Memory tab reads and writes.
+ * Guards issue #2 under the Stage A architecture: user facts still reach conversations from the
+ * single unified store — but now via <b>per-question retrieval</b> ({@link KnowledgeGrounding}) at
+ * chat time rather than a static whole-store dump in the recall block. The recall block itself now
+ * carries only durable identity context (directions, about-me), never the fact dump.
  */
 class UnifiedMemoryRecallTest {
 
+    private static SemanticMemoryService store() {
+        return new SemanticMemoryService(new InMemoryRecordStore(), EmbeddingProvider.DORMANT, null);
+    }
+
     @Test
-    void recallDrawsFactsFromTheUnifiedSemanticStore() {
-        SemanticMemoryService semantic = new SemanticMemoryService(
-                new InMemoryRecordStore(), EmbeddingProvider.DORMANT, null);
+    void recallBlockNoLongerDumpsTheSemanticStore() {
+        SemanticMemoryService semantic = store();
         semantic.remember("Coffee", "black, no sugar", 1L);
         semantic.remember("", "prefers metric units", 2L);
         MemoryStore<String> memory = new InMemoryStore<>();
         memory.put("about", "me", "I'm Bill.");
 
         String block = AppWiring.recall(memory, semantic);
-        assertTrue(block.contains("Coffee: black, no sugar"), block);
-        assertTrue(block.contains("prefers metric units"), block);
+        // Identity context rides along on every turn...
         assertTrue(block.contains("About the user: I'm Bill."), block);
+        // ...but the individual facts are NOT dumped anymore (they're retrieved per question instead).
+        assertFalse(block.contains("black, no sugar"), block);
+        assertFalse(block.contains("prefers metric units"), block);
     }
 
     @Test
-    void forgottenFactsLeaveTheRecallBlock() {
-        SemanticMemoryService semantic = new SemanticMemoryService(
-                new InMemoryRecordStore(), EmbeddingProvider.DORMANT, null);
-        String id = semantic.remember("Secret", "delete me", 1L);
-        MemoryStore<String> memory = new InMemoryStore<>();
-        assertTrue(AppWiring.recall(memory, semantic).contains("delete me"));
+    void factsReachChatViaPerQuestionRetrieval() {
+        SemanticMemoryService semantic = store();
+        semantic.remember("Coffee", "black, no sugar", 1L);
+        semantic.remember("Units", "prefers metric units", 2L);
+
+        // Asking about coffee surfaces the coffee fact from the same unified store.
+        List<KnowledgeGrounding.Scored> hits =
+                KnowledgeGrounding.retrieve(semantic.all(), "how do you take your coffee", 6);
+        assertTrue(hits.stream().anyMatch(h -> h.content().contains("black, no sugar")), hits.toString());
+    }
+
+    @Test
+    void forgottenFactsLeaveRetrieval() {
+        SemanticMemoryService semantic = store();
+        String id = semantic.remember("Secret", "the passphrase is orchid", 1L);
+        assertTrue(KnowledgeGrounding.retrieve(semantic.all(), "passphrase", 6).stream()
+                .anyMatch(h -> h.content().contains("orchid")));
 
         assertTrue(semantic.forget(id));
-        assertFalse(AppWiring.recall(memory, semantic).contains("delete me"));
+        assertFalse(KnowledgeGrounding.retrieve(semantic.all(), "passphrase", 6).stream()
+                .anyMatch(h -> h.content().contains("orchid")));
     }
 
     @Test

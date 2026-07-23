@@ -306,6 +306,21 @@ final class AppWiring {
         BrainVault brain = BrainVault.fromConfig(
                 connectors.resolve("obsidian.vaultPath", "OBSIDIAN_VAULT_PATH"), true, auditLog);
 
+        // ONE INDEX: fold any legacy connector-knowledge entries into the unified semantic store so the
+        // Knowledge tab and chat grounding read the same place. One-time and idempotent (guarded by a
+        // marker), so user deletes stick across restarts. New Knowledge-tab writes go straight to
+        // semantic (see the /kb handler), so this migration runs at most once per machine.
+        if (memory.get("system", "kb-migrated").isEmpty()) {
+            for (com.jarvis.rag.Document d : knowledge.list()) {
+                semantic.ingest("knowledge-" + d.id(), com.jarvis.kb.KnowledgeBase.titleOf(d),
+                        d.content(), "knowledge");
+            }
+            memory.put("system", "kb-migrated", "true");
+        }
+        // AUTO-SYNC: mirror the Obsidian vault into the store at startup and re-mirror on file changes,
+        // so grounding is live without the user clicking "Connect". Daemon-backed; no request-path cost.
+        VaultWatcher.start(brain, semantic, 5_000L);
+
         // Uploaded documents the assistant can read (txt/md/csv/json native, docx/xlsx JDK-only,
         // pdf via PDFBox). In-memory and session-scoped; every upload is audited.
         UploadedDocsService uploads = new UploadedDocsService(auditLog);
@@ -460,14 +475,12 @@ final class AppWiring {
      */
     static String recall(MemoryStore<String> memory, SemanticMemoryService semantic) {
         List<String> lines = new java.util.ArrayList<>();
-        if (semantic != null) {
-            semantic.all().stream().limit(100).forEach(d -> {
-                String title = SemanticMemoryService.titleOf(d);
-                String content = d.content();
-                lines.add("- " + (title.isBlank() ? content
-                        : (content.isBlank() ? title : title + ": " + content)));
-            });
-        } else {
+        // Durable identity context that should ride along on EVERY turn (directions, who the user is).
+        // Facts and notes are NOT dumped here anymore: they are retrieved per question at chat time
+        // (see KnowledgeGrounding in the /chat handler), so the model gets what the question needs
+        // instead of the whole store. When no semantic store is wired we still surface key/value
+        // preferences as a minimal fallback.
+        if (semantic == null) {
             memory.query("preferences").forEach(e -> lines.add("- " + e.value()));
         }
         memory.get("instructions", "mail").map(m -> m.value()).filter(s -> !s.isBlank())
