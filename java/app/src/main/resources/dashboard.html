@@ -1666,8 +1666,14 @@
     document.getElementById('ssAi').className = 'sdot' + (s.online ? '' : ' off');
     document.getElementById('ssVision').className = 'sdot' + (s.online ? '' : ' off');
     document.getElementById('ssGoogle').className = 'sdot' + (s.google ? '' : ' off');
-    add('jarvis', s.online ? 'All systems online, sir. How can I help?'
-        : 'Running in offline echo mode. Set ANTHROPIC_API_KEY and restart to enable AI.');
+    const n = s.notes || 0;
+    const noteStr = n ? (' I have ' + n + ' note' + (n === 1 ? '' : 's') + ' indexed and at the ready.') : '';
+    const hr = new Date().getHours();
+    const tod = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+    add('jarvis', s.online
+        ? (tod + ', sir. All systems online.' + noteStr + ' How may I help?')
+        : (tod + ', sir. Running in offline echo mode.' + noteStr
+            + ' Set ANTHROPIC_API_KEY and restart to enable full AI.'));
     if (s.online) {
       if (S.autoBrief && !didAutoBrief) { didAutoBrief = true;
         setTimeout(() => document.getElementById('brief').click(), 700); }

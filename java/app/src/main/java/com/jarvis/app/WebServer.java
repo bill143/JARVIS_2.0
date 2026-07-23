@@ -1922,6 +1922,8 @@ public final class WebServer {
             status.put("online", liveOnline);
             status.put("model", liveModel == null || liveModel.isBlank() ? model : liveModel);
             status.put("google", googleConnected);
+            // Live size of the unified knowledge store, so the greeting can report it (butler touch).
+            status.put("notes", semantic == null ? 0 : semantic.all().size());
             respond(exchange, 200, "application/json", status.toString().getBytes(StandardCharsets.UTF_8));
         });
 

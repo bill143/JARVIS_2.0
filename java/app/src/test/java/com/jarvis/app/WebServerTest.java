@@ -590,6 +590,28 @@ class WebServerTest {
     }
 
     @Test
+    void statusReportsLiveNoteCountForTheGreeting() throws Exception {
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        semantic.remember("A", "one", 1L);
+        semantic.remember("B", "two", 2L);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null));
+        try {
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + wired.port() + "/status")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(r.body().contains("\"notes\":2"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void knowledgeGraphEndpointReturnsNodesAndLinksAlignedWithSourceIds() throws Exception {
         SemanticMemoryService semantic = new SemanticMemoryService(
                 new com.jarvis.memory.InMemoryRecordStore(),
