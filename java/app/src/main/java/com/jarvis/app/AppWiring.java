@@ -265,9 +265,12 @@ final class AppWiring {
 
         // Local-first multi-model orchestration (ensemble + hierarchy) over the configured providers.
         // Tier-2 routing/failover to OpenHuman is wired in but stays inert (byte-for-byte the prior
-        // behavior) unless JARVIS_OPENHUMAN_ENABLED is set — see OrchestrationService#callOne.
+        // behavior) unless JARVIS_OPENHUMAN_ENABLED is set — see OrchestrationService#callOne. Every
+        // role (Conductor/Orchestrator/Worker) is grounded per-call on the same unified store the main
+        // chat brain uses — the Obsidian vault is auto-mirrored into it below by VaultWatcher — so the
+        // whole hierarchy shares persistent context instead of each call starting cold.
         OrchestrationService orchestration = new OrchestrationService(providerSettings, auditLog,
-                effectiveModel, OrchestrationService::build, routingSettings, openhuman);
+                effectiveModel, OrchestrationService::build, routingSettings, openhuman, semantic);
 
         // Policy-gated self-hosted lane (off by default, default-deny, audited). Responsible analogue
         // of the Hermes "Shadow CEO": local-only, absolute harm denylist, allowlist-scoped.
@@ -305,6 +308,15 @@ final class AppWiring {
         // source of truth. No writes to the vault in Phase 1.
         BrainVault brain = BrainVault.fromConfig(
                 connectors.resolve("obsidian.vaultPath", "OBSIDIAN_VAULT_PATH"), true, auditLog);
+        // Loud, unambiguous startup signal — no need to open the dashboard to know whether the vault
+        // actually connected. Mirrors the dashboard's statusbar Brain badge (see WebServer /status).
+        if (brain.configured()) {
+            System.out.println("[BRAIN] Obsidian vault connected: " + brain.rootDisplay()
+                    + " (" + brain.count() + " notes)");
+        } else {
+            System.out.println("[BRAIN] Obsidian vault NOT connected - set OBSIDIAN_VAULT_PATH or "
+                    + "configure it in the dashboard's Connectors/BRAIN tab.");
+        }
 
         // ONE INDEX: fold any legacy connector-knowledge entries into the unified semantic store so the
         // Knowledge tab and chat grounding read the same place. One-time and idempotent (guarded by a

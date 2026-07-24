@@ -643,6 +643,46 @@ class WebServerTest {
     }
 
     @Test
+    void statusReportsBrainConnectedWithNoteCountAndPath(@org.junit.jupiter.api.io.TempDir java.nio.file.Path vault)
+            throws Exception {
+        java.nio.file.Files.writeString(vault.resolve("note.md"), "# Hi\ncontent");
+        BrainVault brain = BrainVault.fromConfig(vault.toString(), true, null);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, null, brain, null, null, null, null, null, null));
+        try {
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + wired.port() + "/status")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(r.body().contains("\"brainConfigured\":true"), r.body());
+            assertTrue(r.body().contains("\"brainNotes\":1"), r.body());
+            assertTrue(r.body().contains(vault.toString().replace("\\", "\\\\")), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void statusReportsBrainNotConnectedWhenUnconfigured() throws Exception {
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null, null);
+        try {
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + wired.port() + "/status")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(r.body().contains("\"brainConfigured\":false"), r.body());
+            assertTrue(r.body().contains("\"brainNotes\":0"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void knowledgeGraphEndpointReturnsNodesAndLinksAlignedWithSourceIds() throws Exception {
         SemanticMemoryService semantic = new SemanticMemoryService(
                 new com.jarvis.memory.InMemoryRecordStore(),

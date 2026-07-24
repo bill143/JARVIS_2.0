@@ -16,6 +16,7 @@ import com.jarvis.integrations.openhuman.routing.FallbackRoute;
 import com.jarvis.integrations.openhuman.routing.RouteDecision;
 import com.jarvis.integrations.openhuman.routing.RouteSelector;
 import com.jarvis.integrations.openhuman.routing.RouteTier;
+import com.jarvis.rag.Document;
 import com.jarvis.tools.RiskTier;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -74,6 +75,7 @@ final class OrchestrationService {
     private final RoutingSettings routingSettings;       // nullable — null means routing is inert
     private final OpenHumanClient openHuman;             // nullable — null means no Tier-2 target
     private final RouteSelector routeSelector;           // nullable — built once routingSettings is set
+    private final SemanticMemoryService semantic;        // nullable — null means no shared grounding
 
     OrchestrationService(ProviderSettingsService providers, AuditLog audit, String defaultModel) {
         this(providers, audit, defaultModel, OrchestrationService::build, null, null);
@@ -85,16 +87,35 @@ final class OrchestrationService {
     }
 
     /**
-     * Full constructor adding Tier-2 routing/failover. {@code routingSettings} and {@code openHuman}
-     * may both be {@code null} to leave routing entirely inert — byte-for-byte the pre-Tier-2
-     * behavior, which is exactly what the two convenience constructors above do (every existing
-     * caller/test is unaffected). When both are supplied, routing only actually engages per call
-     * once {@link RoutingSettings.Snapshot#openHumanEnabled()} reads {@code true} at that moment;
-     * circuit breaker thresholds are captured once, from the snapshot at construction time.
+     * Constructor adding Tier-2 routing/failover, without shared grounding. {@code routingSettings}
+     * and {@code openHuman} may both be {@code null} to leave routing entirely inert. Delegates to the
+     * full constructor with {@code semantic=null} — existing callers/tests are unaffected.
      */
     OrchestrationService(ProviderSettingsService providers, AuditLog audit, String defaultModel,
             Function<ProviderSettingsService.Active, LlmProvider> providerFactory,
             RoutingSettings routingSettings, OpenHumanClient openHuman) {
+        this(providers, audit, defaultModel, providerFactory, routingSettings, openHuman, null);
+    }
+
+    /**
+     * Full constructor adding Tier-2 routing/failover and shared Brain/memory grounding.
+     * {@code routingSettings}/{@code openHuman} may both be {@code null} to leave routing entirely
+     * inert — byte-for-byte the pre-Tier-2 behavior, which is exactly what the constructors above do
+     * (every existing caller/test is unaffected). When both are supplied, routing only actually
+     * engages per call once {@link RoutingSettings.Snapshot#openHumanEnabled()} reads {@code true} at
+     * that moment; circuit breaker thresholds are captured once, from the snapshot at construction
+     * time.
+     *
+     * <p>{@code semantic} is the same unified store the main chat brain grounds on (the Obsidian vault
+     * is mirrored into it automatically by {@code VaultWatcher}). When non-null, every role's call —
+     * Conductor decompose/arbitrate, Worker execution, ensemble members, and the OpenHuman fallback —
+     * is grounded per-call via {@link KnowledgeGrounding}, scored against that specific call's task
+     * text, exactly like the {@code /chat} handler grounds the single chat brain. {@code null} means
+     * no grounding is injected (the pre-existing behavior).
+     */
+    OrchestrationService(ProviderSettingsService providers, AuditLog audit, String defaultModel,
+            Function<ProviderSettingsService.Active, LlmProvider> providerFactory,
+            RoutingSettings routingSettings, OpenHumanClient openHuman, SemanticMemoryService semantic) {
         this.providers = providers;
         this.audit = audit;
         this.defaultModel = defaultModel == null || defaultModel.isBlank() ? "model" : defaultModel;
@@ -103,6 +124,28 @@ final class OrchestrationService {
         this.openHuman = openHuman;
         this.routeSelector = routingSettings == null
                 ? null : new RouteSelector(breakerConfig(routingSettings.snapshot()));
+        this.semantic = semantic;
+    }
+
+    /**
+     * Grounds {@code prompt} against the shared unified store (semantic facts + the auto-synced
+     * Obsidian vault), scored specifically against this task's text — the same mechanism and topK
+     * (see {@link KnowledgeGrounding#DEFAULT_TOP_K}) the main chat brain uses. Best-effort: a grounding
+     * failure never breaks the underlying model call, it just falls back to the ungrounded prompt.
+     */
+    private String groundedPrompt(String prompt) {
+        if (semantic == null) {
+            return prompt;
+        }
+        try {
+            List<Document> nodes = semantic.all();
+            List<KnowledgeGrounding.Scored> hits =
+                    KnowledgeGrounding.retrieve(nodes, prompt, KnowledgeGrounding.DEFAULT_TOP_K);
+            String block = KnowledgeGrounding.contextBlock(hits);
+            return block.isBlank() ? prompt : block + "\n\n" + prompt;
+        } catch (RuntimeException e) {
+            return prompt;
+        }
     }
 
     private static RouteSelector.BreakerConfig breakerConfig(RoutingSettings.Snapshot snap) {
@@ -394,7 +437,7 @@ final class OrchestrationService {
         try {
             LlmProvider prov = providerFactory.apply(a);
             LlmProvider.Result r = prov.complete(new LlmProvider.Request(model, system,
-                    List.of(new LlmProvider.Message("user", prompt)), maxTokens));
+                    List.of(new LlmProvider.Message("user", groundedPrompt(prompt))), maxTokens));
             long ms = (System.nanoTime() - t0) / 1_000_000;
             record("orchestrate_call", a.name() + "/" + model + " (" + stage + ")", AuditOutcome.SUCCESS);
             return new ModelResult(a.name(), model, role, stage, true, r.text().strip(), ms, "");
@@ -464,7 +507,8 @@ final class OrchestrationService {
         try {
             LlmProvider prov = providerFactory.apply(a);
             LlmProvider.Result r = runWithTimeout(() -> prov.complete(new LlmProvider.Request(model,
-                    system, List.of(new LlmProvider.Message("user", prompt)), maxTokens)), timeoutMs);
+                    system, List.of(new LlmProvider.Message("user", groundedPrompt(prompt))), maxTokens)),
+                    timeoutMs);
             long ms = (System.nanoTime() - t0) / 1_000_000;
             record("orchestrate_call", a.name() + "/" + model + " (" + stage + ")", AuditOutcome.SUCCESS);
             return new ModelResult(a.name(), model, role, stage, true, r.text().strip(), ms, "");
@@ -487,7 +531,8 @@ final class OrchestrationService {
     private ModelResult callOpenHuman(String system, String prompt, int timeoutMs) {
         long t0 = System.nanoTime();
         try {
-            String reply = runWithTimeout(() -> openHuman.consult(prompt, system), timeoutMs);
+            String reply = runWithTimeout(
+                    () -> openHuman.consult(groundedPrompt(prompt), system), timeoutMs);
             long ms = (System.nanoTime() - t0) / 1_000_000;
             record("orchestrate_call", OPENHUMAN_TARGET_ID + " (consult)", AuditOutcome.SUCCESS);
             return new ModelResult(OPENHUMAN_TARGET_ID, OPENHUMAN_TARGET_ID, "", "consult", true,

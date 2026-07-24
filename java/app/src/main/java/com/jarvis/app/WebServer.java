@@ -1924,6 +1924,11 @@ public final class WebServer {
             status.put("google", googleConnected);
             // Live size of the unified knowledge store, so the greeting can report it (butler touch).
             status.put("notes", semantic == null ? 0 : semantic.all().size());
+            // Brain (Obsidian vault) connection — explicit and separate from the unified "notes" count
+            // above, so the dashboard can show an unambiguous connected/not-connected badge.
+            status.put("brainConfigured", brain != null && brain.configured());
+            status.put("brainNotes", brain == null ? 0 : brain.count());
+            status.put("brainPath", brain == null ? "" : brain.rootDisplay());
             respond(exchange, 200, "application/json", status.toString().getBytes(StandardCharsets.UTF_8));
         });
 

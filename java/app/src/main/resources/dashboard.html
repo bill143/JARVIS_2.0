@@ -771,6 +771,7 @@
 
   <div class="statusbar">
     <span><span class="dot" id="sbDot"></span><span id="sbMode">CONNECTING…</span></span>
+    <span><span class="dot" id="sbBrainDot"></span><span id="sbBrainLabel">BRAIN: CHECKING…</span></span>
     <span>MIC: <b id="sbMic">OFF</b></span>
     <span class="sbupd" id="sbUpdate"></span>
     <span class="spacer"></span>
@@ -1657,10 +1658,25 @@
   }
 
   // ---------- Status + telemetry + clock ----------
+  // Brain (Obsidian vault) connection badge — explicit connected/not-connected + live note count, so
+  // it's visible at a glance without opening the BRAIN tab. Backed by /status's brainConfigured/brainNotes.
+  function applyBrainBadge(s){
+    const bd=document.getElementById('sbBrainDot'), bl=document.getElementById('sbBrainLabel');
+    if(!bd || !bl) return;
+    bd.className = 'dot ' + (s.brainConfigured ? 'on' : 'off');
+    bl.textContent = s.brainConfigured
+      ? ('BRAIN: ' + s.brainNotes + ' NOTE' + (s.brainNotes===1?'':'S'))
+      : 'BRAIN: NOT CONNECTED';
+    bl.title = s.brainConfigured ? (s.brainPath||'') : 'Set OBSIDIAN_VAULT_PATH or connect it on the BRAIN tab.';
+  }
+  function refreshBrainBadge(){ fetch('/status').then(r=>r.json()).then(applyBrainBadge).catch(()=>{}); }
+  setInterval(refreshBrainBadge, 15000);   // vault auto-sync runs every few seconds server-side
+
   fetch('/status').then(r => r.json()).then(s => {
     isOnline = s.online; jarvisModel = s.model || '';
     document.getElementById('sbDot').className = 'dot ' + (s.online ? 'on' : 'off');
     document.getElementById('sbMode').textContent = s.online ? ('ONLINE · ' + s.model.toUpperCase()) : 'OFFLINE ECHO MODE';
+    applyBrainBadge(s);
     document.getElementById('modelKv').textContent = s.online ? s.model : 'offline';
     document.getElementById('connKv').textContent = s.online ? 'SECURE' : 'LOCAL';
     document.getElementById('ssAi').className = 'sdot' + (s.online ? '' : ' off');

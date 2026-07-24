@@ -13,9 +13,12 @@ import com.jarvis.integrations.openhuman.OpenHumanResponse;
 import com.jarvis.integrations.openhuman.OpenHumanTransport;
 import com.jarvis.memory.InMemoryRecordStore;
 import com.jarvis.memory.InMemoryStore;
+import com.jarvis.rag.EmbeddingProvider;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
@@ -298,5 +301,105 @@ class OrchestrationServiceTest {
         OrchestrationService.ModelResult r = o.callOne(claude, "sys", "hi", 64, "test");
         assertTrue(r.ok());
         assertTrue(r.text().contains("claude-sonnet-5"));   // default id valid here, and only here
+    }
+
+    // ---- Shared Brain/memory grounding: every role draws on the same unified store -----------
+
+    private static SemanticMemoryService semanticWith(String id, String title, String content) {
+        SemanticMemoryService s = new SemanticMemoryService(
+                new InMemoryRecordStore(), EmbeddingProvider.DORMANT, null);
+        s.ingest(id, title, content, "test");
+        return s;
+    }
+
+    @Test
+    void groundingIsInjectedFromTheSharedSemanticStore() {
+        // The Obsidian vault is auto-mirrored into this same store by VaultWatcher in production —
+        // ingest() here stands in for that so the test doesn't need a real vault on disk.
+        SemanticMemoryService semantic = semanticWith(
+                "n1", "Go-Kart Battery", "The go-kart uses a 60V lithium pack.");
+        ProviderSettingsService p = providersWith("A=worker");
+        AtomicReference<String> captured = new AtomicReference<>();
+        Function<ProviderSettingsService.Active, LlmProvider> factory = a -> req -> {
+            captured.set(req.messages().get(0).content());
+            return new LlmProvider.Result("ok", 1, 1);
+        };
+        OrchestrationService o = new OrchestrationService(p, null, "m", factory, null, null, semantic);
+
+        o.ensemble("what battery does the go-kart use?", "best", null);
+
+        assertTrue(captured.get().contains("60V lithium pack"));
+        assertTrue(captured.get().contains("what battery does the go-kart use?")); // original question kept
+    }
+
+    @Test
+    void noGroundingBlockWhenNothingInTheStoreMatches() {
+        SemanticMemoryService semantic = semanticWith(
+                "n1", "Croissant Recipe", "Bake at 400 degrees with butter lamination.");
+        ProviderSettingsService p = providersWith("A=worker");
+        AtomicReference<String> captured = new AtomicReference<>();
+        Function<ProviderSettingsService.Active, LlmProvider> factory = a -> req -> {
+            captured.set(req.messages().get(0).content());
+            return new LlmProvider.Result("ok", 1, 1);
+        };
+        OrchestrationService o = new OrchestrationService(p, null, "m", factory, null, null, semantic);
+
+        o.ensemble("explain quicksort time complexity", "best", null);
+
+        assertEquals("explain quicksort time complexity", captured.get()); // unchanged, no stray block
+    }
+
+    @Test
+    void groundingIsScopedToEachWorkersOwnSubtaskNotTheWholeRequest() {
+        SemanticMemoryService semantic = semanticWith(
+                "n1", "Battery Spec", "The go-kart battery is 60V lithium.");
+        semantic.ingest("n2", "Paint Colors", "Available paint colors are red, blue, and green.", "test");
+        ProviderSettingsService p = providersWith("Boss=conductor", "W1=worker");
+        List<String> workerPrompts = new ArrayList<>();
+        Function<ProviderSettingsService.Active, LlmProvider> factory = a -> req -> {
+            String sys = req.system();
+            String content = req.messages().get(0).content();
+            if (sys.contains("Break the user's request")) {
+                return new LlmProvider.Result("battery", 1, 1); // one sub-task: "battery"
+            }
+            if (sys.contains("Worker")) {
+                workerPrompts.add(content);
+                return new LlmProvider.Result("worker done", 1, 1);
+            }
+            return new LlmProvider.Result("FINAL", 1, 1);
+        };
+        OrchestrationService o = new OrchestrationService(p, null, "m", factory, null, null, semantic);
+
+        o.hierarchy("plan the go-kart build");
+
+        assertEquals(1, workerPrompts.size());
+        assertTrue(workerPrompts.get(0).contains("60V lithium"));       // relevant note pulled in
+        assertFalse(workerPrompts.get(0).toLowerCase().contains("paint")); // unrelated note excluded
+    }
+
+    @Test
+    void openHumanFallbackAlsoReceivesGroundedContext() {
+        SemanticMemoryService semantic = semanticWith(
+                "n1", "Battery Spec", "The go-kart battery is 60V lithium.");
+        ProviderSettingsService p = providersWith("A=worker");
+        RoutingSettings routing = routingSettings(Map.of(
+                "JARVIS_OPENHUMAN_ENABLED", "true",
+                "JARVIS_ROUTING_FAILOVER_ENABLED", "true",
+                "JARVIS_ROUTING_MAX_RETRIES", "1"));
+        AtomicReference<String> capturedBody = new AtomicReference<>();
+        OpenHumanTransport transport = (method, path, body) -> {
+            if ("/rpc".equals(path)) {
+                capturedBody.set(body);
+                return new OpenHumanResponse(200, "{\"result\":{\"result\":\"fallback reply\"}}");
+            }
+            return new OpenHumanResponse(200, "{}");
+        };
+        OpenHumanClient openHuman = new OpenHumanClient(transport);
+        OrchestrationService o = new OrchestrationService(p, null, "m",
+                alwaysThrows("HTTP 429 too many requests", null), routing, openHuman, semantic);
+
+        o.ensemble("what battery does it use", "best", null);
+
+        assertTrue(capturedBody.get().contains("60V lithium"));
     }
 }
