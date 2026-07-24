@@ -43,6 +43,7 @@ import com.jarvis.memory.FileBackedStore;
 import com.jarvis.memory.FileRecordStore;
 import com.jarvis.memory.InMemoryRecordStore;
 import com.jarvis.memory.MemoryStore;
+import com.jarvis.memory.RecordStore;
 import com.jarvis.planning.Plan;
 import com.jarvis.planning.PlanStep;
 import com.jarvis.planning.Planner;
@@ -50,8 +51,10 @@ import com.jarvis.tools.Tool;
 import com.jarvis.tools.ToolRegistry;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -69,6 +72,17 @@ final class AppWiring {
     /** The running application version (kept in sync with packaging --app-version). */
     static final String APP_VERSION = "0.1.0";
 
+    /**
+     * The vision motion + face-recognition services, bundled so wiring them into {@link Runtime} /
+     * {@link Governance} costs exactly one positional slot on each record. {@code visitLog} is
+     * nullable — with no log wired, {@code GET /vision/visits} simply reports no visits, matching
+     * {@link MotionEventService}'s own nullable {@code visitLog} collaborator.
+     */
+    record VisionServices(VisionSettings settings, MotionEventService motionEvents,
+            UnknownVisitorEnrollmentService enrollment, RecordStore visitLog,
+            FaceRecognitionClient faceClient) {
+    }
+
     /** Everything the launcher needs to run. */
     record Runtime(JarvisApi api, boolean online, String model,
             HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected,
@@ -81,14 +95,15 @@ final class AppWiring {
             AutonomousService autonomous, SemanticMemoryService semantic,
             DiscussionService discussion, ProviderSettingsService providers, BrainVault brain,
             SolicitationsService solicitations, UploadedDocsService uploads, McpService mcp,
-            BrainManager chatBrain, OrchestrationService orchestration, GatedLaneService gatedLane) {
+            BrainManager chatBrain, OrchestrationService orchestration, GatedLaneService gatedLane,
+            VisionServices visionServices) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
                     discussion, providers, brain, solicitations, uploads, mcp, chatBrain, orchestration,
-                    gatedLane);
+                    gatedLane, visionServices);
         }
     }
 
@@ -100,7 +115,8 @@ final class AppWiring {
             SemanticMemoryService semantic, DiscussionService discussion,
             ProviderSettingsService providers, BrainVault brain, SolicitationsService solicitations,
             UploadedDocsService uploads, McpService mcp, BrainManager chatBrain,
-            OrchestrationService orchestration, GatedLaneService gatedLane) {
+            OrchestrationService orchestration, GatedLaneService gatedLane,
+            VisionServices visionServices) {
     }
 
     private AppWiring() {
@@ -347,11 +363,31 @@ final class AppWiring {
         // (Bridged calls are audited inside McpService; MCP tools are consult-style/READ_ONLY.)
         McpService mcp = new McpService(auditLog, governedTools, memory);
 
+        // Vision Motion + Face Recognition (Phase 4 wiring). Both motion detection and face
+        // recognition default to off (see VisionSettings javadoc) — this composition-root wiring is
+        // fully inert until the operator opts in via Settings → Connectors or the JARVIS_VISION_*/
+        // JARVIS_FACE_* env vars. CompreFace is the face-recognition provider; the pending-visitor
+        // store reuses the same durable memory store as everything else above, and the visit log is
+        // its own append-only collection under ~/.jarvis.
+        VisionSettings visionSettings = new VisionSettings(connectors);
+        FaceRecognitionClient faceClient = CompreFaceClient.resolving(visionSettings);
+        PendingVisitorStore pendingVisitors = new PendingVisitorStore(memory);
+        PresenceGreetingService greetingService = new PresenceGreetingService();
+        RecordStore visionVisitLog = new FileRecordStore(
+                Path.of(System.getProperty("user.home"), ".jarvis", "vision-visits"));
+        MotionEventService motionEvents = new MotionEventService(faceClient, visionSettings, people,
+                pendingVisitors, greetingService, visionVisitLog,
+                new HttpSnapshotFetcher(HttpClient.newHttpClient()), Instant::now, auditLog);
+        UnknownVisitorEnrollmentService enrollment = new UnknownVisitorEnrollmentService(
+                faceClient, people, pendingVisitors, Instant::now, auditLog);
+        VisionServices visionServices = new VisionServices(
+                visionSettings, motionEvents, enrollment, visionVisitLog, faceClient);
+
         return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
                 permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
                 autonomous, semantic, discussion, providerSettings, brain, solicitations, uploads, mcp,
-                chatBrain, orchestration, gatedLane);
+                chatBrain, orchestration, gatedLane, visionServices);
     }
 
     /**

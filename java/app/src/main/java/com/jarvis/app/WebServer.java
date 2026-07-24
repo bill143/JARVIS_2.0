@@ -108,6 +108,13 @@ public final class WebServer {
         BrainManager chatBrain = governance == null ? null : governance.chatBrain();
         OrchestrationService orchestration = governance == null ? null : governance.orchestration();
         GatedLaneService gatedLane = governance == null ? null : governance.gatedLane();
+        AppWiring.VisionServices visionServices = governance == null ? null : governance.visionServices();
+        VisionSettings visionSettings = visionServices == null ? null : visionServices.settings();
+        MotionEventService motionEvents = visionServices == null ? null : visionServices.motionEvents();
+        UnknownVisitorEnrollmentService enrollment =
+                visionServices == null ? null : visionServices.enrollment();
+        com.jarvis.memory.RecordStore visionVisitLog =
+                visionServices == null ? null : visionServices.visitLog();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         // The re-architected agent team (dynamic, specialized, parallel, self-correcting). Built once
@@ -1928,6 +1935,135 @@ public final class WebServer {
                 reply.put("response", "I couldn't analyze that image, sir: " + e.getMessage());
             }
             respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- Vision Motion + Face Recognition (Phase 4) --------------------------------------------
+        // These are registered as distinct, more specific paths alongside the pre-existing /vision
+        // route above; HttpServer routes by longest-prefix match, so both coexist without conflict.
+
+        server.createContext("/vision/motion", exchange -> {
+            // Webhook a motion camera calls. Must ack fast: the actual face-recognition work runs on
+            // a virtual thread after the 202 response goes out, so a slow/unreachable face provider
+            // never blocks (or times out) the camera's webhook call.
+            if (motionEvents == null) {
+                respond(exchange, 503, "text/plain", "vision unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String configuredSecret = visionSettings == null ? null
+                    : visionSettings.snapshot().motion().webhookSecret();
+            if (configuredSecret != null && !configuredSecret.isBlank()) {
+                String provided = exchange.getRequestHeaders().getFirst("X-Vision-Webhook-Secret");
+                boolean match = provided != null && java.security.MessageDigest.isEqual(
+                        configuredSecret.getBytes(StandardCharsets.UTF_8),
+                        provided.getBytes(StandardCharsets.UTF_8));
+                if (!match) {
+                    respond(exchange, 401, "text/plain",
+                            "invalid webhook secret".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            MotionEventService.MotionEventRequest request;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                request = new MotionEventService.MotionEventRequest(
+                        j.path("cameraId").asText(""), j.path("timestamp").asText(""),
+                        j.path("imageBase64").asText(""), j.path("snapshotUrl").asText(""));
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode ack = MAPPER.createObjectNode();
+            ack.put("accepted", true);
+            respond(exchange, 202, "application/json", ack.toString().getBytes(StandardCharsets.UTF_8));
+            // Fire-and-forget: face recognition network latency must never block the webhook response.
+            Thread.startVirtualThread(() -> {
+                try {
+                    motionEvents.handle(request);
+                } catch (RuntimeException e) {
+                    // Swallowed: this is a background task with no caller left to report to, and
+                    // MotionEventService.handle already records an audit event for every expected
+                    // outcome (recognized/unknown/error) before returning. Reaching this catch means
+                    // an unexpected bug, not a normal failure mode, so there is nothing more to do
+                    // here beyond not letting it kill the virtual thread silently-but-noisily.
+                }
+            });
+        });
+
+        server.createContext("/vision/enroll", exchange -> {
+            if (enrollment == null) {
+                respond(exchange, 503, "text/plain", "vision unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String pendingToken;
+            String name;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                pendingToken = j.path("pendingToken").asText("");
+                name = j.path("name").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            // Foreground human action (not a webhook) - run synchronously, no need to offload.
+            UnknownVisitorEnrollmentService.EnrollmentResult result =
+                    enrollment.complete(pendingToken, name);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("success", result.success());
+            o.put("reason", result.reason());
+            o.put("personId", result.personId());
+            o.put("personName", result.personName());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/vision/status", exchange -> {
+            ObjectNode o = MAPPER.createObjectNode();
+            if (visionSettings == null) {
+                o.put("available", false);
+                respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            VisionSettings.Snapshot snap = visionSettings.snapshot();
+            o.put("available", true);
+            o.put("motionEnabled", snap.motion().enabled());
+            o.put("motionCooldownSec", snap.motion().cooldownSec());
+            o.put("faceEnabled", snap.face().enabled());
+            o.put("faceProvider", snap.face().provider());
+            o.put("faceSimilarityThreshold", snap.face().similarityThreshold());
+            o.put("facePendingTtlSec", snap.face().pendingTtlSec());
+            // Configured-or-not only (baseUrl + apiKey both present) - deliberately not a live network
+            // ping, so the endpoint stays fast and side-effect-free. Never echo the secrets themselves.
+            boolean faceConfigured = snap.face().baseUrl() != null && !snap.face().baseUrl().isBlank()
+                    && snap.face().apiKey() != null && !snap.face().apiKey().isBlank();
+            o.put("faceConfigured", faceConfigured);
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/vision/visits", exchange -> {
+            if (visionVisitLog == null) {
+                respond(exchange, 200, "application/json", "[]".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            int limit = parseInt(param(exchange, "limit", "50"), 50);
+            ArrayNode arr = MAPPER.createArrayNode();
+            for (com.jarvis.memory.StoredRecord r : visionVisitLog.tail("vision-visits", limit)) {
+                ObjectNode o = arr.addObject();
+                o.put("seq", r.seq());
+                o.put("at", r.at().toString());
+                try {
+                    o.set("payload", MAPPER.readTree(r.payload()));
+                } catch (IOException e) {
+                    o.put("payload", r.payload());
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/", exchange -> {

@@ -65,6 +65,16 @@ final class ConnectorSettingsService {
         m.put("onedrive", List.of(
                 new FieldSpec("onedrive.token", "ONEDRIVE_TOKEN", true),
                 new FieldSpec("onedrive.folders", "ONEDRIVE_ALLOWED_FOLDER_IDS", false)));
+        m.put("vision", List.of(
+                new FieldSpec("vision.motion.enabled", "JARVIS_VISION_MOTION_ENABLED", false),
+                new FieldSpec("vision.motion.webhookSecret", "JARVIS_VISION_MOTION_WEBHOOK_SECRET", true),
+                new FieldSpec("vision.motion.cooldownSec", "JARVIS_VISION_MOTION_COOLDOWN_SEC", false),
+                new FieldSpec("vision.face.enabled", "JARVIS_FACE_ENABLED", false),
+                new FieldSpec("vision.face.provider", "JARVIS_FACE_PROVIDER", false),
+                new FieldSpec("vision.face.baseUrl", "JARVIS_FACE_BASE_URL", false),
+                new FieldSpec("vision.face.apiKey", "JARVIS_FACE_API_KEY", true),
+                new FieldSpec("vision.face.similarityThreshold", "JARVIS_FACE_SIMILARITY_THRESHOLD", false),
+                new FieldSpec("vision.face.pendingTtlSec", "JARVIS_FACE_PENDING_TTL_SEC", false)));
         CONNECTORS = java.util.Collections.unmodifiableMap(m);
     }
 

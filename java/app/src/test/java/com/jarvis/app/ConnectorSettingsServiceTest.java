@@ -71,11 +71,28 @@ class ConnectorSettingsServiceTest {
     }
 
     @Test
-    void catalogCoversAllNineConnectors() {
+    void catalogCoversAllTenConnectors() {
         assertEquals(
                 java.util.Set.of("obsidian", "samgov", "github", "openhuman", "routing", "consensus",
-                        "embeddings", "gdrive", "onedrive"),
+                        "embeddings", "gdrive", "onedrive", "vision"),
                 ConnectorSettingsService.CONNECTORS.keySet());
+    }
+
+    @Test
+    void visionCatalogCoversAllVisionKeysWithCorrectSecrecy() {
+        List<ConnectorSettingsService.FieldSpec> fields = ConnectorSettingsService.CONNECTORS.get("vision");
+        java.util.Set<String> envs = fields.stream().map(ConnectorSettingsService.FieldSpec::env)
+                .collect(java.util.stream.Collectors.toSet());
+        assertEquals(java.util.Set.of("JARVIS_VISION_MOTION_ENABLED", "JARVIS_VISION_MOTION_WEBHOOK_SECRET",
+                "JARVIS_VISION_MOTION_COOLDOWN_SEC", "JARVIS_FACE_ENABLED", "JARVIS_FACE_PROVIDER",
+                "JARVIS_FACE_BASE_URL", "JARVIS_FACE_API_KEY", "JARVIS_FACE_SIMILARITY_THRESHOLD",
+                "JARVIS_FACE_PENDING_TTL_SEC"), envs);
+
+        java.util.Set<String> secretKeys = fields.stream()
+                .filter(ConnectorSettingsService.FieldSpec::secret)
+                .map(ConnectorSettingsService.FieldSpec::key)
+                .collect(java.util.stream.Collectors.toSet());
+        assertEquals(java.util.Set.of("vision.motion.webhookSecret", "vision.face.apiKey"), secretKeys);
     }
 
     @Test
