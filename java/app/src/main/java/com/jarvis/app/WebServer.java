@@ -29,6 +29,7 @@ public final class WebServer {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final HttpServer server;
+    private final AgentRegistryService standingAgents;
 
     /** Analyzes a browser-supplied image (webcam frame) against a question. */
     @FunctionalInterface
@@ -36,8 +37,9 @@ public final class WebServer {
         String analyze(byte[] png, String question) throws Exception;
     }
 
-    private WebServer(HttpServer server) {
+    private WebServer(HttpServer server, AgentRegistryService standingAgents) {
         this.server = server;
+        this.standingAgents = standingAgents;
     }
 
     /** Starts the server on {@code port} (0 picks a free port) and returns it running. */
@@ -94,13 +96,73 @@ public final class WebServer {
         com.jarvis.tasks.TaskBoard tasks =
                 governance == null ? null : governance.tasks();
         WorkflowService workflows = governance == null ? null : governance.workflows();
-        com.jarvis.kb.KnowledgeBase knowledge = governance == null ? null : governance.knowledge();
         MultiAgentService agents = governance == null ? null : governance.agents();
         AutonomousService autonomous = governance == null ? null : governance.autonomous();
         SemanticMemoryService semantic = governance == null ? null : governance.semantic();
         DiscussionService discussion = governance == null ? null : governance.discussion();
+        ProviderSettingsService providers = governance == null ? null : governance.providers();
+        BrainVault brain = governance == null ? null : governance.brain();
+        SolicitationsService solicitations = governance == null ? null : governance.solicitations();
+        UploadedDocsService uploads = governance == null ? null : governance.uploads();
+        McpService mcp = governance == null ? null : governance.mcp();
+        BrainManager chatBrain = governance == null ? null : governance.chatBrain();
+        OrchestrationService orchestration = governance == null ? null : governance.orchestration();
+        GatedLaneService gatedLane = governance == null ? null : governance.gatedLane();
+        AppWiring.VisionServices visionServices = governance == null ? null : governance.visionServices();
+        VisionSettings visionSettings = visionServices == null ? null : visionServices.settings();
+        MotionEventService motionEvents = visionServices == null ? null : visionServices.motionEvents();
+        UnknownVisitorEnrollmentService enrollment =
+                visionServices == null ? null : visionServices.enrollment();
+        com.jarvis.memory.RecordStore visionVisitLog =
+                visionServices == null ? null : visionServices.visitLog();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
+        // The re-architected agent team (dynamic, specialized, parallel, self-correcting). Built once
+        // per server so human-in-the-loop runs persist across status/redirect requests. Each role turn
+        // runs through the governed api; the scratchpad is grounded on the unified semantic store.
+        final SemanticMemoryService semanticForTeam = semantic;
+        AgentTeamService agentTeam = new AgentTeamService(
+                (role, prompt) -> api.chat(new com.jarvis.api.ChatRequest("agents",
+                        role.system() + "\n\n" + prompt)).response(),
+                auditLog,
+                task -> {
+                    if (semanticForTeam == null) {
+                        return java.util.List.of();
+                    }
+                    java.util.List<String> notes = new java.util.ArrayList<>();
+                    for (com.jarvis.rag.ScoredDocument s : semanticForTeam.recall(task, 4)) {
+                        notes.add(SemanticMemoryService.titleOf(s.document()) + ": "
+                                + s.document().content());
+                    }
+                    return notes;
+                });
+        // Standing agents: named, persistent agents (Agents page). An agent bound to a configured
+        // provider runs through the orchestration layer (its own model); an unbound agent uses the
+        // governed chat brain. Interval agents run autonomously on a background daemon tick.
+        final ProviderSettingsService providersForAgents = providers;
+        final OrchestrationService orchForAgents = orchestration;
+        AgentRegistryService standingAgents = new AgentRegistryService(
+                memory != null ? memory : new com.jarvis.memory.InMemoryStore<>(),
+                auditLog,
+                (agent, system, prompt) -> {
+                    if (providersForAgents != null && orchForAgents != null
+                            && !agent.provider().isBlank()) {
+                        for (ProviderSettingsService.Active a : providersForAgents.allConfigured()) {
+                            if (a.name().equals(agent.provider())) {
+                                OrchestrationService.ModelResult r = orchForAgents.callOne(
+                                        a, system, prompt, 1024, "standing:" + agent.name());
+                                if (!r.ok()) {
+                                    throw new java.io.IOException(
+                                            r.error().isBlank() ? "model call failed" : r.error());
+                                }
+                                return r.text();
+                            }
+                        }
+                    }
+                    return api.chat(new com.jarvis.api.ChatRequest("agents",
+                            system + "\n\n" + prompt)).response();
+                });
+        standingAgents.startScheduler(30_000);
         byte[] page = loadDashboard();
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.setExecutor(Executors.newFixedThreadPool(4));
@@ -545,35 +607,200 @@ public final class WebServer {
             respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // ---- Re-architected agent team: dynamic / specialized / parallel / self-correcting ----
+        // Synchronous run (compose → execute → self-correct) with a resource budget.
+        server.createContext("/agents/team/run", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String task;
+            AgentTeamService.Budget budget;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                task = j.path("task").asText("").strip();
+                budget = new AgentTeamService.Budget(j.path("maxTokens").asLong(0),
+                        j.path("maxCostUsd").asDouble(0), j.path("maxMillis").asLong(0));
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (task.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty task".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            respond(exchange, 200, "application/json",
+                    teamJson(agentTeam.run(task, budget)).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Start a run in the background (for human-in-the-loop) → returns a run id.
+        server.createContext("/agents/team/start", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String task;
+            AgentTeamService.Budget budget;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                task = j.path("task").asText("").strip();
+                budget = new AgentTeamService.Budget(j.path("maxTokens").asLong(0),
+                        j.path("maxCostUsd").asDouble(0), j.path("maxMillis").asLong(0));
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (task.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty task".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("runId", agentTeam.start(task, budget));
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Live status of a background run.
+        server.createContext("/agents/team/status", exchange -> {
+            AgentTeamService.TeamResult r = agentTeam.status(param(exchange, "id", ""));
+            if (r == null) {
+                respond(exchange, 404, "text/plain", "no such run".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            respond(exchange, 200, "application/json",
+                    teamJson(r).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Human-in-the-loop: inject feedback / redirect a running team.
+        server.createContext("/agents/team/redirect", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String id;
+            String feedback;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                id = j.path("id").asText("");
+                feedback = j.path("feedback").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("ok", agentTeam.redirect(id, feedback));
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Knowledge tab search — reads the SAME unified store the chat brain grounds on (req: one
+        // index, no second store), scoped to knowledge/vault entries so it stays a knowledge view.
         server.createContext("/kb/search", exchange -> {
             ArrayNode arr = MAPPER.createArrayNode();
-            if (knowledge != null) {
+            if (semantic != null) {
                 int k = parseInt(param(exchange, "k", "5"), 5);
-                for (com.jarvis.rag.ScoredDocument s : knowledge.search(param(exchange, "q", ""), k)) {
+                int added = 0;
+                for (com.jarvis.rag.ScoredDocument s : semantic.recall(param(exchange, "q", ""), k * 4)) {
+                    if (!isKnowledgeNode(s.document())) {
+                        continue;
+                    }
                     ObjectNode o = arr.addObject();
                     o.put("id", s.document().id());
-                    o.put("title", com.jarvis.kb.KnowledgeBase.titleOf(s.document()));
+                    o.put("title", SemanticMemoryService.titleOf(s.document()));
                     o.put("score", s.score());
                     String c = s.document().content();
                     o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
+                    if (++added >= k) {
+                        break;
+                    }
                 }
             }
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // Standing agents: the persistent multi-agent registry behind the Agents page. GET lists
+        // every agent with live state; POST dispatches {action: save|delete|toggle|run}. A run is
+        // synchronous (like /agents/team/run) so the UI can render the result immediately.
+        server.createContext("/agents/standing", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod())) {
+                String action;
+                String id;
+                String name;
+                String role;
+                String providerName;
+                String brief;
+                int intervalMinutes;
+                boolean enabled;
+                String input;
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    action = j.path("action").asText("");
+                    id = j.path("id").asText("");
+                    name = j.path("name").asText("");
+                    role = j.path("role").asText("");
+                    providerName = j.path("provider").asText("");
+                    brief = j.path("brief").asText("");
+                    intervalMinutes = j.path("intervalMinutes").asInt(0);
+                    enabled = j.path("enabled").asBoolean(true);
+                    input = j.path("input").asText("");
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+                if ("save".equals(action)) {
+                    if (standingAgents.save(id, name, role, providerName, brief, intervalMinutes,
+                            enabled).isEmpty()) {
+                        respond(exchange, 400, "text/plain",
+                                "name required".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                } else if ("delete".equals(action)) {
+                    if (!standingAgents.delete(id)) {
+                        respond(exchange, 404, "text/plain",
+                                "no such agent".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                } else if ("toggle".equals(action)) {
+                    if (standingAgents.toggle(id).isEmpty()) {
+                        respond(exchange, 404, "text/plain",
+                                "no such agent".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                } else if ("run".equals(action)) {
+                    if (standingAgents.runOnce(id, input).isEmpty()) {
+                        respond(exchange, 409, "text/plain",
+                                "unknown agent or already running".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                } else {
+                    respond(exchange, 400, "text/plain",
+                            "unknown action".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode list = root.putArray("agents");
+            for (AgentRegistryService.AgentSpec a : standingAgents.list()) {
+                list.add(standingAgentJson(a, standingAgents.stateOf(a.id())));
+            }
+            respond(exchange, 200, "application/json",
+                    root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Knowledge tab list/add/delete — backed by the SAME unified store as chat grounding. New
+        // entries are tagged source="knowledge" so they group into the Knowledge view and galaxy.
         server.createContext("/kb", exchange -> {
-            if ("POST".equals(exchange.getRequestMethod()) && knowledge != null) {
+            if ("POST".equals(exchange.getRequestMethod()) && semantic != null) {
                 try (InputStream body = exchange.getRequestBody()) {
                     JsonNode j = MAPPER.readTree(body);
                     String action = j.path("action").asText("");
                     if ("add".equals(action)) {
                         if (!j.path("content").asText("").isBlank()
                                 || !j.path("title").asText("").isBlank()) {
-                            knowledge.add(j.path("title").asText(""), j.path("content").asText(""),
+                            semantic.rememberSource(j.path("title").asText(""),
+                                    j.path("content").asText(""), "knowledge",
                                     System.currentTimeMillis());
                         }
                     } else if ("delete".equals(action)) {
-                        knowledge.delete(j.path("id").asText(""));
+                        semantic.forget(j.path("id").asText(""));
                     }
                 } catch (IOException e) {
                     respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
@@ -581,16 +808,762 @@ public final class WebServer {
                 }
             }
             ArrayNode arr = MAPPER.createArrayNode();
-            if (knowledge != null) {
-                for (com.jarvis.rag.Document d : knowledge.list()) {
+            if (semantic != null) {
+                for (com.jarvis.rag.Document d : semantic.all()) {
+                    if (!isKnowledgeNode(d)) {
+                        continue;
+                    }
                     ObjectNode o = arr.addObject();
                     o.put("id", d.id());
-                    o.put("title", com.jarvis.kb.KnowledgeBase.titleOf(d));
+                    o.put("title", SemanticMemoryService.titleOf(d));
                     String c = d.content();
                     o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
                 }
             }
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // The knowledge galaxy: the unified store as nodes (one per document) + keyword co-occurrence
+        // links. Node id == the document's index in semantic.all() == the sources[].id the chat
+        // handler returns, so a cited source flies straight to its node.
+        server.createContext("/knowledge/graph", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode nodes = root.putArray("nodes");
+            ArrayNode links = root.putArray("links");
+            if (semantic != null) {
+                KnowledgeGraph.Graph g = KnowledgeGraph.build(semantic.all());
+                for (KnowledgeGraph.Node node : g.nodes()) {
+                    ObjectNode o = nodes.addObject();
+                    o.put("id", node.id());
+                    o.put("title", node.title().isBlank() ? ("note " + node.id()) : node.title());
+                    o.put("source", node.source());
+                    o.put("val", node.val());
+                }
+                for (KnowledgeGraph.Link link : g.links()) {
+                    ObjectNode o = links.addObject();
+                    o.put("source", link.source());
+                    o.put("target", link.target());
+                }
+                root.put("truncated", g.truncated());
+            }
+            root.put("count", nodes.size());
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/providers/models", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode arr = root.putArray("models");
+            if (providers != null) {
+                providers.models(param(exchange, "name", "")).forEach(arr::add);
+            }
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/providers/activate", exchange -> {
+            if (providers == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, providers == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String name;
+            try (InputStream body = exchange.getRequestBody()) {
+                name = MAPPER.readTree(body).path("name").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            boolean ok = providers.activate(name);
+            if (ok && chatBrain != null) {
+                chatBrain.reload();   // hot-swap the live brain — no restart
+            }
+            respond(exchange, ok ? 200 : 404, "application/json",
+                    ("{\"activated\":" + ok + ",\"model\":\""
+                            + (chatBrain == null ? "" : chatBrain.currentModel()) + "\"}")
+                            .getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/providers/role", exchange -> {
+            if (providers == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, providers == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String name;
+            String role;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                name = j.path("name").asText("");
+                role = j.path("role").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            boolean ok = providers.setRole(name, role);
+            respond(exchange, ok ? 200 : 404, "application/json",
+                    ("{\"ok\":" + ok + "}").getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/providers/test", exchange -> {
+            if (providers == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, providers == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String name;
+            try (InputStream body = exchange.getRequestBody()) {
+                name = MAPPER.readTree(body).path("name").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ProviderSettingsService.TestResult r = providers.test(name);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("ok", r.ok());
+            o.put("message", r.message());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/providers", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod()) && providers != null) {
+                boolean active;
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String name = j.path("name").asText("").strip();
+                    if (name.isBlank()) {
+                        respond(exchange, 400, "text/plain", "name required".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                    active = j.path("active").asBoolean(false);
+                    providers.save(name, j.path("kind").asText("openai"), j.path("baseUrl").asText(""),
+                            j.path("apiKey").asText(""), j.path("model").asText(""), active);
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+                if (active && chatBrain != null) {
+                    chatBrain.reload();   // saved as active → hot-swap now
+                }
+            } else if ("DELETE".equals(exchange.getRequestMethod()) && providers != null) {
+                boolean removed = providers.remove(param(exchange, "name", ""));
+                if (removed && chatBrain != null) {
+                    chatBrain.reload();   // in case the active one was removed
+                }
+                respond(exchange, removed ? 200 : 404, "application/json",
+                        ("{\"removed\":" + removed + "}").getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode presets = root.putArray("presets");
+            for (ProviderSettingsService.Preset p : ProviderSettingsService.PRESETS) {
+                ObjectNode po = presets.addObject();
+                po.put("name", p.name());
+                po.put("kind", p.kind());
+                po.put("baseUrl", p.baseUrl());
+            }
+            ArrayNode configured = root.putArray("configured");
+            if (providers != null) {
+                for (ProviderSettingsService.ProviderView v : providers.list()) {
+                    ObjectNode vo = configured.addObject();
+                    vo.put("name", v.name());
+                    vo.put("kind", v.kind());
+                    vo.put("baseUrl", v.baseUrl());
+                    vo.put("model", v.model());
+                    vo.put("hasKey", v.hasKey());   // never the key itself
+                    vo.put("active", v.active());
+                    vo.put("role", v.role());       // orchestration tier (may be empty)
+                }
+            }
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- BRAIN (Obsidian vault, read-only) ----
+        server.createContext("/brain/search", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (brain != null) {
+                int k = parseInt(param(exchange, "k", "8"), 8);
+                for (BrainVault.Hit h : brain.search(param(exchange, "q", ""), k)) {
+                    ObjectNode o = arr.addObject();
+                    o.put("path", h.path());
+                    o.put("title", h.title());
+                    o.put("score", h.score());
+                    o.put("snippet", h.snippet());
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/brain/cite", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (brain != null) {
+                int k = parseInt(param(exchange, "k", "3"), 3);
+                for (BrainVault.Hit h : brain.cite(param(exchange, "q", ""), k)) {
+                    ObjectNode o = arr.addObject();
+                    o.put("source", h.title().isBlank() ? h.path() : h.title());
+                    o.put("path", h.path());
+                    o.put("snippet", h.snippet());
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/brain/note", exchange -> {
+            if (brain == null || !brain.configured()) {
+                respond(exchange, 503, "text/plain", "brain unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String path = param(exchange, "path", "");
+            try {
+                String[] note = brain.readNote(path);
+                ObjectNode o = MAPPER.createObjectNode();
+                o.put("path", path);
+                o.put("title", note[0]);
+                o.put("markdown", note[1]);   // raw; the client escapes before rendering
+                respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+            } catch (BrainVault.VaultAccessException e) {
+                String msg = e.getMessage() == null ? "invalid path" : e.getMessage();
+                int code;
+                if (msg.contains("no such")) {
+                    code = 404;                                   // note doesn't exist
+                } else if (msg.contains("escape") || msg.contains("traversal")
+                        || msg.contains("absolute")) {
+                    code = 403;                                   // access forbidden outside the vault
+                } else {
+                    code = 400;                                   // malformed request
+                }
+                respond(exchange, code, "text/plain", msg.getBytes(StandardCharsets.UTF_8));
+            }
+        });
+
+        server.createContext("/brain", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            boolean on = brain != null && brain.configured();
+            root.put("configured", on);
+            root.put("readOnly", brain == null || brain.readOnly());
+            root.put("root", on ? brain.rootDisplay() : "");
+            root.put("count", on ? brain.count() : 0);
+            ArrayNode notes = root.putArray("notes");
+            if (on) {
+                for (BrainVault.Note n : brain.notes()) {
+                    ObjectNode o = notes.addObject();
+                    o.put("path", n.path());
+                    o.put("title", n.title());
+                }
+            }
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Connect (or re-connect) the vault live — no restart. Optionally enable writes. On success
+        // the notes are mirrored into the unified semantic store so they recall alongside memory.
+        server.createContext("/brain/connect", exchange -> {
+            if (brain == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, brain == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String path;
+            boolean allowWrites;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                path = j.path("path").asText("");
+                allowWrites = j.path("allowWrites").asBoolean(false);
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            boolean ok = brain.connect(path, allowWrites);
+            // Persist the path through the connector settings so it survives a restart.
+            new ConnectorSettingsService(memory).set("obsidian.vaultPath", ok ? path : "");
+            int indexed = 0;
+            if (ok && semantic != null) {
+                indexed = semantic.syncVault(brain.allDocuments());
+            }
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("configured", ok);
+            o.put("readOnly", brain.readOnly());
+            o.put("root", ok ? brain.rootDisplay() : "");
+            o.put("count", ok ? brain.count() : 0);
+            o.put("indexed", indexed);
+            o.put("message", ok ? ("Connected — " + brain.count() + " notes indexed"
+                    + (indexed > 0 ? ", " + indexed + " unified into recall" : ""))
+                    : "Not a valid vault folder");
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Write proposals: GET lists pending; POST {action: propose|approve|reject}. A write only
+        // touches disk on explicit approve (a MUTATING, audited action).
+        server.createContext("/brain/writes", exchange -> {
+            if (brain == null) {
+                respond(exchange, 503, "text/plain", "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String action = j.path("action").asText("");
+                    ObjectNode r = MAPPER.createObjectNode();
+                    switch (action) {
+                        case "propose" -> {
+                            String id = brain.proposeWrite(j.path("path").asText(""),
+                                    j.path("content").asText(""), j.path("kind").asText("note"));
+                            r.put("id", id);
+                            r.put("ok", true);
+                        }
+                        case "approve" -> {
+                            boolean applied = brain.approveWrite(j.path("id").asText(""));
+                            if (applied && semantic != null) {
+                                semantic.syncVault(brain.allDocuments());
+                            }
+                            r.put("ok", applied);
+                        }
+                        case "reject" -> r.put("ok", brain.rejectWrite(j.path("id").asText("")));
+                        default -> r.put("ok", false);
+                    }
+                    respond(exchange, 200, "application/json",
+                            r.toString().getBytes(StandardCharsets.UTF_8));
+                    return;
+                } catch (BrainVault.VaultAccessException e) {
+                    ObjectNode r = MAPPER.createObjectNode();
+                    r.put("ok", false);
+                    r.put("error", e.getMessage());
+                    respond(exchange, 400, "application/json",
+                            r.toString().getBytes(StandardCharsets.UTF_8));
+                    return;
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode out = MAPPER.createObjectNode();
+            ArrayNode arr = out.putArray("pending");
+            for (BrainVault.PendingWrite w : brain.pendingWrites()) {
+                ObjectNode o = arr.addObject();
+                o.put("id", w.id());
+                o.put("path", w.relativePath());
+                o.put("kind", w.kind());
+                o.put("preview", w.preview());
+            }
+            respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- Solicitations Command Center ----
+        server.createContext("/solicitations/refresh", exchange -> {
+            if (!"POST".equals(exchange.getRequestMethod()) || solicitations == null) {
+                respond(exchange, solicitations == null ? 503 : 405, "text/plain",
+                        (solicitations == null ? "solicitations unavailable" : "method not allowed")
+                                .getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            com.jarvis.solicitations.SolicitationFilters filters;
+            try (InputStream body = exchange.getRequestBody()) {
+                filters = solicitationFilters(MAPPER.readTree(body));
+            } catch (IOException e) {
+                filters = com.jarvis.solicitations.SolicitationFilters.none();
+            }
+            SolicitationsService.RefreshResult r =
+                    solicitations.refresh(filters, com.jarvis.audit.AuditTrigger.USER);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("correlationId", r.correlationId());
+            o.put("total", r.total());
+            ObjectNode per = o.putObject("perSource");
+            r.perSource().forEach(per::put);
+            ArrayNode errs = o.putArray("errors");
+            r.errors().forEach(errs::add);
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/solicitations/detail", exchange -> {
+            if (solicitations == null) {
+                respond(exchange, 503, "text/plain", "unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            var found = solicitations.get(param(exchange, "id", ""));
+            if (found.isEmpty()) {
+                respond(exchange, 404, "text/plain", "not found".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            respond(exchange, 200, "application/json",
+                    solicitationJson(found.get()).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/solicitations/map", exchange -> {
+            ObjectNode o = MAPPER.createObjectNode();
+            if (solicitations != null) {
+                com.jarvis.solicitations.MapPayload m =
+                        solicitations.map(com.jarvis.solicitations.SolicitationFilters.none());
+                o.put("plotted", m.plotted());
+                o.put("unplotted", m.unplotted());
+                ArrayNode pts = o.putArray("points");
+                for (com.jarvis.solicitations.MapPayload.MapPoint p : m.points()) {
+                    ObjectNode po = pts.addObject();
+                    po.put("id", p.id());
+                    po.put("title", p.title());
+                    po.put("lat", p.lat());
+                    po.put("lng", p.lng());
+                    po.put("state", p.state());
+                    po.put("dueDate", p.dueDate());
+                    po.put("source", p.source());
+                }
+                ArrayNode groups = o.putArray("groups");
+                for (com.jarvis.solicitations.MapPayload.StateGroup g : m.groups()) {
+                    ObjectNode go = groups.addObject();
+                    go.put("state", g.state());
+                    go.put("count", g.count());
+                }
+            }
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/connectors/status", exchange -> {
+            ArrayNode arr = MAPPER.createArrayNode();
+            if (solicitations != null) {
+                for (java.util.Map<String, Object> c : solicitations.connectorStatus()) {
+                    ObjectNode o = arr.addObject();
+                    o.put("name", String.valueOf(c.get("name")));
+                    o.put("available", Boolean.TRUE.equals(c.get("available")));
+                    o.put("health", String.valueOf(c.get("health")));
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // In-app connector configuration (Settings → Connectors). Reads/writes the same 'connectors'
+        // scope in the memory store that AppWiring's live suppliers resolve, so a saved value takes
+        // effect without a restart. Secret fields report only whether a value is set, never the value.
+        server.createContext("/connectors/config", exchange -> {
+            if (memory == null) {
+                respond(exchange, 503, "text/plain", "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ConnectorSettingsService cs = new ConnectorSettingsService(memory);
+            if ("POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    String key = j.path("key").asText("");
+                    // Only keys declared in the catalog may be written (no arbitrary store writes).
+                    boolean known = ConnectorSettingsService.CONNECTORS.values().stream()
+                            .flatMap(java.util.List::stream)
+                            .anyMatch(f -> f.key().equals(key));
+                    if (!known) {
+                        respond(exchange, 400, "text/plain",
+                                "unknown key".getBytes(StandardCharsets.UTF_8));
+                        return;
+                    }
+                    cs.set(key, j.path("value").asText(""));
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            ObjectNode out = MAPPER.createObjectNode();
+            ObjectNode conns = out.putObject("connectors");
+            ConnectorSettingsService.CONNECTORS.forEach((name, specs) -> {
+                ArrayNode fields = conns.putArray(name);
+                for (ConnectorSettingsService.Field f : cs.view(specs)) {
+                    ObjectNode o = fields.addObject();
+                    o.put("key", f.key());
+                    o.put("env", f.env());
+                    o.put("secret", f.secret());
+                    o.put("set", f.set());
+                    o.put("value", f.value());   // blank for secret fields
+                }
+            });
+            respond(exchange, 200, "application/json", out.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- Uploaded documents the assistant can read ----
+        server.createContext("/upload", exchange -> {
+            if (uploads == null) {
+                respond(exchange, 503, "text/plain", "uploads unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String filename;
+            byte[] data;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                filename = j.path("filename").asText("upload");
+                String b64 = j.path("content").asText("");
+                data = java.util.Base64.getDecoder().decode(b64);
+            } catch (IOException | IllegalArgumentException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            UploadedDocsService.Doc doc = uploads.add(filename, data);
+            respond(exchange, 200, "application/json", docJson(doc).toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- Multi-model orchestration (ensemble / hierarchy) ----
+        server.createContext("/orchestrate", exchange -> {
+            if (orchestration == null) {
+                respond(exchange, 503, "text/plain", "orchestration unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String mode;
+            String prompt;
+            String fusion;
+            java.util.List<String> names = new java.util.ArrayList<>();
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                mode = j.path("mode").asText("ensemble");
+                prompt = j.path("prompt").asText("");
+                fusion = j.path("fusion").asText("");
+                if (j.path("providers").isArray()) {
+                    j.path("providers").forEach(n -> names.add(n.asText()));
+                }
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (prompt.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty prompt".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode reply;
+            if ("hierarchy".equals(mode)) {
+                reply = hierarchyJson(orchestration.hierarchy(prompt));
+            } else {
+                OrchestrationService.EnsembleResult r = orchestration.ensemble(prompt, fusion, names);
+                reply = MAPPER.createObjectNode();
+                reply.put("mode", "ensemble");
+                reply.put("answer", r.answer());
+                reply.put("fusion", r.fusion());
+                reply.put("chosen", r.chosen());
+                ArrayNode arr = reply.putArray("trace");
+                for (OrchestrationService.ModelResult m : r.results()) {
+                    arr.add(modelResultJson(m));
+                }
+            }
+            respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- Tier-2 routing (OpenHuman failover): status/breaker health + a live "Test Route" probe ----
+        server.createContext("/routing/status", exchange -> {
+            if (orchestration == null) {
+                respond(exchange, 503, "text/plain",
+                        "orchestration unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            OrchestrationService.RoutingStatus s = orchestration.routingStatus();
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("wired", s.wired());
+            o.put("openHumanEnabled", s.openHumanEnabled());
+            o.put("failoverEnabled", s.failoverEnabled());
+            o.put("timeoutMs", s.timeoutMs());
+            o.put("maxRetries", s.maxRetries());
+            o.put("breakerFailThreshold", s.breakerFailThreshold());
+            o.put("breakerWindowSec", s.breakerWindowSec());
+            o.put("breakerCooldownSec", s.breakerCooldownSec());
+            ObjectNode breakers = o.putObject("breakers");
+            s.breakers().forEach((target, cb) -> {
+                ObjectNode b = breakers.putObject(target);
+                b.put("phase", cb.phase().name());
+                b.put("consecutiveFailures", cb.consecutiveFailures());
+                b.put("openedAt", cb.openedAt() == null ? "" : cb.openedAt().toString());
+                b.put("nextRetryAt", cb.nextRetryAt() == null ? "" : cb.nextRetryAt().toString());
+            });
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/routing/test", exchange -> {
+            if (orchestration == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, orchestration == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            OrchestrationService.RouteTestResult r = orchestration.testOpenHumanRoute();
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("configured", r.configured());
+            o.put("reachable", r.reachable());
+            o.put("degraded", r.degraded());
+            o.put("httpStatus", r.httpStatus());
+            o.put("message", r.message());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- Gated local lane (policy-gated, self-hosted, off by default) ----
+        server.createContext("/gatedlane/test", exchange -> {
+            if (gatedLane == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, gatedLane == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String task;
+            try (InputStream body = exchange.getRequestBody()) {
+                task = MAPPER.readTree(body).path("task").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            GatedLaneService.GateDecision d = gatedLane.evaluate(task);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("approved", d.approved());
+            o.put("reason", d.reason());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/gatedlane/run", exchange -> {
+            if (gatedLane == null || !"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, gatedLane == null ? 503 : 405, "text/plain",
+                        "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String task;
+            try (InputStream body = exchange.getRequestBody()) {
+                task = MAPPER.readTree(body).path("task").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            GatedLaneService.RunResult r = gatedLane.run(task);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("approved", r.approved());
+            o.put("reason", r.reason());
+            o.put("output", r.output());
+            o.put("provider", r.provider());
+            o.put("needsReview", r.needsReview());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/gatedlane", exchange -> {
+            if (gatedLane == null) {
+                respond(exchange, 503, "text/plain", "n/a".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("POST".equals(exchange.getRequestMethod())) {
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    java.util.List<String> allow = new java.util.ArrayList<>();
+                    if (j.path("allow").isArray()) {
+                        j.path("allow").forEach(n -> allow.add(n.asText()));
+                    }
+                    gatedLane.setConfig(j.path("enabled").asBoolean(false), allow,
+                            j.path("provider").asText(""));
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            GatedLaneService.Config c = gatedLane.config();
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("enabled", c.enabled());
+            o.put("provider", c.provider());
+            ArrayNode allow = o.putArray("allow");
+            for (String a : c.allow()) {
+                allow.add(a);
+            }
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // ---- MCP connections ----
+        server.createContext("/mcp/call", exchange -> {
+            if (mcp == null) {
+                respond(exchange, 503, "text/plain", "mcp unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String server1;
+            String tool;
+            JsonNode args;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                server1 = j.path("server").asText("");
+                tool = j.path("tool").asText("");
+                args = j.path("arguments");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String out = mcp.call(server1, tool, args.isObject() ? args : null);
+            ObjectNode reply = MAPPER.createObjectNode();
+            reply.put("output", out);
+            respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/mcp", exchange -> {
+            if (mcp == null) {
+                respond(exchange, 503, "text/plain", "mcp unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String method = exchange.getRequestMethod();
+            if ("POST".equals(method)) {
+                String name;
+                String url;
+                String token;
+                try (InputStream body = exchange.getRequestBody()) {
+                    JsonNode j = MAPPER.readTree(body);
+                    name = j.path("name").asText("");
+                    url = j.path("url").asText("");
+                    token = j.path("token").asText("");
+                } catch (IOException e) {
+                    respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+                McpService.ServerView v = mcp.add(name, url, token);
+                respond(exchange, 200, "application/json",
+                        mcpJson(v).toString().getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("DELETE".equals(method)) {
+                boolean removed = mcp.remove(param(exchange, "name", ""));
+                respond(exchange, removed ? 200 : 404, "application/json",
+                        ("{\"removed\":" + removed + "}").getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("REFRESH".equals(method) || "true".equals(param(exchange, "refresh", ""))) {
+                mcp.refresh();
+            }
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode arr = root.putArray("servers");
+            for (McpService.ServerView v : mcp.list()) {
+                arr.add(mcpJson(v));
+            }
+            root.put("count", arr.size());
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/uploads", exchange -> {
+            if (uploads == null) {
+                respond(exchange, 503, "text/plain", "uploads unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if ("DELETE".equals(exchange.getRequestMethod())) {
+                boolean removed = uploads.remove(param(exchange, "id", ""));
+                respond(exchange, removed ? 200 : 404, "application/json",
+                        ("{\"removed\":" + removed + "}").getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode root = MAPPER.createObjectNode();
+            ArrayNode arr = root.putArray("items");
+            for (UploadedDocsService.Doc d : uploads.list()) {
+                arr.add(docJson(d));
+            }
+            root.put("count", arr.size());
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/solicitations", exchange -> {
+            ObjectNode root = MAPPER.createObjectNode();
+            root.put("configured", solicitations != null && solicitations.anySourceAvailable());
+            root.put("lastRefresh", solicitations == null ? "" : solicitations.lastRefresh());
+            ArrayNode arr = root.putArray("items");
+            if (solicitations != null) {
+                com.jarvis.solicitations.SolicitationFilters f = solicitationFiltersFromQuery(exchange);
+                for (com.jarvis.solicitations.Solicitation s : solicitations.list(f)) {
+                    arr.add(solicitationJson(s));
+                }
+            }
+            root.put("count", arr.size());
+            respond(exchange, 200, "application/json", root.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/discussion/run", exchange -> {
@@ -601,8 +1574,10 @@ public final class WebServer {
                 return;
             }
             String topic;
+            JsonNode j;
             try (InputStream body = exchange.getRequestBody()) {
-                topic = MAPPER.readTree(body).path("topic").asText("").strip();
+                j = MAPPER.readTree(body);
+                topic = j.path("topic").asText("").strip();
             } catch (IOException e) {
                 respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
                 return;
@@ -611,12 +1586,22 @@ public final class WebServer {
                 respond(exchange, 400, "text/plain", "empty topic".getBytes(StandardCharsets.UTF_8));
                 return;
             }
-            com.jarvis.discussion.DiscussionRunner.Discussion d = discussion.run(topic);
+            // Optional per-request consensus fields. Omitting all of them (the common/legacy case)
+            // means no override at all — the global JARVIS_CONSENSUS_* settings decide everything,
+            // and when those are off (the default), this reproduces the pre-consensus response
+            // exactly except for the two new, additive "consensus"/"finalized" fields below.
+            com.jarvis.discussion.ConsensusPolicy override =
+                    consensusOverrideFrom(j, discussion.consensusSnapshot());
+            com.jarvis.discussion.DiscussionRunner.ConsensusDiscussion result =
+                    discussion.runWithConsensus(topic, override);
+            com.jarvis.discussion.DiscussionRunner.Discussion d = result.discussion();
+
             ObjectNode o = MAPPER.createObjectNode();
             o.put("topic", d.topic());
             o.put("converged", d.converged());
             o.put("outcome", d.outcome());
             o.put("advisorAvailable", discussion.advisorAvailable());
+            o.put("advisorSource", discussion.advisorSource());
             ArrayNode rounds = o.putArray("rounds");
             d.rounds().forEach(r -> {
                 ObjectNode ro = rounds.addObject();
@@ -627,12 +1612,27 @@ public final class WebServer {
                     ro.put("error", r.error());
                 }
             });
+            o.put("finalized", result.finalized());
+            ObjectNode consensusNode = o.putObject("consensus");
+            consensusNode.put("achieved", result.consensus().achieved());
+            consensusNode.put("reason", result.consensus().reason());
+            ArrayNode blockingArr = consensusNode.putArray("blockingAgents");
+            result.consensus().blockingAgents().forEach(blockingArr::add);
+            ArrayNode votesArr = consensusNode.putArray("votes");
+            result.consensus().votes().forEach(v -> {
+                ObjectNode vo = votesArr.addObject();
+                vo.put("agentId", v.agentId());
+                vo.put("decision", v.decision().name());
+                vo.put("rationale", v.rationale());
+                vo.put("round", v.round());
+            });
             respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/discussion", exchange -> {
             ObjectNode root = MAPPER.createObjectNode();
             root.put("advisorAvailable", discussion != null && discussion.advisorAvailable());
+            root.put("advisorSource", discussion == null ? "" : discussion.advisorSource());
             ArrayNode arr = root.putArray("items");
             if (discussion != null) {
                 int limit = parseInt(param(exchange, "limit", "20"), 20);
@@ -669,11 +1669,17 @@ public final class WebServer {
             if ("POST".equals(exchange.getRequestMethod()) && semantic != null) {
                 try (InputStream body = exchange.getRequestBody()) {
                     JsonNode j = MAPPER.readTree(body);
-                    if ("add".equals(j.path("action").asText(""))
+                    String action = j.path("action").asText("");
+                    if ("add".equals(action)
                             && (!j.path("content").asText("").isBlank()
                                     || !j.path("title").asText("").isBlank())) {
                         semantic.remember(j.path("title").asText(""), j.path("content").asText(""),
                                 System.currentTimeMillis());
+                    } else if ("delete".equals(action)) {
+                        semantic.forget(j.path("id").asText(""));
+                    } else if ("update".equals(action)) {
+                        semantic.update(j.path("id").asText(""), j.path("title").asText(""),
+                                j.path("content").asText(""), System.currentTimeMillis());
                     }
                 } catch (IOException e) {
                     respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
@@ -689,6 +1695,7 @@ public final class WebServer {
                     o.put("id", d.id());
                     o.put("title", SemanticMemoryService.titleOf(d));
                     String c = d.content();
+                    o.put("content", c);   // full content, for the edit form
                     o.put("snippet", c.length() > 200 ? c.substring(0, 200) + "…" : c);
                 }
             }
@@ -817,11 +1824,22 @@ public final class WebServer {
                     if ("add".equals(action)) {
                         String value = j.path("value").asText("").strip();
                         if (!value.isEmpty()) {
-                            memory.put("preferences",
-                                    "pref-" + Long.toHexString(System.nanoTime()), value);
+                            // Unified fact store: write through the semantic engine when wired so the
+                            // fact is visible to the Personal Intelligence tab and to chat recall too.
+                            if (semantic != null) {
+                                semantic.remember("", value, System.currentTimeMillis());
+                            } else {
+                                memory.put("preferences",
+                                        "pref-" + Long.toHexString(System.nanoTime()), value);
+                            }
                         }
                     } else if ("delete".equals(action)) {
-                        memory.delete("preferences", j.path("key").asText(""));
+                        String key = j.path("key").asText("");
+                        if (semantic != null && key.startsWith("sm-")) {
+                            semantic.forget(key);
+                        } else {
+                            memory.delete("preferences", key);
+                        }
                     }
                 } catch (IOException e) {
                     respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
@@ -831,14 +1849,27 @@ public final class WebServer {
             ObjectNode out = MAPPER.createObjectNode();
             ArrayNode prefs = out.putArray("preferences");
             ArrayNode rem = out.putArray("reminders");
+            // Facts come from the unified semantic store when wired; each carries its id as the key
+            // so the Memory tab's delete flows back to the same store.
+            if (semantic != null) {
+                semantic.all().forEach(d -> {
+                    ObjectNode o = prefs.addObject();
+                    o.put("key", d.id());
+                    String title = SemanticMemoryService.titleOf(d);
+                    o.put("value", title.isBlank() ? d.content()
+                            : (d.content().isBlank() ? title : title + ": " + d.content()));
+                });
+            }
             if (memory != null) {
-                memory.query("preferences").stream()
-                        .sorted(java.util.Comparator.comparing(e -> e.key()))
-                        .forEach(e -> {
-                            ObjectNode o = prefs.addObject();
-                            o.put("key", e.key());
-                            o.put("value", e.value());
-                        });
+                if (semantic == null) {
+                    memory.query("preferences").stream()
+                            .sorted(java.util.Comparator.comparing(e -> e.key()))
+                            .forEach(e -> {
+                                ObjectNode o = prefs.addObject();
+                                o.put("key", e.key());
+                                o.put("value", e.value());
+                            });
+                }
                 memory.query("reminders").stream()
                         .sorted(java.util.Comparator.comparing(e -> e.key()))
                         .forEach(e -> {
@@ -906,6 +1937,135 @@ public final class WebServer {
             respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
         });
 
+        // ---- Vision Motion + Face Recognition (Phase 4) --------------------------------------------
+        // These are registered as distinct, more specific paths alongside the pre-existing /vision
+        // route above; HttpServer routes by longest-prefix match, so both coexist without conflict.
+
+        server.createContext("/vision/motion", exchange -> {
+            // Webhook a motion camera calls. Must ack fast: the actual face-recognition work runs on
+            // a virtual thread after the 202 response goes out, so a slow/unreachable face provider
+            // never blocks (or times out) the camera's webhook call.
+            if (motionEvents == null) {
+                respond(exchange, 503, "text/plain", "vision unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String configuredSecret = visionSettings == null ? null
+                    : visionSettings.snapshot().motion().webhookSecret();
+            if (configuredSecret != null && !configuredSecret.isBlank()) {
+                String provided = exchange.getRequestHeaders().getFirst("X-Vision-Webhook-Secret");
+                boolean match = provided != null && java.security.MessageDigest.isEqual(
+                        configuredSecret.getBytes(StandardCharsets.UTF_8),
+                        provided.getBytes(StandardCharsets.UTF_8));
+                if (!match) {
+                    respond(exchange, 401, "text/plain",
+                            "invalid webhook secret".getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+            MotionEventService.MotionEventRequest request;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                request = new MotionEventService.MotionEventRequest(
+                        j.path("cameraId").asText(""), j.path("timestamp").asText(""),
+                        j.path("imageBase64").asText(""), j.path("snapshotUrl").asText(""));
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode ack = MAPPER.createObjectNode();
+            ack.put("accepted", true);
+            respond(exchange, 202, "application/json", ack.toString().getBytes(StandardCharsets.UTF_8));
+            // Fire-and-forget: face recognition network latency must never block the webhook response.
+            Thread.startVirtualThread(() -> {
+                try {
+                    motionEvents.handle(request);
+                } catch (RuntimeException e) {
+                    // Swallowed: this is a background task with no caller left to report to, and
+                    // MotionEventService.handle already records an audit event for every expected
+                    // outcome (recognized/unknown/error) before returning. Reaching this catch means
+                    // an unexpected bug, not a normal failure mode, so there is nothing more to do
+                    // here beyond not letting it kill the virtual thread silently-but-noisily.
+                }
+            });
+        });
+
+        server.createContext("/vision/enroll", exchange -> {
+            if (enrollment == null) {
+                respond(exchange, 503, "text/plain", "vision unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String pendingToken;
+            String name;
+            try (InputStream body = exchange.getRequestBody()) {
+                JsonNode j = MAPPER.readTree(body);
+                pendingToken = j.path("pendingToken").asText("");
+                name = j.path("name").asText("");
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            // Foreground human action (not a webhook) - run synchronously, no need to offload.
+            UnknownVisitorEnrollmentService.EnrollmentResult result =
+                    enrollment.complete(pendingToken, name);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("success", result.success());
+            o.put("reason", result.reason());
+            o.put("personId", result.personId());
+            o.put("personName", result.personName());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/vision/status", exchange -> {
+            ObjectNode o = MAPPER.createObjectNode();
+            if (visionSettings == null) {
+                o.put("available", false);
+                respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            VisionSettings.Snapshot snap = visionSettings.snapshot();
+            o.put("available", true);
+            o.put("motionEnabled", snap.motion().enabled());
+            o.put("motionCooldownSec", snap.motion().cooldownSec());
+            o.put("faceEnabled", snap.face().enabled());
+            o.put("faceProvider", snap.face().provider());
+            o.put("faceSimilarityThreshold", snap.face().similarityThreshold());
+            o.put("facePendingTtlSec", snap.face().pendingTtlSec());
+            // Configured-or-not only (baseUrl + apiKey both present) - deliberately not a live network
+            // ping, so the endpoint stays fast and side-effect-free. Never echo the secrets themselves.
+            boolean faceConfigured = snap.face().baseUrl() != null && !snap.face().baseUrl().isBlank()
+                    && snap.face().apiKey() != null && !snap.face().apiKey().isBlank();
+            o.put("faceConfigured", faceConfigured);
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/vision/visits", exchange -> {
+            if (visionVisitLog == null) {
+                respond(exchange, 200, "application/json", "[]".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            int limit = parseInt(param(exchange, "limit", "50"), 50);
+            ArrayNode arr = MAPPER.createArrayNode();
+            for (com.jarvis.memory.StoredRecord r : visionVisitLog.tail("vision-visits", limit)) {
+                ObjectNode o = arr.addObject();
+                o.put("seq", r.seq());
+                o.put("at", r.at().toString());
+                try {
+                    o.set("payload", MAPPER.readTree(r.payload()));
+                } catch (IOException e) {
+                    o.put("payload", r.payload());
+                }
+            }
+            respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
         server.createContext("/", exchange -> {
             if (!"GET".equals(exchange.getRequestMethod())) {
                 respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
@@ -916,9 +2076,20 @@ public final class WebServer {
 
         server.createContext("/status", exchange -> {
             ObjectNode status = MAPPER.createObjectNode();
-            status.put("online", online);
-            status.put("model", model);
+            // Reflect the live brain so a hot-swap (activate a provider) updates status without restart.
+            boolean liveOnline = online || (providers != null && !providers.list().isEmpty()
+                    && providers.list().stream().anyMatch(ProviderSettingsService.ProviderView::active));
+            String liveModel = chatBrain != null ? chatBrain.currentModel() : model;
+            status.put("online", liveOnline);
+            status.put("model", liveModel == null || liveModel.isBlank() ? model : liveModel);
             status.put("google", googleConnected);
+            // Live size of the unified knowledge store, so the greeting can report it (butler touch).
+            status.put("notes", semantic == null ? 0 : semantic.all().size());
+            // Brain (Obsidian vault) connection — explicit and separate from the unified "notes" count
+            // above, so the dashboard can show an unambiguous connected/not-connected badge.
+            status.put("brainConfigured", brain != null && brain.configured());
+            status.put("brainNotes", brain == null ? 0 : brain.count());
+            status.put("brainPath", brain == null ? "" : brain.rootDisplay());
             respond(exchange, 200, "application/json", status.toString().getBytes(StandardCharsets.UTF_8));
         });
 
@@ -929,10 +2100,15 @@ public final class WebServer {
             }
             String prompt;
             String mode;
+            java.util.List<String> docIds = new java.util.ArrayList<>();
             try (InputStream body = exchange.getRequestBody()) {
                 JsonNode json = MAPPER.readTree(body);
                 prompt = json.path("prompt").asText("");
                 mode = json.path("mode").asText("");
+                JsonNode docs = json.path("docs");
+                if (docs.isArray()) {
+                    docs.forEach(d -> docIds.add(d.asText()));
+                }
             } catch (IOException e) {
                 respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
                 return;
@@ -941,20 +2117,87 @@ public final class WebServer {
                 respond(exchange, 400, "text/plain", "empty prompt".getBytes(StandardCharsets.UTF_8));
                 return;
             }
+            // TOTAL RECALL: "remember that …" writes straight into the unified knowledge store and
+            // confirms — no LLM round-trip. The new note is a knowledge node, so it grounds the next
+            // question (Stage A) and appears in the galaxy (Stage B); the reply carries a "remembered"
+            // marker so the UI can spawn/refresh the node live.
+            if (semantic != null) {
+                java.util.Optional<RecallCapture.Fact> cap = RecallCapture.parse(prompt);
+                if (cap.isPresent()) {
+                    RecallCapture.Fact f = cap.get();
+                    String newId = semantic.rememberSource(f.title(), f.content(), "knowledge",
+                            System.currentTimeMillis());
+                    int nodeId = indexInStore(semantic, newId);
+                    System.out.println("[chat] remembered #" + nodeId + " -> " + oneLine(f.title()));
+                    ObjectNode reply = MAPPER.createObjectNode();
+                    reply.put("answer", "Noted, sir — I'll remember that: " + f.content());
+                    ArrayNode sources = reply.putArray("sources");
+                    if (nodeId >= 0) {
+                        ObjectNode so = sources.addObject();
+                        so.put("id", nodeId);
+                        so.put("title", f.title());
+                        so.put("score", 1.0);
+                    }
+                    ObjectNode rem = reply.putObject("remembered");
+                    rem.put("id", nodeId);
+                    rem.put("title", f.title());
+                    reply.put("toolSteps", 0);
+                    respond(exchange, 200, "application/json",
+                            reply.toString().getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+            }
+
             String preamble = modePreamble(mode);
             String effective = preamble.isEmpty() ? prompt.strip() : preamble + "\n\n" + prompt.strip();
+
+            // PER-QUESTION GROUNDING: score the unified store against THIS question (title-weighted
+            // keyword overlap) and ground on the top few — no more whole-store dump. The node id is the
+            // note's index in the unified store, i.e. its node id in the Knowledge galaxy.
+            java.util.List<com.jarvis.rag.Document> nodes =
+                    semantic == null ? java.util.List.of() : semantic.all();
+            java.util.List<KnowledgeGrounding.Scored> grounded =
+                    KnowledgeGrounding.retrieve(nodes, prompt, KnowledgeGrounding.DEFAULT_TOP_K);
+            // Console trace so grounding is verifiable from the server log, no devtools needed.
+            System.out.println("[chat] grounding \"" + oneLine(prompt) + "\" -> " + grounded.size()
+                    + " note(s) of " + nodes.size());
+            for (KnowledgeGrounding.Scored s : grounded) {
+                System.out.printf(java.util.Locale.ROOT, "        #%d  score=%.3f  %s%n",
+                        s.id(), s.score(), s.title().isBlank() ? "(untitled)" : s.title());
+            }
+
+            // Prepend the text of any attached uploads so the assistant can read them.
+            if (uploads != null && !docIds.isEmpty()) {
+                String context = uploads.contextFor(docIds, UploadedDocsService.DEFAULT_CONTEXT_BUDGET);
+                if (!context.isBlank()) {
+                    effective = "The user attached the following file(s); use them to answer.\n"
+                            + context + "\n\n" + effective;
+                }
+            }
+            // Grounding sits at the very top of the prompt, above uploads and the question.
+            String groundingBlock = KnowledgeGrounding.contextBlock(grounded);
+            if (!groundingBlock.isBlank()) {
+                effective = groundingBlock + "\n\n" + effective;
+            }
+
             ChatResponse chat = api.chat(new ChatRequest("dashboard", effective));
+            String answer = chat.completed() ? chat.response()
+                    : "(no answer - my step budget ran out; please try rephrasing)";
             ObjectNode reply = MAPPER.createObjectNode();
-            reply.put("completed", chat.completed());
-            reply.put("response", chat.completed()
-                    ? chat.response()
-                    : "(no answer - my step budget ran out; please try rephrasing)");
-            reply.put("toolSteps", chat.toolSteps());
+            reply.put("answer", answer);
+            ArrayNode sources = reply.putArray("sources");
+            for (KnowledgeGrounding.Scored s : grounded) {
+                ObjectNode so = sources.addObject();
+                so.put("id", s.id());
+                so.put("title", s.title().isBlank() ? ("note " + s.id()) : s.title());
+                so.put("score", s.score());
+            }
+            reply.put("toolSteps", chat.toolSteps());   // retained for the tool-step indicator
             respond(exchange, 200, "application/json", reply.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.start();
-        return new WebServer(server);
+        return new WebServer(server, standingAgents);
     }
 
     /** The port the server is actually listening on. */
@@ -963,7 +2206,31 @@ public final class WebServer {
     }
 
     public void stop() {
+        if (standingAgents != null) {
+            standingAgents.stopScheduler();
+        }
         server.stop(0);
+    }
+
+    /** One standing agent (definition + live run state) as the Agents page consumes it. */
+    private static ObjectNode standingAgentJson(AgentRegistryService.AgentSpec a,
+            AgentRegistryService.StateView s) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("id", a.id());
+        o.put("name", a.name());
+        o.put("role", a.role());
+        o.put("provider", a.provider());
+        o.put("brief", a.brief());
+        o.put("intervalMinutes", a.intervalMinutes());
+        o.put("enabled", a.enabled());
+        o.put("status", s.status());
+        o.put("lastRunAt", s.lastRunAt());
+        o.put("lastLatencyMs", s.lastLatencyMs());
+        o.put("lastOk", s.lastOk());
+        o.put("lastOutput", s.lastOutput());
+        o.put("lastError", s.lastError());
+        o.put("totalRuns", s.totalRuns());
+        return o;
     }
 
     private static byte[] loadDashboard() throws IOException {
@@ -998,6 +2265,279 @@ public final class WebServer {
         } catch (NumberFormatException e) {
             return dflt;
         }
+    }
+
+    /**
+     * Builds a per-request consensus override from {@code /discussion/run}'s optional JSON fields,
+     * layering whatever was specified on top of the live global {@code base} snapshot — {@code null}
+     * when none of the fields were present at all, so the global settings decide everything
+     * (the legacy/common case). Whether this override is honored at all is
+     * {@link ConsensusSettings#effectivePolicy} default-deny, not this method's concern.
+     */
+    private static com.jarvis.discussion.ConsensusPolicy consensusOverrideFrom(JsonNode j,
+            ConsensusSettings.Snapshot base) {
+        boolean hasAny = j.has("consensusEnabled") || j.has("consensusMode")
+                || j.has("consensusMaxRounds") || j.has("consensusRequireRationale")
+                || j.has("consensusTimeoutMs");
+        if (!hasAny) {
+            return null;
+        }
+        com.jarvis.discussion.ConsensusMode mode;
+        if (j.has("consensusMode")) {
+            mode = parseConsensusMode(j.path("consensusMode").asText(""), base.mode());
+        } else if (j.has("consensusEnabled")) {
+            mode = j.path("consensusEnabled").asBoolean(false)
+                    ? com.jarvis.discussion.ConsensusMode.UNANIMOUS
+                    : com.jarvis.discussion.ConsensusMode.OFF;
+        } else {
+            mode = base.mode();
+        }
+        int maxRounds = j.has("consensusMaxRounds")
+                ? Math.max(1, j.path("consensusMaxRounds").asInt(base.maxRounds())) : base.maxRounds();
+        boolean requireRationale = j.has("consensusRequireRationale")
+                ? j.path("consensusRequireRationale").asBoolean(base.requireRationale())
+                : base.requireRationale();
+        long timeoutMs = j.has("consensusTimeoutMs")
+                ? Math.max(0L, j.path("consensusTimeoutMs").asLong(base.timeoutMs())) : base.timeoutMs();
+        return new com.jarvis.discussion.ConsensusPolicy(mode, maxRounds, requireRationale, timeoutMs);
+    }
+
+    private static com.jarvis.discussion.ConsensusMode parseConsensusMode(String s,
+            com.jarvis.discussion.ConsensusMode fallback) {
+        if (s == null || s.isBlank()) {
+            return fallback;
+        }
+        try {
+            return com.jarvis.discussion.ConsensusMode.valueOf(s.strip().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return fallback;
+        }
+    }
+
+    /** The index of the document with {@code id} in the unified store — its galaxy node id, or -1. */
+    private static int indexInStore(SemanticMemoryService semantic, String id) {
+        java.util.List<com.jarvis.rag.Document> all = semantic.all();
+        for (int i = 0; i < all.size(); i++) {
+            if (all.get(i).id().equals(id)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** A unified-store node that belongs in the Knowledge view / galaxy (connector knowledge or vault). */
+    private static boolean isKnowledgeNode(com.jarvis.rag.Document d) {
+        String src = SemanticMemoryService.sourceOf(d);
+        return "knowledge".equals(src) || "vault".equals(src);
+    }
+
+    /** Collapses whitespace and truncates a string for a single-line console trace. */
+    private static String oneLine(String s) {
+        if (s == null) {
+            return "";
+        }
+        String flat = s.replaceAll("\\s+", " ").strip();
+        return flat.length() > 120 ? flat.substring(0, 120) + "…" : flat;
+    }
+
+    /** Serializes one model's contribution to an orchestration run (for the trace tree). */
+    /** Serializes an agent-team run: composition, per-role trace, budget usage, and scratchpad. */
+    private static ObjectNode teamJson(AgentTeamService.TeamResult r) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("task", r.task());
+        o.put("answer", r.answer());
+        o.put("status", r.status());
+        o.put("approvedByCritic", r.approvedByCritic());
+        o.put("retries", r.retries());
+        ArrayNode team = o.putArray("team");
+        r.team().forEach(team::add);
+        ArrayNode steps = o.putArray("steps");
+        for (AgentTeamService.AgentStep s : r.steps()) {
+            ObjectNode so = steps.addObject();
+            so.put("role", s.role());
+            so.put("phase", s.phase());
+            so.put("ok", s.ok());
+            so.put("latencyMs", s.latencyMs());
+            so.put("error", s.error());
+            String t = s.output() == null ? "" : s.output();
+            so.put("snippet", t.length() > 240 ? t.substring(0, 240) + "…" : t);
+        }
+        AgentTeamService.Usage u = r.usage();
+        ObjectNode usage = o.putObject("usage");
+        usage.put("tokens", u.tokens());
+        usage.put("costUsd", u.costUsd());
+        usage.put("elapsedMs", u.elapsedMs());
+        usage.put("nearLimit", u.nearLimit());
+        usage.put("exceeded", u.exceeded());
+        ObjectNode pad = o.putObject("scratchpad");
+        r.scratchpad().forEach(pad::put);
+        return o;
+    }
+
+    private static ObjectNode modelResultJson(OrchestrationService.ModelResult m) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("provider", m.provider());
+        o.put("model", m.model());
+        o.put("role", m.role());
+        o.put("stage", m.stage());
+        o.put("ok", m.ok());
+        o.put("latencyMs", m.latencyMs());
+        o.put("error", m.error());
+        // A short snippet keeps the trace light; the fused answer carries the full text.
+        String t = m.text() == null ? "" : m.text();
+        o.put("snippet", t.length() > 240 ? t.substring(0, 240) + "…" : t);
+        return o;
+    }
+
+    /** Serializes a hierarchy run: plan, arbitrated answer, and the tier-by-tier trace. */
+    private static ObjectNode hierarchyJson(OrchestrationService.HierarchyResult r) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("mode", "hierarchy");
+        o.put("answer", r.answer());
+        ArrayNode plan = o.putArray("plan");
+        for (String s : r.plan()) {
+            plan.add(s);
+        }
+        ArrayNode trace = o.putArray("trace");
+        for (OrchestrationService.ModelResult m : r.steps()) {
+            trace.add(modelResultJson(m));
+        }
+        return o;
+    }
+
+    /** Serializes an MCP server view (never the token — only whether one is set). */
+    private static ObjectNode mcpJson(McpService.ServerView v) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("name", v.name());
+        o.put("url", v.url());
+        o.put("hasToken", v.hasToken());
+        o.put("connected", v.connected());
+        o.put("error", v.error());
+        ArrayNode t = o.putArray("tools");
+        for (String tool : v.tools()) {
+            t.add(tool);
+        }
+        return o;
+    }
+
+    /** Serializes uploaded-document metadata (never the extracted text itself). */
+    private static ObjectNode docJson(UploadedDocsService.Doc d) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("id", d.id());
+        o.put("filename", d.filename());
+        o.put("kind", d.kind());
+        o.put("chars", d.chars());
+        o.put("truncated", d.truncated());
+        o.put("note", d.note());
+        o.put("uploadedAt", d.uploadedAt());
+        o.put("readable", !"unsupported".equals(d.kind()) && d.chars() > 0);
+        return o;
+    }
+
+    // ---- Solicitations helpers ----
+
+    /** Serializes a canonical solicitation (including documents, amendments, and source link). */
+    private static ObjectNode solicitationJson(com.jarvis.solicitations.Solicitation s) {
+        ObjectNode o = MAPPER.createObjectNode();
+        o.put("id", s.id());
+        o.put("source", s.source());
+        o.put("title", s.title());
+        o.put("solicitationNumber", s.solicitationNumber());
+        o.put("agency", s.agency());
+        o.put("subAgency", s.subAgency());
+        o.put("setAside", s.setAside());
+        ArrayNode naics = o.putArray("naics");
+        s.naics().forEach(naics::add);
+        ObjectNode pop = o.putObject("placeOfPerformance");
+        pop.put("city", s.placeOfPerformance().city());
+        pop.put("state", s.placeOfPerformance().state());
+        if (s.placeOfPerformance().hasCoordinates()) {
+            pop.put("lat", s.placeOfPerformance().lat());
+            pop.put("lng", s.placeOfPerformance().lng());
+        }
+        o.put("postedDate", s.postedDate());
+        o.put("dueDate", s.dueDate());
+        if (s.estValueMin() != null) {
+            o.put("estValueMin", s.estValueMin());
+        }
+        if (s.estValueMax() != null) {
+            o.put("estValueMax", s.estValueMax());
+        }
+        o.put("status", s.status());
+        o.put("description", s.description());
+        ArrayNode docs = o.putArray("documents");
+        for (com.jarvis.solicitations.SolicitationDocument d : s.documents()) {
+            ObjectNode doc = docs.addObject();
+            doc.put("name", d.name());
+            doc.put("url", d.url());
+            doc.put("type", d.type());
+            doc.put("source", d.source());
+        }
+        ArrayNode amends = o.putArray("amendments");
+        for (com.jarvis.solicitations.Amendment a : s.amendments()) {
+            ObjectNode am = amends.addObject();
+            am.put("id", a.id());
+            am.put("title", a.title());
+            am.put("date", a.date());
+            am.put("summary", a.summary());
+            am.put("url", a.url());
+        }
+        o.put("sourceUrl", s.sourceUrl());
+        o.put("fetchedAt", s.fetchedAt());
+        return o;
+    }
+
+    /** Builds filters from a JSON body (refresh). Lenient — every field optional. */
+    private static com.jarvis.solicitations.SolicitationFilters solicitationFilters(JsonNode j) {
+        if (j == null) {
+            return com.jarvis.solicitations.SolicitationFilters.none();
+        }
+        java.util.List<String> naics = new java.util.ArrayList<>();
+        for (String p : j.path("naics").asText("").split(",")) {
+            if (!p.isBlank()) {
+                naics.add(p.strip());
+            }
+        }
+        return new com.jarvis.solicitations.SolicitationFilters(
+                blank(j.path("setAside").asText("")),
+                j.path("valueMin").isNumber() ? j.path("valueMin").asLong() : null,
+                j.path("valueMax").isNumber() ? j.path("valueMax").asLong() : null,
+                naics,
+                com.jarvis.solicitations.DueWindow.parse(j.path("due").asText("")),
+                blank(j.path("agency").asText("")), blank(j.path("state").asText("")),
+                blank(j.path("status").asText("")), blank(j.path("source").asText("")),
+                blank(j.path("query").asText("")));
+    }
+
+    /** Builds filters from query params (list). */
+    private static com.jarvis.solicitations.SolicitationFilters solicitationFiltersFromQuery(
+            HttpExchange exchange) {
+        java.util.List<String> naics = new java.util.ArrayList<>();
+        for (String p : param(exchange, "naics", "").split(",")) {
+            if (!p.isBlank()) {
+                naics.add(p.strip());
+            }
+        }
+        Long vMin = parseLongOrNull(param(exchange, "valueMin", ""));
+        Long vMax = parseLongOrNull(param(exchange, "valueMax", ""));
+        return new com.jarvis.solicitations.SolicitationFilters(
+                blank(param(exchange, "setAside", "")), vMin, vMax, naics,
+                com.jarvis.solicitations.DueWindow.parse(param(exchange, "due", "")),
+                blank(param(exchange, "agency", "")), blank(param(exchange, "state", "")),
+                blank(param(exchange, "status", "")), blank(param(exchange, "source", "")),
+                blank(param(exchange, "query", "")));
+    }
+
+    private static Long parseLongOrNull(String s) {
+        try {
+            return s == null || s.isBlank() ? null : Long.parseLong(s.strip());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String blank(String s) {
+        return s == null || s.isBlank() ? null : s;
     }
 
     /** Maps a Conversations chat mode to an instruction prepended to the user's message. */

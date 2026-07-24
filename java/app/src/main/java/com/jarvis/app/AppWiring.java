@@ -43,6 +43,7 @@ import com.jarvis.memory.FileBackedStore;
 import com.jarvis.memory.FileRecordStore;
 import com.jarvis.memory.InMemoryRecordStore;
 import com.jarvis.memory.MemoryStore;
+import com.jarvis.memory.RecordStore;
 import com.jarvis.planning.Plan;
 import com.jarvis.planning.PlanStep;
 import com.jarvis.planning.Planner;
@@ -50,8 +51,10 @@ import com.jarvis.tools.Tool;
 import com.jarvis.tools.ToolRegistry;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -69,6 +72,17 @@ final class AppWiring {
     /** The running application version (kept in sync with packaging --app-version). */
     static final String APP_VERSION = "0.1.0";
 
+    /**
+     * The vision motion + face-recognition services, bundled so wiring them into {@link Runtime} /
+     * {@link Governance} costs exactly one positional slot on each record. {@code visitLog} is
+     * nullable — with no log wired, {@code GET /vision/visits} simply reports no visits, matching
+     * {@link MotionEventService}'s own nullable {@code visitLog} collaborator.
+     */
+    record VisionServices(VisionSettings settings, MotionEventService motionEvents,
+            UnknownVisitorEnrollmentService enrollment, RecordStore visitLog,
+            FaceRecognitionClient faceClient) {
+    }
+
     /** Everything the launcher needs to run. */
     record Runtime(JarvisApi api, boolean online, String model,
             HardwareMonitor monitor, WebServer.VisionHook vision, boolean googleConnected,
@@ -79,13 +93,17 @@ final class AppWiring {
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
             AutonomousService autonomous, SemanticMemoryService semantic,
-            DiscussionService discussion) {
+            DiscussionService discussion, ProviderSettingsService providers, BrainVault brain,
+            SolicitationsService solicitations, UploadedDocsService uploads, McpService mcp,
+            BrainManager chatBrain, OrchestrationService orchestration, GatedLaneService gatedLane,
+            VisionServices visionServices) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion);
+                    discussion, providers, brain, solicitations, uploads, mcp, chatBrain, orchestration,
+                    gatedLane, visionServices);
         }
     }
 
@@ -94,7 +112,11 @@ final class AppWiring {
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
-            SemanticMemoryService semantic, DiscussionService discussion) {
+            SemanticMemoryService semantic, DiscussionService discussion,
+            ProviderSettingsService providers, BrainVault brain, SolicitationsService solicitations,
+            UploadedDocsService uploads, McpService mcp, BrainManager chatBrain,
+            OrchestrationService orchestration, GatedLaneService gatedLane,
+            VisionServices visionServices) {
     }
 
     private AppWiring() {
@@ -104,6 +126,10 @@ final class AppWiring {
     static Runtime build(String apiKey, String model) {
         Path memoryFile = Path.of(System.getProperty("user.home"), ".jarvis", "memory.tsv");
         MemoryStore<String> memory = new FileBackedStore(memoryFile);
+        // In-app connector configuration (Settings → Connectors). Persists to the memory store and is
+        // resolved live (saved value → environment fallback), so the credential connectors below read
+        // through suppliers and pick up a saved value on the next request — no restart, no env var.
+        ConnectorSettingsService connectors = new ConnectorSettingsService(memory);
         boolean online = isOnline(apiKey);
 
         ToolRegistry tools = new ToolRegistry();
@@ -114,14 +140,8 @@ final class AppWiring {
         // registered (and manifest-tiered) either way; a missing token yields a graceful error, not
         // a crash. MUTATING actions are gated by the permission layer via their manifest risk tier.
         plugins.install(new com.jarvis.integrations.github.GitHubPlugin(
-                com.jarvis.integrations.github.HttpGitHubTransport.fromEnvironment()));
-        // OpenHuman advisor (read-only). Dormant until 'openhuman-core serve' is running and
-        // JARVIS_OPENHUMAN_URL + OPENHUMAN_CORE_TOKEN are set. Arm's-length HTTP only (GPL-safe).
-        com.jarvis.integrations.openhuman.OpenHumanClient openhuman =
-                new com.jarvis.integrations.openhuman.OpenHumanClient(
-                        com.jarvis.integrations.openhuman.HttpOpenHumanTransport.fromEnvironment());
-        plugins.install(new com.jarvis.integrations.openhuman.OpenHumanPlugin(openhuman));
-
+                com.jarvis.integrations.github.HttpGitHubTransport.resolving(
+                        connectors.supplier("github.token", "JARVIS_GITHUB_TOKEN"))));
         GoogleAuth google = googleAuth(memory);
         boolean googleConnected = google != null && google.isConnected();
         com.jarvis.integrations.google.GoogleWorkspaceService googleService = null;
@@ -148,6 +168,37 @@ final class AppWiring {
                 Path.of(System.getProperty("user.home"), ".jarvis", "audit")));
         PermissionPolicy permissionPolicy = new PermissionPolicy();   // prompt on destructive
         PermissionBroker permissions = new PermissionBroker();
+
+        // OpenHuman advisor (Tier 1, read-only) + Tier-2 delegated/failover target. Dormant until
+        // 'openhuman-core serve' is running and JARVIS_OPENHUMAN_URL + OPENHUMAN_CORE_TOKEN are set.
+        // Arm's-length HTTP only (GPL-safe). memory_doc_put writes are gated default-deny by
+        // OpenHumanWriteGate — see its Javadoc for why OpenHuman's own write path can't be trusted
+        // alone. Built here (after auditLog exists) so the gate can audit its decisions.
+        OpenHumanWriteGate openHumanWriteGate = new OpenHumanWriteGate(memory, auditLog);
+        com.jarvis.integrations.openhuman.OpenHumanClient openhuman =
+                new com.jarvis.integrations.openhuman.OpenHumanClient(
+                        com.jarvis.integrations.openhuman.HttpOpenHumanTransport.resolving(
+                                connectors.supplier("openhuman.url", "JARVIS_OPENHUMAN_URL"),
+                                () -> {
+                                    String t = connectors.resolve("openhuman.token",
+                                            "OPENHUMAN_CORE_TOKEN");
+                                    return t != null ? t : System.getenv("JARVIS_OPENHUMAN_TOKEN");
+                                }),
+                        com.jarvis.integrations.openhuman.OpenHumanClient.DEFAULT_MEMORY_SEARCH_METHOD,
+                        com.jarvis.integrations.openhuman.OpenHumanClient.DEFAULT_CONSULT_METHOD,
+                        com.jarvis.integrations.openhuman.OpenHumanClient.DEFAULT_MEMORY_WRITE_METHOD,
+                        openHumanWriteGate);
+        plugins.install(new com.jarvis.integrations.openhuman.OpenHumanPlugin(openhuman));
+        // Tier-2 routing configuration (OPENHUMAN_ENABLED / ROUTING_*), resolved live through the
+        // same connectors catalog — see ConnectorSettingsService's "openhuman"/"routing" entries.
+        RoutingSettings routingSettings = new RoutingSettings(connectors);
+
+        // Solicitations Command Center. Sources + document connectors are dormant-by-default (env
+        // gated); the AI tools register here (before governance wraps the registry) so they are
+        // manifest-tiered READ_ONLY. Every source query / open / refresh is audited by the service.
+        SolicitationsService solicitations = buildSolicitations(auditLog, connectors);
+        plugins.install(new SolicitationsPlugin(solicitations));
+
         ToolRegistry governedTools = governedRegistry(
                 tools, pluginRegistry, auditLog, permissionPolicy, permissions);
 
@@ -155,18 +206,92 @@ final class AppWiring {
         UsageMeter usageMeter = new UsageMeter(new FileRecordStore(
                 Path.of(System.getProperty("user.home"), ".jarvis", "usage")), PriceTable.defaults());
 
-        AgentPolicy policy = online
-                ? AnthropicPolicy.withApiKey(apiKey, model, governedTools)
-                        .withMemoryContext(() -> recall(memory, people))
+        // Model provider selection (Settings → Models & Providers). An active configured provider
+        // (e.g. NVIDIA / OpenAI / a local model) overrides the ANTHROPIC_API_KEY default; it takes
+        // effect on (re)start. Keys live locally in the memory store and are never logged.
+        ProviderSettingsService providerSettings = new ProviderSettingsService(memory);
+        // Semantic memory is the single source of truth for the facts JARVIS remembers: both the
+        // Memory tab and the Personal Intelligence tab read/write it, and it feeds the chat recall
+        // block below so the assistant draws on the same unified store during conversations. Cloud
+        // embeddings are dormant by default (decision D3) — keyword fallback until
+        // JARVIS_EMBEDDINGS_KEY is set, at which point recall becomes meaning-based.
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "semantic")),
+                HttpEmbeddingProvider.resolving(
+                        connectors.supplier("embeddings.key", "JARVIS_EMBEDDINGS_KEY"),
+                        connectors.supplier("embeddings.endpoint", "JARVIS_EMBEDDINGS_ENDPOINT"),
+                        connectors.supplier("embeddings.model", "JARVIS_EMBEDDINGS_MODEL")), auditLog);
+        final ToolRegistry brainTools = governedTools;
+        // Rebuilt on demand so activating a provider (APIs & Models) hot-swaps the brain, no restart.
+        java.util.function.Supplier<AgentPolicy> brainFactory = () -> {
+            java.util.Optional<ProviderSettingsService.Active> cp = providerSettings.active();
+            if (cp.isPresent()) {
+                ProviderSettingsService.Active a = cp.get();
+                String m = a.model() == null ? "" : a.model().strip();
+                if (m.isBlank()) {
+                    if ("anthropic".equals(a.kind())) {
+                        m = model;   // Anthropic-native: the app default is a valid Claude id.
+                    } else {
+                        // Never guess a model for an OpenAI-compatible endpoint — the app
+                        // default is a Claude id and would 404 (model_not_found). Fail with
+                        // an actionable message instead of a doomed API call.
+                        final String who = a.name();
+                        return context -> new Decision.Respond("Provider '" + who
+                                + "' has no model selected, sir. Open APIs & Models, click "
+                                + "Fetch live models on that provider, pick one, and Save — "
+                                + "the brain swaps live.");
+                    }
+                }
+                com.jarvis.integrations.llm.LlmProvider prov = "anthropic".equals(a.kind())
+                        ? new com.jarvis.integrations.llm.AnthropicProvider(
+                                AnthropicPolicy.anthropicTransport(a.apiKey()))
+                        : new com.jarvis.integrations.llm.OpenAiCompatibleProvider(
+                                com.jarvis.integrations.llm.OpenAiCompatibleProvider.transport(
+                                        a.baseUrl(), a.apiKey()));
+                return AnthropicPolicy.withProvider(prov, m, 1024, brainTools)
+                        .withMemoryContext(() -> recall(memory, people, semantic))
+                        .withHistory(() -> conversationHistory(memory, "dashboard", 24))
+                        .withUsageSink((usedModel, in, out) -> {
+                            if (in > 0 || out > 0) {
+                                usageMeter.record(a.name(), usedModel, in, out);
+                            }
+                        });
+            }
+            if (online) {
+                return AnthropicPolicy.withApiKey(apiKey, model, brainTools)
+                        .withMemoryContext(() -> recall(memory, people, semantic))
                         .withHistory(() -> conversationHistory(memory, "dashboard", 24))
                         .withUsageSink((usedModel, in, out) -> {
                             if (in > 0 || out > 0) {
                                 usageMeter.record("anthropic", usedModel, in, out);
                             }
-                        })
-                : context -> new Decision.Respond(OFFLINE_HINT + context.input());
+                        });
+            }
+            return context -> new Decision.Respond(OFFLINE_HINT + context.input());
+        };
+        boolean brainOnline = providerSettings.active().isPresent() || online;
+        String effectiveModel = providerSettings.active()
+                .map(ProviderSettingsService.Active::model).filter(m -> !m.isBlank()).orElse(model);
 
-        JarvisApi api = assemble(policy, governedTools, memory);
+        SwappablePolicy swappable = new SwappablePolicy(brainFactory.get());
+        JarvisApi api = assemble(swappable, governedTools, memory);
+        BrainManager chatBrain = new BrainManager(swappable, brainFactory,
+                () -> providerSettings.active().map(ProviderSettingsService.Active::model)
+                        .filter(m -> !m.isBlank()).orElse(model));
+
+        // Local-first multi-model orchestration (ensemble + hierarchy) over the configured providers.
+        // Tier-2 routing/failover to OpenHuman is wired in but stays inert (byte-for-byte the prior
+        // behavior) unless JARVIS_OPENHUMAN_ENABLED is set — see OrchestrationService#callOne. Every
+        // role (Conductor/Orchestrator/Worker) is grounded per-call on the same unified store the main
+        // chat brain uses — the Obsidian vault is auto-mirrored into it below by VaultWatcher — so the
+        // whole hierarchy shares persistent context instead of each call starting cold.
+        OrchestrationService orchestration = new OrchestrationService(providerSettings, auditLog,
+                effectiveModel, OrchestrationService::build, routingSettings, openhuman, semantic);
+
+        // Policy-gated self-hosted lane (off by default, default-deny, audited). Responsible analogue
+        // of the Hermes "Shadow CEO": local-only, absolute harm denylist, allowlist-scoped.
+        GatedLaneService gatedLane =
+                new GatedLaneService(memory, providerSettings, auditLog, effectiveModel);
         HardwareMonitor monitor = new HardwareMonitor();
         PeopleRecognizer recognizer = online
                 ? new PeopleRecognizer(AnthropicPolicy.anthropicTransport(apiKey), model) : null;
@@ -189,19 +314,100 @@ final class AppWiring {
                 Path.of(System.getProperty("user.home"), ".jarvis", "knowledge")));
         MultiAgentService agents = new MultiAgentService(api, auditLog);
         AutonomousService autonomous = new AutonomousService(api, auditLog);
-        // Semantic memory: cloud embeddings dormant by default (decision D3) — keyword fallback until
-        // JARVIS_EMBEDDINGS_KEY is set, at which point recall becomes meaning-based.
-        SemanticMemoryService semantic = new SemanticMemoryService(
-                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "semantic")),
-                HttpEmbeddingProvider.fromEnvironment(), auditLog);
-        // Project Discussion: JARVIS chairs, OpenHuman advises. Bounded + audited; read-only.
+        // Consensus gating for Project Discussion (JARVIS_CONSENSUS_*), resolved live through the
+        // same connectors catalog. Off by default — see ConsensusSettings/ConsensusGate javadoc.
+        ConsensusSettings consensusSettings = new ConsensusSettings(connectors);
+        // Project Discussion: JARVIS chairs; OpenHuman advises when its core is connected, else a
+        // roster model stands in (preferring one that isn't the active brain). Bounded + audited.
         DiscussionService discussion = new DiscussionService(api, openhuman, auditLog,
-                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "discussions")));
+                new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "discussions")),
+                providerSettings, orchestration, consensusSettings);
+        // BRAIN (Obsidian): read-only mirror of a local vault. The vault path is configurable in-app
+        // (Settings → Connectors) and falls back to OBSIDIAN_VAULT_PATH; the memory backend stays the
+        // source of truth. No writes to the vault in Phase 1.
+        BrainVault brain = BrainVault.fromConfig(
+                connectors.resolve("obsidian.vaultPath", "OBSIDIAN_VAULT_PATH"), true, auditLog);
+        // Loud, unambiguous startup signal — no need to open the dashboard to know whether the vault
+        // actually connected. Mirrors the dashboard's statusbar Brain badge (see WebServer /status).
+        if (brain.configured()) {
+            System.out.println("[BRAIN] Obsidian vault connected: " + brain.rootDisplay()
+                    + " (" + brain.count() + " notes)");
+        } else {
+            System.out.println("[BRAIN] Obsidian vault NOT connected - set OBSIDIAN_VAULT_PATH or "
+                    + "configure it in the dashboard's Connectors/BRAIN tab.");
+        }
 
-        return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
-                memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
-                updates, license, usageMeter, tasks, workflows, knowledge, agents, autonomous, semantic,
-                discussion);
+        // ONE INDEX: fold any legacy connector-knowledge entries into the unified semantic store so the
+        // Knowledge tab and chat grounding read the same place. One-time and idempotent (guarded by a
+        // marker), so user deletes stick across restarts. New Knowledge-tab writes go straight to
+        // semantic (see the /kb handler), so this migration runs at most once per machine.
+        if (memory.get("system", "kb-migrated").isEmpty()) {
+            for (com.jarvis.rag.Document d : knowledge.list()) {
+                semantic.ingest("knowledge-" + d.id(), com.jarvis.kb.KnowledgeBase.titleOf(d),
+                        d.content(), "knowledge");
+            }
+            memory.put("system", "kb-migrated", "true");
+        }
+        // AUTO-SYNC: mirror the Obsidian vault into the store at startup and re-mirror on file changes,
+        // so grounding is live without the user clicking "Connect". Daemon-backed; no request-path cost.
+        VaultWatcher.start(brain, semantic, 5_000L);
+
+        // Uploaded documents the assistant can read (txt/md/csv/json native, docx/xlsx JDK-only,
+        // pdf via PDFBox). In-memory and session-scoped; every upload is audited.
+        UploadedDocsService uploads = new UploadedDocsService(auditLog);
+
+        // MCP connections: talk to Model Context Protocol servers over HTTP. Dormant until the user
+        // adds one; configs persist in the local memory store (surviving restarts), tokens never
+        // returned/logged, all audited. Discovered tools are bridged into the brain's registry as
+        // mcp_<server>_<tool> — the policy re-reads the registry each turn, so they appear live.
+        // (Bridged calls are audited inside McpService; MCP tools are consult-style/READ_ONLY.)
+        McpService mcp = new McpService(auditLog, governedTools, memory);
+
+        // Vision Motion + Face Recognition (Phase 4 wiring). Both motion detection and face
+        // recognition default to off (see VisionSettings javadoc) — this composition-root wiring is
+        // fully inert until the operator opts in via Settings → Connectors or the JARVIS_VISION_*/
+        // JARVIS_FACE_* env vars. CompreFace is the face-recognition provider; the pending-visitor
+        // store reuses the same durable memory store as everything else above, and the visit log is
+        // its own append-only collection under ~/.jarvis.
+        VisionSettings visionSettings = new VisionSettings(connectors);
+        FaceRecognitionClient faceClient = CompreFaceClient.resolving(visionSettings);
+        PendingVisitorStore pendingVisitors = new PendingVisitorStore(memory);
+        PresenceGreetingService greetingService = new PresenceGreetingService();
+        RecordStore visionVisitLog = new FileRecordStore(
+                Path.of(System.getProperty("user.home"), ".jarvis", "vision-visits"));
+        MotionEventService motionEvents = new MotionEventService(faceClient, visionSettings, people,
+                pendingVisitors, greetingService, visionVisitLog,
+                new HttpSnapshotFetcher(HttpClient.newHttpClient()), Instant::now, auditLog);
+        UnknownVisitorEnrollmentService enrollment = new UnknownVisitorEnrollmentService(
+                faceClient, people, pendingVisitors, Instant::now, auditLog);
+        VisionServices visionServices = new VisionServices(
+                visionSettings, motionEvents, enrollment, visionVisitLog, faceClient);
+
+        return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
+                googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,
+                permissionPolicy, updates, license, usageMeter, tasks, workflows, knowledge, agents,
+                autonomous, semantic, discussion, providerSettings, brain, solicitations, uploads, mcp,
+                chatBrain, orchestration, gatedLane, visionServices);
+    }
+
+    /**
+     * Builds the solicitations service. SAM.gov is the live source when {@code SAMGOV_API_KEY} is set
+     * (dormant otherwise); GovTribe is a dormant MCP-bridge seam (the runtime has no MCP client of its
+     * own). Drive/OneDrive connectors are read-only and dormant until credentials + folder scope are
+     * configured. No autonomous polling — the cache refreshes only on explicit request.
+     */
+    private static SolicitationsService buildSolicitations(AuditLog auditLog,
+            ConnectorSettingsService connectorSettings) {
+        List<com.jarvis.solicitations.SolicitationSourceAdapter> sources = List.of(
+                new com.jarvis.solicitations.SamGovAdapter(
+                        com.jarvis.solicitations.HttpSamGovTransport.resolving(
+                                connectorSettings.supplier("samgov.apiKey", "SAMGOV_API_KEY"),
+                                connectorSettings.supplier("samgov.baseUrl", "SAMGOV_BASE_URL"))),
+                com.jarvis.solicitations.GovTribeMcpAdapter.dormant());
+        List<com.jarvis.solicitations.DocumentConnector> connectors = List.of(
+                GoogleDriveConnector.fromEnvironment(null),
+                OneDriveConnector.fromEnvironment(null));
+        return new SolicitationsService(sources, connectors, auditLog);
     }
 
     /**
@@ -267,7 +473,8 @@ final class AppWiring {
     static PluginRegistry pluginRegistry() {
         List<ToolManifest> manifests = new ArrayList<>();
         for (String resource : new String[] {
-                "/manifests/builtin.json", "/manifests/github.json", "/manifests/openhuman.json"}) {
+                "/manifests/builtin.json", "/manifests/github.json", "/manifests/openhuman.json",
+                "/manifests/solicitations.json"}) {
             try (InputStream in = AppWiring.class.getResourceAsStream(resource)) {
                 if (in != null) {
                     manifests.addAll(ManifestLoader.parseArray(
@@ -307,9 +514,26 @@ final class AppWiring {
 
     /** Collapses durable preferences + directions into a recall block (no people contacts). */
     static String recall(MemoryStore<String> memory) {
-        List<String> lines = memory.query("preferences").stream()
-                .map(e -> "- " + e.value())
-                .collect(Collectors.toList());
+        return recall(memory, (SemanticMemoryService) null);
+    }
+
+    /**
+     * The chat recall block, drawn from the <b>single unified fact store</b>. When the semantic
+     * memory service is wired (production) the facts JARVIS remembers come from it — the same store
+     * the Memory tab and the Personal Intelligence tab read and write — so a fact added in either
+     * tab is available to the assistant during conversations. Email/calendar directions and the
+     * about-the-user note remain in the key/value memory store.
+     */
+    static String recall(MemoryStore<String> memory, SemanticMemoryService semantic) {
+        List<String> lines = new java.util.ArrayList<>();
+        // Durable identity context that should ride along on EVERY turn (directions, who the user is).
+        // Facts and notes are NOT dumped here anymore: they are retrieved per question at chat time
+        // (see KnowledgeGrounding in the /chat handler), so the model gets what the question needs
+        // instead of the whole store. When no semantic store is wired we still surface key/value
+        // preferences as a minimal fallback.
+        if (semantic == null) {
+            memory.query("preferences").forEach(e -> lines.add("- " + e.value()));
+        }
         memory.get("instructions", "mail").map(m -> m.value()).filter(s -> !s.isBlank())
                 .ifPresent(s -> lines.add("- Email handling directions: " + s));
         memory.get("instructions", "calendar").map(m -> m.value()).filter(s -> !s.isBlank())
@@ -321,7 +545,13 @@ final class AppWiring {
 
     /** Recall including the People directory, so JARVIS can email/contact people by name. */
     static String recall(MemoryStore<String> memory, PeopleStore people) {
-        String base = recall(memory);
+        return recall(memory, people, null);
+    }
+
+    /** Recall including the People directory and drawing facts from the unified semantic store. */
+    static String recall(MemoryStore<String> memory, PeopleStore people,
+            SemanticMemoryService semantic) {
+        String base = recall(memory, semantic);
         String contacts = people.contactsBlock();
         if (contacts.isBlank()) {
             return base;
