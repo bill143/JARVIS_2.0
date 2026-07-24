@@ -92,6 +92,7 @@ channel-gmail = [
 ]
 channel-twitter = ["tweepy>=4.14"]
 browser = ["playwright>=1.40"]
+vision-motion = ["opencv-python>=4.9"]
 media = ["openai>=1.30"]
 pdf = ["pdfplumber>=0.10"]
 scheduler = ["croniter>=2.0"]
