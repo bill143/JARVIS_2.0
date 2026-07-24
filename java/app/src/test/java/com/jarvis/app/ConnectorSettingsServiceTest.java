@@ -71,11 +71,22 @@ class ConnectorSettingsServiceTest {
     }
 
     @Test
-    void catalogCoversAllEightConnectors() {
+    void catalogCoversAllNineConnectors() {
         assertEquals(
-                java.util.Set.of("obsidian", "samgov", "github", "openhuman", "routing",
+                java.util.Set.of("obsidian", "samgov", "github", "openhuman", "routing", "consensus",
                         "embeddings", "gdrive", "onedrive"),
                 ConnectorSettingsService.CONNECTORS.keySet());
+    }
+
+    @Test
+    void consensusCatalogCoversAllConsensusKeys() {
+        List<ConnectorSettingsService.FieldSpec> fields = ConnectorSettingsService.CONNECTORS.get("consensus");
+        java.util.Set<String> envs = fields.stream().map(ConnectorSettingsService.FieldSpec::env)
+                .collect(java.util.stream.Collectors.toSet());
+        assertEquals(java.util.Set.of("JARVIS_CONSENSUS_ENABLED", "JARVIS_CONSENSUS_MODE",
+                "JARVIS_CONSENSUS_MAX_ROUNDS", "JARVIS_CONSENSUS_REQUIRE_RATIONALE",
+                "JARVIS_CONSENSUS_TIMEOUT_MS"), envs);
+        assertTrue(fields.stream().noneMatch(ConnectorSettingsService.FieldSpec::secret));
     }
 
     @Test

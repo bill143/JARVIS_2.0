@@ -49,6 +49,12 @@ final class ConnectorSettingsService {
                 new FieldSpec("routing.breakerFailThreshold", "JARVIS_ROUTING_BREAKER_FAIL_THRESHOLD", false),
                 new FieldSpec("routing.breakerWindowSec", "JARVIS_ROUTING_BREAKER_WINDOW_SEC", false),
                 new FieldSpec("routing.breakerCooldownSec", "JARVIS_ROUTING_BREAKER_COOLDOWN_SEC", false)));
+        m.put("consensus", List.of(
+                new FieldSpec("consensus.enabled", "JARVIS_CONSENSUS_ENABLED", false),
+                new FieldSpec("consensus.mode", "JARVIS_CONSENSUS_MODE", false),
+                new FieldSpec("consensus.maxRounds", "JARVIS_CONSENSUS_MAX_ROUNDS", false),
+                new FieldSpec("consensus.requireRationale", "JARVIS_CONSENSUS_REQUIRE_RATIONALE", false),
+                new FieldSpec("consensus.timeoutMs", "JARVIS_CONSENSUS_TIMEOUT_MS", false)));
         m.put("embeddings", List.of(
                 new FieldSpec("embeddings.key", "JARVIS_EMBEDDINGS_KEY", true),
                 new FieldSpec("embeddings.endpoint", "JARVIS_EMBEDDINGS_ENDPOINT", false),

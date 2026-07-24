@@ -1567,8 +1567,10 @@ public final class WebServer {
                 return;
             }
             String topic;
+            JsonNode j;
             try (InputStream body = exchange.getRequestBody()) {
-                topic = MAPPER.readTree(body).path("topic").asText("").strip();
+                j = MAPPER.readTree(body);
+                topic = j.path("topic").asText("").strip();
             } catch (IOException e) {
                 respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
                 return;
@@ -1577,7 +1579,16 @@ public final class WebServer {
                 respond(exchange, 400, "text/plain", "empty topic".getBytes(StandardCharsets.UTF_8));
                 return;
             }
-            com.jarvis.discussion.DiscussionRunner.Discussion d = discussion.run(topic);
+            // Optional per-request consensus fields. Omitting all of them (the common/legacy case)
+            // means no override at all — the global JARVIS_CONSENSUS_* settings decide everything,
+            // and when those are off (the default), this reproduces the pre-consensus response
+            // exactly except for the two new, additive "consensus"/"finalized" fields below.
+            com.jarvis.discussion.ConsensusPolicy override =
+                    consensusOverrideFrom(j, discussion.consensusSnapshot());
+            com.jarvis.discussion.DiscussionRunner.ConsensusDiscussion result =
+                    discussion.runWithConsensus(topic, override);
+            com.jarvis.discussion.DiscussionRunner.Discussion d = result.discussion();
+
             ObjectNode o = MAPPER.createObjectNode();
             o.put("topic", d.topic());
             o.put("converged", d.converged());
@@ -1593,6 +1604,20 @@ public final class WebServer {
                 if (r.failed()) {
                     ro.put("error", r.error());
                 }
+            });
+            o.put("finalized", result.finalized());
+            ObjectNode consensusNode = o.putObject("consensus");
+            consensusNode.put("achieved", result.consensus().achieved());
+            consensusNode.put("reason", result.consensus().reason());
+            ArrayNode blockingArr = consensusNode.putArray("blockingAgents");
+            result.consensus().blockingAgents().forEach(blockingArr::add);
+            ArrayNode votesArr = consensusNode.putArray("votes");
+            result.consensus().votes().forEach(v -> {
+                ObjectNode vo = votesArr.addObject();
+                vo.put("agentId", v.agentId());
+                vo.put("decision", v.decision().name());
+                vo.put("rationale", v.rationale());
+                vo.put("round", v.round());
             });
             respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
@@ -2103,6 +2128,53 @@ public final class WebServer {
             return Integer.parseInt(s.strip());
         } catch (NumberFormatException e) {
             return dflt;
+        }
+    }
+
+    /**
+     * Builds a per-request consensus override from {@code /discussion/run}'s optional JSON fields,
+     * layering whatever was specified on top of the live global {@code base} snapshot — {@code null}
+     * when none of the fields were present at all, so the global settings decide everything
+     * (the legacy/common case). Whether this override is honored at all is
+     * {@link ConsensusSettings#effectivePolicy} default-deny, not this method's concern.
+     */
+    private static com.jarvis.discussion.ConsensusPolicy consensusOverrideFrom(JsonNode j,
+            ConsensusSettings.Snapshot base) {
+        boolean hasAny = j.has("consensusEnabled") || j.has("consensusMode")
+                || j.has("consensusMaxRounds") || j.has("consensusRequireRationale")
+                || j.has("consensusTimeoutMs");
+        if (!hasAny) {
+            return null;
+        }
+        com.jarvis.discussion.ConsensusMode mode;
+        if (j.has("consensusMode")) {
+            mode = parseConsensusMode(j.path("consensusMode").asText(""), base.mode());
+        } else if (j.has("consensusEnabled")) {
+            mode = j.path("consensusEnabled").asBoolean(false)
+                    ? com.jarvis.discussion.ConsensusMode.UNANIMOUS
+                    : com.jarvis.discussion.ConsensusMode.OFF;
+        } else {
+            mode = base.mode();
+        }
+        int maxRounds = j.has("consensusMaxRounds")
+                ? Math.max(1, j.path("consensusMaxRounds").asInt(base.maxRounds())) : base.maxRounds();
+        boolean requireRationale = j.has("consensusRequireRationale")
+                ? j.path("consensusRequireRationale").asBoolean(base.requireRationale())
+                : base.requireRationale();
+        long timeoutMs = j.has("consensusTimeoutMs")
+                ? Math.max(0L, j.path("consensusTimeoutMs").asLong(base.timeoutMs())) : base.timeoutMs();
+        return new com.jarvis.discussion.ConsensusPolicy(mode, maxRounds, requireRationale, timeoutMs);
+    }
+
+    private static com.jarvis.discussion.ConsensusMode parseConsensusMode(String s,
+            com.jarvis.discussion.ConsensusMode fallback) {
+        if (s == null || s.isBlank()) {
+            return fallback;
+        }
+        try {
+            return com.jarvis.discussion.ConsensusMode.valueOf(s.strip().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return fallback;
         }
     }
 

@@ -298,11 +298,14 @@ final class AppWiring {
                 Path.of(System.getProperty("user.home"), ".jarvis", "knowledge")));
         MultiAgentService agents = new MultiAgentService(api, auditLog);
         AutonomousService autonomous = new AutonomousService(api, auditLog);
+        // Consensus gating for Project Discussion (JARVIS_CONSENSUS_*), resolved live through the
+        // same connectors catalog. Off by default — see ConsensusSettings/ConsensusGate javadoc.
+        ConsensusSettings consensusSettings = new ConsensusSettings(connectors);
         // Project Discussion: JARVIS chairs; OpenHuman advises when its core is connected, else a
         // roster model stands in (preferring one that isn't the active brain). Bounded + audited.
         DiscussionService discussion = new DiscussionService(api, openhuman, auditLog,
                 new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "discussions")),
-                providerSettings, orchestration);
+                providerSettings, orchestration, consensusSettings);
         // BRAIN (Obsidian): read-only mirror of a local vault. The vault path is configurable in-app
         // (Settings → Connectors) and falls back to OBSIDIAN_VAULT_PATH; the memory backend stays the
         // source of truth. No writes to the vault in Phase 1.

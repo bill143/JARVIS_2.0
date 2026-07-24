@@ -4,12 +4,24 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.jarvis.api.ChatRequest;
+import com.jarvis.api.ChatResponse;
 import com.jarvis.api.JarvisApi;
+import com.jarvis.api.PlanRequest;
+import com.jarvis.api.PlanResponse;
+import com.jarvis.audit.AuditEntry;
+import com.jarvis.audit.AuditLog;
+import com.jarvis.audit.RecordStoreAuditLog;
+import com.jarvis.discussion.ConsensusMode;
+import com.jarvis.discussion.ConsensusPolicy;
 import com.jarvis.discussion.DiscussionRunner;
 import com.jarvis.integrations.llm.LlmProvider;
 import com.jarvis.integrations.openhuman.OpenHumanClient;
 import com.jarvis.integrations.openhuman.OpenHumanResponse;
+import com.jarvis.memory.InMemoryRecordStore;
 import com.jarvis.memory.InMemoryStore;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class DiscussionServiceTest {
@@ -91,5 +103,136 @@ class DiscussionServiceTest {
                 p, fakeOrchestration(p));
         assertTrue(svc.advisorAvailable());
         assertEquals("openhuman", svc.advisorSource());   // core outranks the model fallback
+    }
+
+    // ---- consensus: runWithConsensus() ---------------------------------------------------
+
+    /** A fake chair-side JarvisApi that scripts replies by inspecting the prompt shape. */
+    private static JarvisApi scriptedChairApi(String chairVoteDecision) {
+        return new JarvisApi() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                String p = request.prompt();
+                String text;
+                if (p.contains("Vote on whether")) {
+                    text = "DECISION: " + chairVoteDecision + "\nRATIONALE: because";
+                } else if (p.contains("Decide the SINGLE next question")) {
+                    text = "What is the budget?"; // never self-converges — the gate decides
+                } else {
+                    text = "outcome synthesized";
+                }
+                return new ChatResponse(request.sessionId(), true, text, 0);
+            }
+
+            @Override
+            public PlanResponse plan(PlanRequest request) {
+                throw new UnsupportedOperationException("not used by discussions");
+            }
+        };
+    }
+
+    /** A fake model advisor that scripts its vote reply the same way the chair fake does. */
+    private static OrchestrationService votingOrchestration(ProviderSettingsService p,
+            String advisorVoteDecision) {
+        return new OrchestrationService(p, null, "m", a -> req -> {
+            String content = req.messages().get(0).content();
+            String text = content.contains("Vote on whether")
+                    ? "DECISION: " + advisorVoteDecision + "\nRATIONALE: because"
+                    : "advice from " + a.name();
+            return new LlmProvider.Result(text, 1, 1);
+        });
+    }
+
+    private static ConsensusSettings enabledConsensus(int maxRounds) {
+        return new ConsensusSettings(new ConnectorSettingsService(new InMemoryStore<>(), Map.of(
+                "JARVIS_CONSENSUS_ENABLED", "true",
+                "JARVIS_CONSENSUS_MODE", "UNANIMOUS",
+                "JARVIS_CONSENSUS_MAX_ROUNDS", String.valueOf(maxRounds))::get));
+    }
+
+    private static ConsensusSettings disabledConsensus() {
+        return new ConsensusSettings(
+                new ConnectorSettingsService(new InMemoryStore<>(), Map.<String, String>of()::get));
+    }
+
+    @Test
+    void withNoConsensusSettingsWiredRunWithConsensusMatchesLegacyRunExactly() {
+        ProviderSettingsService p = twoProviders();
+        DiscussionService svc = new DiscussionService(scriptedChairApi("APPROVE"), null, null, null,
+                p, votingOrchestration(p, "APPROVE")); // 6-arg ctor -> consensusSettings == null
+
+        DiscussionRunner.ConsensusDiscussion result = svc.runWithConsensus("topic", null);
+
+        assertTrue(result.finalized());
+        assertTrue(result.consensus().achieved());
+        assertEquals("consensus disabled", result.consensus().reason());
+    }
+
+    @Test
+    void requestOverrideIsIgnoredWhenConsensusIsGloballyDisabled() {
+        ProviderSettingsService p = twoProviders();
+        DiscussionService svc = new DiscussionService(scriptedChairApi("REJECT"), null, null, null,
+                p, votingOrchestration(p, "REJECT"), disabledConsensus());
+
+        // Even though the request explicitly asks for UNANIMOUS, the global switch is off, so this
+        // must behave exactly like consensus-disabled (default-deny), never attempting REJECT votes.
+        ConsensusPolicy attemptedOverride = new ConsensusPolicy(ConsensusMode.UNANIMOUS, 3, true, 0L);
+        DiscussionRunner.ConsensusDiscussion result = svc.runWithConsensus("topic", attemptedOverride);
+
+        assertTrue(result.finalized());
+        assertEquals("consensus disabled", result.consensus().reason());
+    }
+
+    @Test
+    void unanimousConsensusAchievedWhenGloballyEnabledAndBothApprove() {
+        ProviderSettingsService p = twoProviders();
+        AuditLog audit = new RecordStoreAuditLog(new InMemoryRecordStore());
+        DiscussionService svc = new DiscussionService(scriptedChairApi("APPROVE"), null, audit, null,
+                p, votingOrchestration(p, "APPROVE"), enabledConsensus(3));
+
+        DiscussionRunner.ConsensusDiscussion result = svc.runWithConsensus("go-kart budget", null);
+
+        assertTrue(result.finalized());
+        assertTrue(result.consensus().achieved());
+
+        List<AuditEntry> events = audit.recent(50);
+        assertTrue(events.stream().anyMatch(e -> e.event().action().equals("CONSENSUS_ROUND_STARTED")));
+        assertTrue(events.stream().anyMatch(e -> e.event().action().equals("CONSENSUS_VOTE_RECORDED")
+                && e.event().detail().contains("chair") && e.event().detail().contains("APPROVE")));
+        assertTrue(events.stream().anyMatch(e -> e.event().action().equals("CONSENSUS_REACHED")));
+        assertFalse(events.stream().anyMatch(e -> e.event().action().equals("CONSENSUS_FAILED")));
+    }
+
+    @Test
+    void consensusFailsClosedAndAuditsFailureWhenTheAdvisorNeverApproves() {
+        ProviderSettingsService p = twoProviders();
+        AuditLog audit = new RecordStoreAuditLog(new InMemoryRecordStore());
+        DiscussionService svc = new DiscussionService(scriptedChairApi("APPROVE"), null, audit, null,
+                p, votingOrchestration(p, "REJECT"), enabledConsensus(1)); // 1 round, advisor rejects
+
+        DiscussionRunner.ConsensusDiscussion result = svc.runWithConsensus("go-kart budget", null);
+
+        assertFalse(result.finalized());
+        assertFalse(result.consensus().achieved());
+        assertTrue(result.consensus().blockingAgents().stream().anyMatch(a -> a.contains("SecondOpinion")));
+
+        List<AuditEntry> events = audit.recent(50);
+        assertTrue(events.stream().anyMatch(e -> e.event().action().equals("CONSENSUS_FAILED")));
+        assertTrue(events.stream().anyMatch(e -> e.event().action().equals("CONSENSUS_BLOCKED_ACTION")));
+    }
+
+    @Test
+    void legacyRunNeverEmitsAnyConsensusAuditEvents() {
+        // Regression guard for the bug caught during development: buildChair() is shared by both
+        // run() and runWithConsensus() — legacy run() must never emit CONSENSUS_* events.
+        ProviderSettingsService p = twoProviders();
+        AuditLog audit = new RecordStoreAuditLog(new InMemoryRecordStore());
+        DiscussionService svc = new DiscussionService(scriptedChairApi("APPROVE"), null, audit, null,
+                p, votingOrchestration(p, "APPROVE"), enabledConsensus(3));
+
+        svc.run("plain legacy discussion");
+
+        List<AuditEntry> events = audit.recent(50);
+        assertFalse(events.stream().anyMatch(e -> e.event().action().startsWith("CONSENSUS_")));
     }
 }

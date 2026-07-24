@@ -357,6 +357,99 @@ class WebServerTest {
         assertEquals(503, post("/discussion/run", "{\"topic\":\"x\"}").statusCode());
     }
 
+    // ---- /discussion/run: consensus fields (additive, backward compatible) -------------------
+
+    /** A chair-side JarvisApi that scripts replies by inspecting the prompt shape. */
+    private static JarvisApi scriptedConsensusChairApi(String voteDecision) {
+        return new JarvisApi() {
+            @Override
+            public com.jarvis.api.ChatResponse chat(com.jarvis.api.ChatRequest request) {
+                String p = request.prompt();
+                String text = p.contains("Vote on whether") ? "DECISION: " + voteDecision + "\nRATIONALE: ok"
+                        : p.contains("Decide the SINGLE next question") ? "What is the budget?"
+                        : "outcome synthesized";
+                return new com.jarvis.api.ChatResponse(request.sessionId(), true, text, 0);
+            }
+
+            @Override
+            public com.jarvis.api.PlanResponse plan(com.jarvis.api.PlanRequest request) {
+                throw new UnsupportedOperationException("not used by discussions");
+            }
+        };
+    }
+
+    private static OrchestrationService votingOrchestrationFor(ProviderSettingsService p, String voteDecision) {
+        return new OrchestrationService(p, null, "m", a -> req -> {
+            String content = req.messages().get(0).content();
+            String text = content.contains("Vote on whether")
+                    ? "DECISION: " + voteDecision + "\nRATIONALE: ok" : "advice from " + a.name();
+            return new com.jarvis.integrations.llm.LlmProvider.Result(text, 1, 1);
+        });
+    }
+
+    @Test
+    void discussionRunEndpointReturnsFinalizedConsensusWhenGloballyEnabledAndBothApprove() throws Exception {
+        ProviderSettingsService providers = new ProviderSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), (b, k) -> java.util.List.of());
+        providers.save("Chair", "openai", "https://x/v1", "k1", "m-chair", true);
+        providers.save("SecondOpinion", "openai", "https://x/v1", "k2", "m-second", false);
+        ConsensusSettings enabled = new ConsensusSettings(new ConnectorSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), java.util.Map.of(
+                        "JARVIS_CONSENSUS_ENABLED", "true", "JARVIS_CONSENSUS_MODE", "UNANIMOUS",
+                        "JARVIS_CONSENSUS_MAX_ROUNDS", "2")::get));
+        DiscussionService svc = new DiscussionService(scriptedConsensusChairApi("APPROVE"), null, null,
+                new com.jarvis.memory.InMemoryRecordStore(), providers,
+                votingOrchestrationFor(providers, "APPROVE"), enabled);
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, svc, null, null, null, null, null, null, null, null));
+        try {
+            HttpResponse<String> r = post2r("http://localhost:" + wired.port() + "/discussion/run",
+                    "{\"topic\":\"go-kart budget\"}");
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("\"finalized\":true"), r.body());
+            assertTrue(r.body().contains("\"achieved\":true"), r.body());
+            assertTrue(r.body().contains("\"blockingAgents\":[]"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void discussionRunEndpointIgnoresRequestOverrideWhenGloballyDisabled() throws Exception {
+        ProviderSettingsService providers = new ProviderSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), (b, k) -> java.util.List.of());
+        providers.save("Chair", "openai", "https://x/v1", "k1", "m-chair", true);
+        providers.save("SecondOpinion", "openai", "https://x/v1", "k2", "m-second", false);
+        // No ConsensusSettings wired at all -> globally disabled, matching production's safe default.
+        DiscussionService svc = new DiscussionService(scriptedConsensusChairApi("REJECT"), null, null,
+                new com.jarvis.memory.InMemoryRecordStore(), providers,
+                votingOrchestrationFor(providers, "REJECT"));
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, svc, null, null, null, null, null, null, null, null));
+        try {
+            // The request explicitly asks for UNANIMOUS consensus, but the global switch is off, so
+            // this must be ignored entirely (default-deny) — the response looks like plain legacy.
+            HttpResponse<String> r = post2r("http://localhost:" + wired.port() + "/discussion/run",
+                    "{\"topic\":\"go-kart budget\",\"consensusEnabled\":true,"
+                            + "\"consensusMode\":\"UNANIMOUS\",\"consensusMaxRounds\":1}");
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("\"finalized\":true"), r.body());
+            assertTrue(r.body().contains("consensus disabled"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
     @Test
     void semanticEndpointsRememberRecallAndReportKeywordFallback() throws Exception {
         // Dormant embeddings (no key) → keyword fallback; recall still works and mode is reported.
