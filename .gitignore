@@ -37,11 +37,17 @@ htmlcov/
 Thumbs.db
 
 # Secrets
+# .env.example is intentionally included here (no carve-out) — it was previously tracked as a
+# template with blank placeholders, but real secrets were pasted into it and committed at least
+# once (2026-07-20 incident: a TOGETHER_API_KEY + SENTRY_DSN reached a pushed backup branch).
+# Since .gitignore alone cannot stop `git add -A` from re-staging edits to an *already-tracked*
+# file, it was also untracked (`git rm --cached`) so this can't recur regardless of file content.
 .env
 .env.*
-!.env.example
 credentials.toml
 AIMLAPI_APIkey_d7b094b8.txt
+*.pem
+*.key
 
 # Project
 *.sqlite
