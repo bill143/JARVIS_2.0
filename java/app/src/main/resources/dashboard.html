@@ -4,10 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>J.A.R.V.I.S.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root { --bg:#03070e; --panel:rgba(10,20,34,.72); --line:rgba(41,120,180,.28);
           --cyan:#41d9ff; --cyan-dim:#1c6f92; --dim:#6f8bab; --text:#d7e8f7; --green:#38e28e;
-          --amber:#ffb84d; --red:#ff5a72; }
+          --amber:#ffb84d; --red:#ff5a72;
+          /* JARVIS_DESIGN_SYSTEM.md — locked Command Center tokens. Do not repurpose --cyan/--text
+             (those stay user-tunable via Appearance settings for the rest of the app); the surface
+             this file rebuilds against the design contract uses these fixed tokens exclusively. */
+          --void:#05070A; --surface:#0B1016; --reactor:#4FC3F7; --reactor-dim:#1A5F7A;
+          --signal:#FFB454; --cc-text:#E8EDF2; --cc-text-dim:#6B7A8A; --cc-edge:rgba(79,195,247,0.08);
+          --font-display:"Space Grotesk", system-ui, sans-serif; --font-mono-cc:"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
   * { box-sizing:border-box; margin:0; }
   html,body { height:100%; }
   body { background:
@@ -578,6 +587,118 @@
   .orch-dot{ width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
   .orch-dot.ok{ background:#38e28e; } .orch-dot.bad{ background:#ef4444; }
 
+  /* =====================================================================
+     JARVIS_DESIGN_SYSTEM.md rebuild — Command Center only. Other pages
+     (Memory, Tasks, Workflows, Settings, …) are untouched and keep using
+     the original --cyan/--panel/--line tokens + the Appearance engine.
+     ===================================================================== */
+
+  /* Sidebar retired: kept in the DOM (untouched JS still targets #sidenav
+     .navitem for other machinery) but never rendered. Ctrl+K palette is
+     the only way to reach these destinations now. */
+  #sidenav, #navToggle { display:none !important; }
+  #app { padding-left:0 !important; }
+
+  /* Old header tool-pills and left/right widget columns: their JS (polling,
+     click handlers, page-open functions) all still runs — see the hidden
+     wrappers below — but nothing renders. This is what "delete" means here:
+     zero visual/layout footprint, not a rewrite of every function that
+     reads these element ids. */
+  .cc-hidden { position:absolute !important; width:0 !important; height:0 !important;
+    overflow:hidden !important; opacity:0 !important; pointer-events:none !important; }
+
+  header.cc-header { display:flex; align-items:center; gap:18px; padding:16px 32px;
+    border-bottom:1px solid var(--cc-edge); background:var(--void); }
+  .cc-header .badge { width:22px; height:22px; box-shadow:0 0 12px 2px rgba(79,195,247,.4); }
+  .cc-header h1 { font-family:var(--font-display); font-size:15px; letter-spacing:4px;
+    font-weight:600; color:var(--cc-text); }
+  .cc-header .sub { font-family:var(--font-mono-cc); font-size:11px; letter-spacing:.14em;
+    color:var(--cc-text-dim); text-transform:uppercase; }
+  .cc-voice { background:transparent; border:1px solid var(--cc-edge); color:var(--cc-text-dim);
+    border-radius:4px; padding:6px 14px; font-family:var(--font-mono-cc); font-size:11px;
+    letter-spacing:.14em; text-transform:uppercase; cursor:pointer; transition:border-color .22s ease,color .22s ease; }
+  .cc-voice:hover { border-color:var(--reactor); color:var(--cc-text); }
+  .cc-voice.on { color:var(--reactor); border-color:var(--reactor); }
+  .cc-kbd-hint { display:flex; align-items:center; gap:8px;
+    font-family:var(--font-mono-cc); font-size:11px; letter-spacing:.14em; color:var(--cc-text-dim);
+    background:transparent; border:1px solid var(--cc-edge); border-radius:4px; padding:6px 14px; cursor:pointer; }
+  .cc-kbd-hint:hover { border-color:var(--reactor); color:var(--cc-text); }
+  .cc-kbd-hint kbd { font-family:var(--font-mono-cc); background:var(--surface); border:1px solid var(--cc-edge);
+    border-radius:3px; padding:1px 5px; }
+  .cc-dot { width:8px; height:8px; border-radius:50%; background:var(--cc-text-dim); flex:0 0 auto; }
+  .cc-dot.on { background:var(--reactor); box-shadow:0 0 8px var(--reactor); }
+
+  /* Main surface: one column now that the side widget columns are gone. */
+  #main.cc-main { display:block; padding:0; }
+  .col.center.cc-stage { position:relative; height:100%; width:100%; padding:0; }
+  .cc-stage .stage { position:absolute; left:42%; top:46%; transform:translate(-50%,-50%);
+    width:min(55vh,640px); height:min(55vh,640px); }
+  .cc-stage .orb { width:100%; transition:transform .16s ease-out; }
+  @keyframes breathe { 50% { transform:scale(1.03); box-shadow:0 0 80px 18px rgba(65,217,255,.6),
+                              inset 0 0 46px rgba(255,255,255,.45); } }
+
+  /* Answers: large typography over the surface, no bubbles, no avatars. The orb sits at 42%
+     specifically to leave this open — the answer stream lives in that freed asymmetric space,
+     clear of the orb, the mode toggles, and the bottom-anchored input. */
+  .cc-stage #log { position:absolute; left:62%; right:5%; top:14%; bottom:22%;
+    overflow:hidden; display:flex; flex-direction:column-reverse; gap:32px; pointer-events:none; }
+  .cc-stage .msg { width:100%; max-width:100%; align-self:center; padding:0; background:none;
+    border:none; border-radius:0;
+    font-family:var(--font-display); font-size:20px; line-height:1.5; color:var(--cc-text);
+    text-align:left; white-space:pre-wrap; word-wrap:break-word;
+    animation:cc-msg-life 7s ease-in-out forwards; }
+  .cc-stage .msg.you { font-size:15px; color:var(--cc-text-dim); }
+  .cc-stage .msg .who { font-family:var(--font-mono-cc); font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--cc-text-dim); margin-bottom:8px; }
+  .cc-stage .msg .meta { font-family:var(--font-mono-cc); font-size:11px; color:var(--cc-text-dim); margin-top:8px; }
+  .cc-stage .msg.thinking { color:var(--cc-text-dim); font-style:normal; animation:none; opacity:.7; }
+  @keyframes cc-msg-life {
+    0% { opacity:0; transform:translateY(8px); }
+    8% { opacity:1; transform:translateY(0); }
+    60% { opacity:1; }
+    100% { opacity:.35; }
+  }
+
+  /* Chat input: borderless line, bottom-anchored, no SEND button. */
+  .cc-stage .orch-modes, .cc-stage .attach-chips { position:absolute; left:50%; transform:translateX(-50%); width:min(640px,90vw); }
+  .cc-stage .orch-modes { bottom:76px; }
+  .cc-stage .attach-chips { bottom:132px; }
+  .cc-stage .cmd { position:absolute; left:50%; bottom:32px; transform:translateX(-50%);
+    width:min(640px,90vw); max-width:640px; margin-top:0; background:none; border:none;
+    border-bottom:1px solid var(--cc-edge); padding-bottom:6px; transition:border-color .22s ease; }
+  .cc-stage .cmd:focus-within { border-bottom-color:var(--reactor); }
+  .cc-stage .cmd input { background:transparent; border:none; padding:8px 4px; font-family:var(--font-display); font-size:15px; }
+  .cc-stage .cmd input:focus { box-shadow:none; }
+  .cc-stage .cmd #send { display:none; }
+  .cc-stage .cmd .attach-btn { background:none; border:none; color:var(--cc-text-dim); }
+  .cc-stage .cmd .attach-btn:hover { color:var(--reactor); }
+
+  /* Bottom status strip: model · mic state · note count · uptime. */
+  .statusbar.cc-strip { font-family:var(--font-mono-cc); font-size:11px; letter-spacing:.06em;
+    color:var(--cc-text-dim); border-top:1px solid var(--cc-edge); background:var(--void); gap:32px; }
+  .statusbar.cc-strip b { color:var(--cc-text); font-weight:500; }
+  .statusbar.cc-strip .cc-extra { display:none; }
+
+  /* Command palette (Ctrl+K) */
+  .cc-palette-scrim { position:fixed; inset:0; background:rgba(5,7,10,.6); opacity:0; pointer-events:none;
+    transition:opacity .22s cubic-bezier(0.16,1,0.3,1); z-index:80; }
+  .cc-palette-scrim.open { opacity:1; pointer-events:auto; }
+  #palette { position:fixed; left:50%; top:14vh; transform:translate(-50%,8px); width:min(640px,90vw);
+    background:var(--surface); border:1px solid var(--cc-edge); border-radius:10px; z-index:81;
+    opacity:0; pointer-events:none; transition:opacity .22s cubic-bezier(0.16,1,0.3,1), transform .22s cubic-bezier(0.16,1,0.3,1);
+    max-height:70vh; display:flex; flex-direction:column; overflow:hidden; }
+  .cc-palette-scrim.open #palette { opacity:1; transform:translate(-50%,0); pointer-events:auto; }
+  #palette input { width:100%; background:transparent; border:none; border-bottom:1px solid var(--cc-edge);
+    color:var(--cc-text); font-family:var(--font-display); font-size:15px; padding:16px 20px; outline:none; }
+  #palette .cc-results { overflow-y:auto; padding:8px; }
+  #palette .cc-group-label { font-family:var(--font-mono-cc); font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--cc-text-dim); padding:12px 12px 4px; }
+  #palette .cc-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:6px;
+    color:var(--cc-text-dim); font-family:var(--font-display); font-size:14px; cursor:pointer; }
+  #palette .cc-item .cc-item-tag { margin-left:auto; font-family:var(--font-mono-cc); font-size:10.5px;
+    color:var(--cc-text-dim); letter-spacing:.1em; text-transform:uppercase; }
+  #palette .cc-item.sel { background:rgba(79,195,247,.08); color:var(--cc-text); }
+  #palette .cc-empty { padding:20px 12px; color:var(--cc-text-dim); font-size:13px; }
 </style>
 </head>
 <body>
@@ -606,15 +727,20 @@
   <div class="navitem" data-nav="sysmon"><span class="ic">📈</span> System Monitor</div>
 </nav>
 <div id="app">
-  <header>
-    <button class="hbtn" id="navToggle" type="button" title="Show / hide the side panel">☰</button>
+  <header class="cc-header">
     <div class="badge"></div>
-    <div><h1>J.A.R.V.I.S.</h1><div class="sub">JUST A RATHER VERY INTELLIGENT SYSTEM</div></div>
-    <div class="tools">
+    <div><h1>J.A.R.V.I.S.</h1><div class="sub">Command Center</div></div>
+    <button class="cc-voice" id="voice" type="button" title="Toggle voice; say your wake word, ESC interrupts">VOICE</button>
+    <span class="cc-dot" id="hdrDot" title="Connection status"></span>
+    <button class="cc-kbd-hint" id="paletteHint" type="button" title="Open the command palette">
+      Search <kbd>Ctrl</kbd><kbd>K</kbd>
+    </button>
+    <!-- Everything below still runs (polling, page routing, click handlers) — it is just never
+         rendered. The command palette (#palette) is the only visible way to reach it now. -->
+    <div class="tools cc-hidden">
       <button class="hbtn" id="brief" type="button" title="Time, reminders, weather, headlines">BRIEFING</button>
       <button class="hbtn" id="mailTab" type="button" title="Your Gmail">✉ MAIL</button>
       <button class="hbtn" id="calTab" type="button" title="Your Google Calendar">📅 CALENDAR</button>
-      <button class="hbtn" id="voice" type="button" title="Toggle voice; say your wake word, ESC interrupts">🎤 VOICE</button>
       <button class="hbtn" id="camera" type="button" title="Look through the webcam">📷 CAMERA</button>
       <button class="hbtn" id="peopleTab" type="button" title="People & About Me">👥 PEOPLE</button>
       <button class="hbtn" id="auditTab" type="button" title="Audit log — every action JARVIS takes">🛡 AUDIT</button>
@@ -623,54 +749,25 @@
     </div>
   </header>
 
-  <div id="main">
-    <!-- LEFT: metrics -->
-    <div class="col">
-      <div class="card">
-        <h3>System</h3>
-        <div class="metric"><div class="top"><span>CPU LOAD</span><b id="cpuVal">—</b></div>
-          <div class="bar" id="cpuBar"><span></span></div></div>
-        <div class="metric"><div class="top"><span>MEMORY</span><b id="ramVal">—</b></div>
-          <div class="bar" id="ramBar"><span></span></div></div>
-        <div class="kv"><span>CORES</span><b id="cores">—</b></div>
-        <div class="kv"><span>MEMORY</span><b id="ramGb">—</b></div>
-      </div>
-      <div class="card">
-        <h3>Core Status</h3>
-        <div class="kv"><span>MODEL</span><b id="modelKv">—</b></div>
-        <div class="kv"><span>CONNECTION</span><b id="connKv">—</b></div>
-        <div class="kv"><span>UPTIME</span><b id="uptime">00:00:00</b></div>
-      </div>
-      <div class="card">
-        <h3>Usage
-          <button class="hbtn" id="usageMore" type="button" title="Token & cost history"
-                  style="float:right;font-size:10px;padding:2px 8px;">HISTORY ▸</button></h3>
-        <div class="kv"><span>EST. COST</span><b id="uCost">$0.00</b></div>
-        <div class="kv"><span>TOKENS</span><b id="uTokens">0</b></div>
-        <div class="kv"><span>CALLS</span><b id="uCalls">0</b></div>
-      </div>
-      <div class="card">
-        <h3>Subsystems</h3>
-        <div class="sub-list">
-          <div class="item"><span class="sdot" id="ssAi"></span>Cognitive core</div>
-          <div class="item"><span class="sdot" id="ssVoice"></span>Voice interface</div>
-          <div class="item"><span class="sdot" id="ssVision"></span>Vision (screen/webcam)</div>
-          <div class="item"><span class="sdot" id="ssGoogle"></span>Email &amp; Calendar (Google)</div>
-          <div class="item"><span class="sdot"></span>Persistent memory</div>
-          <div class="item"><span class="sdot"></span>Tool execution</div>
-          <div class="item"><span class="sdot"></span>Hardware monitor</div>
-        </div>
-      </div>
-      <div class="card" style="flex:1;">
-        <h3>Activity <span id="actCount" class="actcount"></span>
-          <button class="hbtn" id="actMore" type="button" title="Open the full Audit Log"
-                  style="float:right;font-size:10px;padding:2px 8px;">AUDIT ▸</button></h3>
-        <div id="activityFeed" class="afeed"><div class="hint">Waiting for activity…</div></div>
-      </div>
+  <div id="main" class="cc-main">
+    <!-- Retired left metrics column. Every id below is still polled/updated by existing JS
+         (hardware monitor, usage meter, subsystem dots) — just never shown. model/uptime/note
+         count that matter to the design contract's status strip live in the real statusbar now. -->
+    <div class="cc-hidden">
+      <b id="cpuVal"></b><div class="bar" id="cpuBar"><span></span></div>
+      <b id="ramVal"></b><div class="bar" id="ramBar"><span></span></div>
+      <b id="cores"></b><b id="ramGb"></b>
+      <b id="modelKv"></b><b id="connKv"></b>
+      <button id="usageMore" type="button"></button>
+      <b id="uCost">$0.00</b><b id="uTokens">0</b><b id="uCalls">0</b>
+      <span class="sdot" id="ssAi"></span><span class="sdot" id="ssVoice"></span>
+      <span class="sdot" id="ssVision"></span><span class="sdot" id="ssGoogle"></span>
+      <button id="actMore" type="button"></button>
+      <div id="activityFeed"></div>
     </div>
 
-    <!-- CENTER: orb -->
-    <div class="col center">
+    <!-- CENTER: the one primary surface -->
+    <div class="col center cc-stage">
       <div class="stage">
         <div class="orb idle" id="orb">
           <svg viewBox="0 0 400 400" aria-hidden="true">
@@ -698,9 +795,11 @@
         </div>
         <div class="status-line">
           <div class="st" id="statusText">STANDBY</div>
-          <div class="hint" id="statusHint">Press 🎤 VOICE or type a command</div>
+          <div class="hint" id="statusHint">Press VOICE or type a command</div>
         </div>
       </div>
+      <!-- Answers: large typography over the surface, fade in / hold / dim. No bubbles, no avatars. -->
+      <div id="log"></div>
       <div class="orch-modes" id="orchModes">
         <button type="button" class="omode active" data-omode="single" title="One active model answers">🧠 Single</button>
         <button type="button" class="omode" data-omode="ensemble" title="Every rostered model answers in parallel; answers are fused">⚖️ Ensemble</button>
@@ -708,43 +807,46 @@
       </div>
       <div class="attach-chips" id="attachChips"></div>
       <form class="cmd" id="form" autocomplete="off">
-        <input id="box" placeholder="Ask JARVIS anything…" autofocus>
+        <input id="box" placeholder="…" autofocus>
         <button type="button" class="attach-btn" id="attachBtn" title="Attach a file JARVIS can read (txt, md, csv, json, pdf, docx, xlsx)">📎</button>
         <button id="send" type="submit">SEND</button>
         <input type="file" id="fileInput" style="display:none" multiple accept=".txt,.text,.log,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.pdf,.docx,.xlsx,.html,.htm,.rtf">
       </form>
     </div>
 
-    <!-- RIGHT: chat -->
-    <div class="col">
-      <div class="card">
-        <h3>Quick Commands</h3>
-        <div class="qcmds">
-          <button class="qcmd" data-cmd="Give me my briefing" type="button">📋 Briefing</button>
-          <button class="qcmd" data-cmd="What's my system status?" type="button">🖥 System status</button>
-          <button class="qcmd" data-cmd="Any new email?" type="button">✉ New email</button>
-          <button class="qcmd" data-cmd="What's on my calendar today?" type="button">📅 Today</button>
-          <button class="qcmd" data-cmd="What can you do?" type="button">✨ Capabilities</button>
-        </div>
+    <!-- Retired right column. Quick Commands + Mission Timeline surface as palette results now;
+         the buttons/polling below still work exactly as before, just hidden. -->
+    <div class="cc-hidden">
+      <div class="qcmds">
+        <button class="qcmd" data-cmd="Give me my briefing" type="button">Briefing</button>
+        <button class="qcmd" data-cmd="What's my system status?" type="button">System status</button>
+        <button class="qcmd" data-cmd="Any new email?" type="button">New email</button>
+        <button class="qcmd" data-cmd="What's on my calendar today?" type="button">Today</button>
+        <button class="qcmd" data-cmd="What can you do?" type="button">Capabilities</button>
       </div>
-      <div class="card chat" style="flex:1;">
-        <h3>Command Log</h3>
-        <div id="log"></div>
-      </div>
-      <div class="card">
-        <h3>Mission Timeline</h3>
-        <div id="timeline" class="tline"><div class="hint">No activity yet.</div></div>
-      </div>
+      <div id="timeline" class="tline"></div>
     </div>
   </div>
 
-  <div class="statusbar">
+  <!-- Design contract status strip: model · mic state · note count · uptime. -->
+  <div class="statusbar cc-strip">
     <span><span class="dot" id="sbDot"></span><span id="sbMode">CONNECTING…</span></span>
-    <span>MIC: <b id="sbMic">OFF</b></span>
-    <span class="sbupd" id="sbUpdate"></span>
+    <span>MIC <b id="sbMic">OFF</b></span>
+    <span id="actCount">0 notes</span>
+    <span>UPTIME <b id="uptime">00:00:00</b></span>
     <span class="spacer"></span>
-    <span id="sbClock">--:--:--</span>
-    <span>J.A.R.V.I.S. · v<span id="sbVersion">0.1.0</span></span>
+    <span class="cc-extra sbupd" id="sbUpdate"></span>
+    <span class="cc-extra" id="sbClock">--:--:--</span>
+    <span class="cc-extra">v<span id="sbVersion">0.1.0</span></span>
+  </div>
+</div>
+
+<!-- Command palette (Ctrl/Cmd+K): the sole way to reach every destination the sidebar and
+     header tool-pills used to expose, plus Quick Commands and recent Mission Timeline entries. -->
+<div class="cc-palette-scrim" id="paletteScrim">
+  <div id="palette" role="dialog" aria-label="Command palette">
+    <input id="paletteInput" placeholder="Type a command or destination…" autocomplete="off">
+    <div class="cc-results" id="paletteResults"></div>
   </div>
 </div>
 
@@ -1579,7 +1681,7 @@
 
   function setOrb(state) {
     orb.className = 'orb ' + state;
-    const map = { idle:['STANDBY','Press 🎤 VOICE or type a command'],
+    const map = { idle:['STANDBY','Press VOICE or type a command'],
       listening:['LISTENING','Say "'+ (S.wakeWord||'jarvis') +', …"'],
       thinking:['PROCESSING','Working on it, sir'],
       speaking:['SPEAKING','Press ESC to interrupt'] };
@@ -1611,6 +1713,7 @@
   fetch('/status').then(r => r.json()).then(s => {
     isOnline = s.online; jarvisModel = s.model || '';
     document.getElementById('sbDot').className = 'dot ' + (s.online ? 'on' : 'off');
+    document.getElementById('hdrDot').className = 'cc-dot' + (s.online ? ' on' : '');
     document.getElementById('sbMode').textContent = s.online ? ('ONLINE · ' + s.model.toUpperCase()) : 'OFFLINE ECHO MODE';
     document.getElementById('modelKv').textContent = s.online ? s.model : 'offline';
     document.getElementById('connKv').textContent = s.online ? 'SECURE' : 'LOCAL';
@@ -1704,7 +1807,7 @@
       if (S.autoSpeak) speak(answer); else setOrb(restState());
     } catch (err) {
       pending.className=''; pending.textContent='Connection error: '+err.message; setOrb(restState());
-    } finally { send.disabled = false; box.focus(); }
+    } finally { send.disabled = false; if (!paletteOpen) box.focus(); }
   }
 
   document.getElementById('form').addEventListener('submit', (e) => {
@@ -1833,10 +1936,14 @@
     let finished = false;
     const finish = () => { if (finished) return; finished = true;
       clearInterval(keepAlive); clearTimeout(watchdog); speaking = false;
-      interruptBtn.classList.remove('show');
+      interruptBtn.classList.remove('show'); orb.style.transform = '';
       if (conversationActive) resetConvoTimer();      // count the quiet-timeout from his last word
       if (voiceOn) startListening(); else setOrb('idle'); };
     u.onend = finish; u.onerror = finish;
+    // The browser gives no amplitude/waveform data for synthesized speech, so "pulses to voice
+    // amplitude" is approximated with a per-word pop on the utterance boundary event.
+    u.onboundary = () => { orb.style.transform = 'scale(1.045)';
+      setTimeout(() => { if (speaking) orb.style.transform = 'scale(1)'; }, 140); };
     const keepAlive = setInterval(() => {
       if (!speechSynthesis.speaking && !speechSynthesis.pending) { finish(); return; }
       try { speechSynthesis.resume(); } catch (e) {}
@@ -2827,7 +2934,7 @@
     let rows=[];
     try{ rows=await (await fetch('/audit?limit=14')).json(); }catch(e){ return; }
     const box=$('activityFeed');
-    if(!rows.length){ box.innerHTML='<div class="hint">No activity yet.</div>'; $('actCount').textContent=''; return; }
+    if(!rows.length){ box.innerHTML='<div class="hint">No activity yet.</div>'; $('actCount').textContent='0 notes'; return; }
     box.innerHTML=''; let issues=0;
     rows.forEach(e=>{
       const cls=actClass(e); if(cls!=='ok') issues++;
@@ -2837,7 +2944,7 @@
       const g=document.createElement('span'); g.className='atag'; g.textContent=(e.riskTier||'').replace('_',' ');
       d.appendChild(t); d.appendChild(a); d.appendChild(g); box.appendChild(d);
     });
-    $('actCount').textContent = issues ? (issues+' issue'+(issues>1?'s':'')) : '';
+    $('actCount').textContent = issues ? (issues+' issue'+(issues>1?'s':'')) : '0 notes';
   }
   $('actMore').addEventListener('click',openAudit);
   setInterval(loadActivity,3000);
@@ -2860,6 +2967,98 @@
     });
   }
   setInterval(loadTimeline,4000); loadTimeline();
+
+  // ---- Command palette (Ctrl/Cmd+K) ----
+  // Every destination the old sidebar + header tool-pills reached, reachable by name now.
+  const PALETTE_PAGES = [
+    {label:'Command Center', tag:'Page', run:()=>navTo('home')},
+    {label:'Memory', tag:'Page', run:()=>navTo('memory')},
+    {label:'Conversations', tag:'Page', run:()=>navTo('conv')},
+    {label:'APIs & Models', tag:'Page', run:()=>navTo('apis')},
+    {label:'Tasks', tag:'Page', run:()=>navTo('tasks')},
+    {label:'Workflows', tag:'Page', run:()=>navTo('workflows')},
+    {label:'Knowledge', tag:'Page', run:()=>navTo('kb')},
+    {label:'Brain', tag:'Page', run:()=>navTo('brain')},
+    {label:'Solicitations', tag:'Page', run:()=>navTo('solicitations')},
+    {label:'Intelligence', tag:'Page', run:()=>navTo('intel')},
+    {label:'Discussion', tag:'Page', run:()=>navTo('discussion')},
+    {label:'Agents', tag:'Page', run:()=>navTo('agents')},
+    {label:'Tools & Skills', tag:'Page', run:()=>navTo('tools')},
+    {label:'System Monitor', tag:'Page', run:()=>navTo('sysmon')},
+  ];
+  const PALETTE_ACTIONS = [
+    {label:'Briefing', tag:'Action', run:()=>document.getElementById('brief').click()},
+    {label:'Mail', tag:'Action', run:()=>openWorkspace('mail')},
+    {label:'Calendar', tag:'Action', run:()=>openWorkspace('calendar')},
+    {label:'Camera', tag:'Action', run:()=>document.getElementById('camera').click()},
+    {label:'People', tag:'Action', run:openPeople},
+    {label:'Audit Log', tag:'Action', run:openAudit},
+    {label:'Usage & Cost', tag:'Action', run:openUsage},
+    {label:'Settings', tag:'Action', run:openSettings},
+    {label:'Stop / Interrupt', tag:'Action', run:interrupt},
+  ];
+  function paletteQuickCommands(){
+    return [...document.querySelectorAll('.qcmd')].map(b=>({label:b.dataset.cmd, tag:'Quick command', run:()=>b.click()}));
+  }
+  async function paletteRecent(){
+    try{ const rows = await (await fetch('/audit?limit=6')).json();
+      return rows.map(e=>({label:(e.action||'')+(e.outcome==='FAILURE'?' — failed':''), tag:'Recent', run:openAudit})); }
+    catch(e){ return []; }
+  }
+
+  const paletteScrim = document.getElementById('paletteScrim');
+  const paletteInput = document.getElementById('paletteInput');
+  const paletteResults = document.getElementById('paletteResults');
+  let paletteOpen = false, paletteSel = 0, paletteItems = [], paletteRecentCache = [];
+
+  function renderPalette(query){
+    const q = (query||'').trim().toLowerCase();
+    paletteItems = q
+      ? [...PALETTE_PAGES, ...PALETTE_ACTIONS, ...paletteQuickCommands()].filter(i=>i.label.toLowerCase().includes(q))
+      : [...paletteQuickCommands(), ...paletteRecentCache];
+    paletteSel = 0;
+    paletteResults.innerHTML = '';
+    if (!paletteItems.length){ paletteResults.innerHTML = '<div class="cc-empty">No matches.</div>'; return; }
+    paletteItems.forEach((it,i)=>{
+      const d = document.createElement('div'); d.className = 'cc-item' + (i===0?' sel':'');
+      const label = document.createElement('span'); label.textContent = it.label;
+      const tag = document.createElement('span'); tag.className = 'cc-item-tag'; tag.textContent = it.tag||'';
+      d.appendChild(label); d.appendChild(tag);
+      d.addEventListener('click', ()=>activatePalette(i));
+      paletteResults.appendChild(d);
+    });
+  }
+  function updatePaletteSelection(){
+    [...paletteResults.children].forEach((el,i)=>el.classList.toggle('sel', i===paletteSel));
+    const sel = paletteResults.children[paletteSel]; if (sel) sel.scrollIntoView({block:'nearest'});
+  }
+  function activatePalette(i){
+    const item = paletteItems[i]; if (!item) return;
+    closePalette();
+    try { item.run(); } catch (e) {}
+  }
+  async function openPalette(){
+    if (paletteOpen) return;
+    paletteOpen = true; paletteScrim.classList.add('open'); paletteInput.value = '';
+    paletteRecentCache = await paletteRecent();
+    renderPalette('');
+    setTimeout(() => paletteInput.focus(), 10);
+  }
+  function closePalette(){ paletteOpen = false; paletteScrim.classList.remove('open'); }
+
+  document.getElementById('paletteHint').addEventListener('click', openPalette);
+  paletteScrim.addEventListener('click', (e) => { if (e.target === paletteScrim) closePalette(); });
+  paletteInput.addEventListener('input', () => renderPalette(paletteInput.value));
+  paletteInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); paletteSel = Math.min(paletteSel+1, paletteItems.length-1); updatePaletteSelection(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); paletteSel = Math.max(paletteSel-1, 0); updatePaletteSelection(); }
+    else if (e.key === 'Enter') { e.preventDefault(); activatePalette(paletteSel); }
+  });
+  document.addEventListener('keydown', (e) => {
+    if ((e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault(); if (paletteOpen) closePalette(); else openPalette();
+    } else if (e.key === 'Escape' && paletteOpen) { closePalette(); }
+  });
 
   // ---- Memory page ----
   async function loadMemory(){
