@@ -640,6 +640,115 @@ async def learning_policy(request: Request):
     return result
 
 
+class RoutingConfigUpdate(BaseModel):
+    """Partial update for the routing strategy / cost threshold dial.
+
+    Only fields that are set are applied; omitted fields are left as-is.
+    """
+
+    policy: Optional[str] = None  # heuristic | learned | classifier | similarity
+    cost_threshold: Optional[float] = None
+    min_samples: Optional[int] = None
+    classifier_hash_dim: Optional[int] = None
+    similarity_k: Optional[int] = None
+
+
+def _routing_config_payload(config: Any) -> Dict[str, Any]:
+    r = config.learning.routing
+    return {
+        "policy": r.policy,
+        "min_samples": r.min_samples,
+        "cost_threshold": r.cost_threshold,
+        "classifier_model_path": r.classifier_model_path,
+        "classifier_hash_dim": r.classifier_hash_dim,
+        "similarity_k": r.similarity_k,
+    }
+
+
+@learning_router.get("/routing/config")
+async def get_routing_config(request: Request):
+    """Return the current routing strategy config, including the cost dial."""
+    import openjarvis.learning.routing  # noqa: F401 -- registers built-in strategies
+    from openjarvis.core.config import load_config
+    from openjarvis.core.registry import RouterPolicyRegistry
+
+    config = load_config()
+    payload = _routing_config_payload(config)
+    payload["available_strategies"] = sorted(RouterPolicyRegistry.keys())
+    return payload
+
+
+@learning_router.put("/routing/config")
+async def update_routing_config(body: RoutingConfigUpdate):
+    """Adjust the routing strategy / cost threshold dial.
+
+    Persists to ``config.toml`` (the same file ``jarvis config set
+    learning.routing.<field> <value>`` writes to), so the change survives a
+    restart and is visible to both the CLI and this API.
+    """
+    import os
+    from pathlib import Path
+
+    import tomlkit
+
+    import openjarvis.learning.routing  # noqa: F401 -- registers built-in strategies
+    from openjarvis.core.config import DEFAULT_CONFIG_DIR, load_config
+    from openjarvis.core.registry import RouterPolicyRegistry
+
+    updates: Dict[str, Any] = {}
+    if body.policy is not None:
+        if body.policy not in RouterPolicyRegistry.keys():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unknown routing policy {body.policy!r}; available: "
+                    f"{sorted(RouterPolicyRegistry.keys())}"
+                ),
+            )
+        updates["policy"] = body.policy
+    if body.cost_threshold is not None:
+        if not 0.0 <= body.cost_threshold <= 1.0:
+            raise HTTPException(
+                status_code=400,
+                detail="cost_threshold must be between 0.0 and 1.0",
+            )
+        updates["cost_threshold"] = body.cost_threshold
+    if body.min_samples is not None:
+        updates["min_samples"] = body.min_samples
+    if body.classifier_hash_dim is not None:
+        updates["classifier_hash_dim"] = body.classifier_hash_dim
+    if body.similarity_k is not None:
+        updates["similarity_k"] = body.similarity_k
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields provided to update")
+
+    config_path = Path(
+        os.environ.get("OPENJARVIS_CONFIG", DEFAULT_CONFIG_DIR / "config.toml")
+    )
+    if config_path.exists():
+        doc = tomlkit.parse(config_path.read_text())
+    else:
+        doc = tomlkit.document()
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    current = doc
+    for part in ("learning", "routing"):
+        if part not in current:
+            current.add(part, tomlkit.table())
+        current = current[part]
+    for key, value in updates.items():
+        current[key] = value
+
+    config_path.write_text(tomlkit.dumps(doc))
+    load_config.cache_clear()
+
+    config = load_config()
+    payload = _routing_config_payload(config)
+    payload["updated"] = sorted(updates.keys())
+    return payload
+
+
 # ---- Speech routes ----
 
 speech_router = APIRouter(prefix="/v1/speech", tags=["speech"])
