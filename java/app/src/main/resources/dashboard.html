@@ -137,6 +137,33 @@
   #main { display:grid; grid-template-columns:288px 1fr 380px; gap:16px; padding:16px; min-height:0; }
   .col { min-height:0; display:flex; flex-direction:column; gap:14px; }
 
+  /* ---- Responsive: the 3-column HUD reflows instead of overflowing on smaller / OS-scaled
+     displays (e.g. a 1366 laptop at 125%, or a 1280 screen). Without these the centre orb starves
+     the grid and pushes the right rail off-screen. ---- */
+  @media (max-width:1500px){
+    #main{ grid-template-columns:250px 1fr 330px; gap:14px; }
+  }
+  @media (max-width:1240px){
+    /* Left rail + main on the first row; the right rail drops to a full-width row of cards below. */
+    #main{ grid-template-columns:230px 1fr; }
+    #main > .col:last-child{ grid-column:1 / -1; flex-direction:row; flex-wrap:wrap; align-items:flex-start; }
+    #main > .col:last-child > .card{ flex:1 1 300px; }
+    header{ flex-wrap:wrap; row-gap:8px; }
+  }
+  @media (max-width:820px){
+    /* Everything stacks into one column; keep the orb/chat at the top. The fixed sidebar is hidden
+       here so content reclaims the full width (this is a desktop HUD; the ☰ toggle still applies). */
+    #app{ padding-left:0; }
+    #sidenav{ display:none; }
+    #main{ grid-template-columns:1fr; }
+    #main > .col:last-child{ flex-direction:column; }
+    #main > .col:last-child > .card{ flex:1 1 auto; }   /* stack right-rail cards, no side-by-side clip */
+    .col.center{ order:-1; }
+    .orb{ width:min(42vh,300px); }
+    .pgrid{ grid-template-columns:1fr; }
+    header{ padding:12px 16px; }
+  }
+
   .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px;
           backdrop-filter:blur(3px); }
   .card h3 { font-size:10px; letter-spacing:3px; color:var(--cyan); text-transform:uppercase;
