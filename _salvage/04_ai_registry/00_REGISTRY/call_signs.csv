@@ -1,0 +1,8 @@
+agent_id,call_sign,display_name,module,status
+nxs-est-001,@Marcus,Marcus — Plan Reader,estimating,draft
+nxs-bid-001,@Iris,Iris — Solicitation Summarizer,bid_pipeline,draft
+nxs-sch-001,@Atlas,Atlas — Schedule Risk Analyzer,operations,draft
+nxs-saf-001,@Sentinel,Sentinel — Real-Time Hazard Detector,safety,draft
+nxs-acc-001,@Ledger,Ledger — AIA Pay App Generator,accounting,draft
+nxs-eco-001,@ECHO,ECHO — Cross-Module Orchestrator,echo,draft
+nxs-rec-001,@Front,Front — Inbound Voice Agent,receptionist,draft

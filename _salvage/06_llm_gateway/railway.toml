@@ -1,0 +1,23 @@
+# ============================================================
+#  Railway deployment config for ECHO LiteLLM proxy
+# ============================================================
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 15
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Expose on Railway's assigned PORT (Railway sets $PORT env var at runtime)
+[[deploy.environmentGroups]]
+name = "production"
+
+[deploy.resources]
+# Railway starter: 512MB RAM is plenty for LiteLLM proxy;
+# scale up if Phase 5 load tests show pressure.
+memoryLimitMB = 512

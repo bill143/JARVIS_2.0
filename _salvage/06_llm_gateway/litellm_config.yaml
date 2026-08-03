@@ -1,0 +1,258 @@
+﻿# ============================================================
+#  ECHO - LiteLLM Proxy Config
+#  Operator: Bill Asmar / O'Neill Contractors
+#  Generated: 2026-04-18 (Phase 1)
+#  Status: STAGED on branch phase-0/scaffold (not yet committed)
+# ============================================================
+#
+#  Aliases describe the ROUTING TIER, not the underlying model.
+#  Tier 1 Compliance  - highest reasoning, bet-the-company decisions
+#  Tier 2 Long-Doc    - 1M+ context window, document ingestion
+#  Tier 3 Strategy    - general reasoning, daily driver
+#  Tier 4 Bulk        - cheap, high-volume, JARVIS background tasks
+#  Tier 5 Reasoning   - explicit step-by-step thinking
+#  Tier 6 Realtime    - fast, huge context, cheap
+#
+#  Decisions ratified 2026-04-18:
+#  - Opus 4.7 primary for Compliance; 4.6 as first fallback
+#  - Kimi K2.5 deferred to Phase 2 (access friction)
+#  - Gemini 3.1 Pro as Long-Doc fallback only (still preview)
+#  - 6-tier layout (Reasoning + Realtime added)
+# ============================================================
+
+model_list:
+
+  # ============================================================
+  #  TIER 1 - COMPLIANCE
+  #  Primary: Opus 4.7   Fallbacks: Opus 4.6 -> GPT-5.4
+  # ============================================================
+  - model_name: compliance
+    litellm_params:
+      model: anthropic/claude-opus-4-7
+      api_key: os.environ/ANTHROPIC_API_KEY
+      rpm: 50
+      tpm: 40000
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.000005      # $5 / MTok
+      output_cost_per_token: 0.000025     # $25 / MTok
+      max_input_tokens: 200000
+      max_output_tokens: 64000
+      supports_vision: true
+      supports_function_calling: true
+
+  - model_name: compliance-fallback-a
+    litellm_params:
+      model: anthropic/claude-opus-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.000005
+      output_cost_per_token: 0.000025
+      max_input_tokens: 200000
+
+  - model_name: compliance-fallback-b
+    litellm_params:
+      model: openai/gpt-5.4
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.00000125    # $1.25 / MTok (est.)
+      output_cost_per_token: 0.00001      # $10   / MTok (est.)
+      max_input_tokens: 1050000
+
+  # ============================================================
+  #  TIER 2 - LONG-DOC (1M+ context)
+  #  Primary: GPT-5.4   Fallbacks: Sonnet 4.6 (1M beta) -> Gemini 3.1 Pro
+  # ============================================================
+  - model_name: longdoc
+    litellm_params:
+      model: openai/gpt-5.4
+      api_key: os.environ/OPENAI_API_KEY
+      rpm: 100
+      tpm: 800000
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.00000125
+      output_cost_per_token: 0.00001
+      max_input_tokens: 1050000
+      supports_vision: true
+
+  - model_name: longdoc-fallback-a
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+      extra_headers: { anthropic-beta: "context-1m-2025-08-07" }
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+      max_input_tokens: 1000000
+      # WARNING: 1M beta on Sonnet 4.6 retires 2026-04-30
+
+  - model_name: longdoc-fallback-b
+    litellm_params:
+      model: gemini/gemini-3.1-pro-preview
+      api_key: os.environ/GOOGLE_API_KEY
+    model_info:
+      mode: chat
+      max_input_tokens: 1000000
+      # WARNING: preview status - possible deprecation with 2wk notice
+
+  # ============================================================
+  #  TIER 3 - STRATEGY (daily driver)
+  #  Primary: Sonnet 4.6   Fallbacks: GPT-5.4 -> GPT-5.4-mini
+  # ============================================================
+  - model_name: strategy
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+      rpm: 200
+      tpm: 160000
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+      max_input_tokens: 200000
+
+  - model_name: strategy-fallback-a
+    litellm_params:
+      model: openai/gpt-5.4
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.00000125
+      output_cost_per_token: 0.00001
+      max_input_tokens: 1050000
+
+  - model_name: strategy-fallback-b
+    litellm_params:
+      model: openai/gpt-5.4-mini
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.0000004
+      output_cost_per_token: 0.0000016
+      max_input_tokens: 400000
+
+  # ============================================================
+  #  TIER 4 - BULK (cheap, high-volume)
+  #  Primary: DeepSeek V3.2   Fallbacks: GPT-5.4-nano -> Haiku 4.5
+  # ============================================================
+  - model_name: bulk
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: https://api.deepseek.com
+      rpm: 500
+      tpm: 500000
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.00000028    # $0.28 / MTok
+      output_cost_per_token: 0.00000042   # $0.42 / MTok
+      max_input_tokens: 128000
+
+  - model_name: bulk-fallback-a
+    litellm_params:
+      model: openai/gpt-5.4-nano
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.0000008
+      max_input_tokens: 400000
+
+  - model_name: bulk-fallback-b
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.00000025
+      output_cost_per_token: 0.00000125
+      max_input_tokens: 200000
+
+  # ============================================================
+  #  TIER 5 - REASONING (explicit step-by-step)
+  #  Primary: DeepSeek R1 (reasoner)   Fallback: Opus 4.7
+  # ============================================================
+  - model_name: reasoning
+    litellm_params:
+      model: deepseek/deepseek-reasoner
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: https://api.deepseek.com
+      rpm: 200
+      tpm: 200000
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.00000028
+      output_cost_per_token: 0.00000042
+      max_input_tokens: 128000
+      max_output_tokens: 64000
+
+  - model_name: reasoning-fallback-a
+    litellm_params:
+      model: anthropic/claude-opus-4-7
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.000005
+      output_cost_per_token: 0.000025
+      max_input_tokens: 200000
+
+  # ============================================================
+  #  TIER 6 - REALTIME (2M context, cheap)
+  #  Primary: Grok 4.1 Fast   Fallback: GPT-5.4-mini
+  # ============================================================
+  - model_name: realtime
+    litellm_params:
+      model: xai/grok-4.1-fast
+      api_key: os.environ/XAI_API_KEY
+      api_base: https://api.x.ai/v1
+      rpm: 300
+      tpm: 500000
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.0000002
+      output_cost_per_token: 0.0000005
+      max_input_tokens: 2000000
+
+  - model_name: realtime-fallback-a
+    litellm_params:
+      model: openai/gpt-5.4-mini
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.0000004
+      output_cost_per_token: 0.0000016
+      max_input_tokens: 400000
+
+# ============================================================
+#  FALLBACK ROUTING
+# ============================================================
+router_settings:
+  routing_strategy: simple-shuffle
+  fallbacks:
+    - compliance: [compliance-fallback-a, compliance-fallback-b]
+    - longdoc:    [longdoc-fallback-a,    longdoc-fallback-b]
+    - strategy:   [strategy-fallback-a,   strategy-fallback-b]
+    - bulk:       [bulk-fallback-a,       bulk-fallback-b]
+    - reasoning:  [reasoning-fallback-a]
+    - realtime:   [realtime-fallback-a]
+
+# ============================================================
+#  GLOBAL
+# ============================================================
+litellm_settings:
+  drop_params: true
+  num_retries: 2
+  request_timeout: 120
+  telemetry: false
+  set_verbose: false
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+  callbacks: ["app.logging_middleware.echo_logger"]
+
+general_settings:
+  master_key: os.environ/ECHO_MASTER_KEY
+  database_url: os.environ/DATABASE_URL   # Phase 8 - Postgres on Railway

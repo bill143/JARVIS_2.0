@@ -1,0 +1,65 @@
+# ============================================================
+#  ECHO - Local Development Stack
+#  Run: docker compose up -d
+# ============================================================
+
+services:
+  echo:
+    build: .
+    container_name: echo-litellm
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      # Local Langfuse override (points to langfuse service below)
+      LANGFUSE_HOST: http://langfuse-web:3000
+      DATABASE_URL: postgresql://echo:echo@postgres:5432/echo
+    depends_on:
+      langfuse-web:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: echo-postgres
+    environment:
+      POSTGRES_USER: echo
+      POSTGRES_PASSWORD: echo
+      POSTGRES_DB: echo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U echo -d echo"]
+      interval: 10s
+      retries: 5
+
+  langfuse-web:
+    image: langfuse/langfuse:2
+    container_name: echo-langfuse
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://echo:echo@postgres:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: LOCAL-DEV-SECRET-CHANGEME
+      SALT: LOCAL-DEV-SALT-CHANGEME
+      TELEMETRY_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://langfuse-web:3000/api/public/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:

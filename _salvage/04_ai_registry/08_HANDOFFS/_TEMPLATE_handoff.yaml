@@ -1,0 +1,22 @@
+# Handoff Contract Template
+from_agent: nxs-est-001  # @Marcus
+to_agent: nxs-est-008    # @CostBenchmark
+
+trigger:
+  event: "takeoff_complete"
+  confidence_min: 0.90
+
+payload_schema:
+  - field: takeoff_json
+    type: object
+    required: true
+  - field: project_id
+    type: string
+    required: true
+
+sla:
+  max_handoff_latency_ms: 2000
+
+failure_mode:
+  on_timeout: queue_for_human
+  on_schema_mismatch: reject_and_log
