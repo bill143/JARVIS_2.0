@@ -80,7 +80,7 @@ final class AppWiring {
      */
     record VisionServices(VisionSettings settings, MotionEventService motionEvents,
             UnknownVisitorEnrollmentService enrollment, RecordStore visitLog,
-            FaceRecognitionClient faceClient) {
+            FaceRecognitionClient faceClient, VisionEventBroadcaster events) {
     }
 
     /** Everything the launcher needs to run. */
@@ -380,8 +380,12 @@ final class AppWiring {
                 new HttpSnapshotFetcher(HttpClient.newHttpClient()), Instant::now, auditLog);
         UnknownVisitorEnrollmentService enrollment = new UnknownVisitorEnrollmentService(
                 faceClient, people, pendingVisitors, Instant::now, auditLog);
+        // Pushes each motion-event greeting to the dashboard over SSE (/vision/events) the instant
+        // MotionEventService produces one, so it lands in the chat log and gets spoken without the
+        // browser having to poll.
+        VisionEventBroadcaster visionEvents = new VisionEventBroadcaster();
         VisionServices visionServices = new VisionServices(
-                visionSettings, motionEvents, enrollment, visionVisitLog, faceClient);
+                visionSettings, motionEvents, enrollment, visionVisitLog, faceClient, visionEvents);
 
         return new Runtime(api, brainOnline, effectiveModel, monitor, visionHook, googleConnected,
                 googleService, memory, people, recognizer, auditLog, pluginRegistry, permissions,

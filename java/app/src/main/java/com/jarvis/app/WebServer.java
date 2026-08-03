@@ -115,6 +115,7 @@ public final class WebServer {
                 visionServices == null ? null : visionServices.enrollment();
         com.jarvis.memory.RecordStore visionVisitLog =
                 visionServices == null ? null : visionServices.visitLog();
+        VisionEventBroadcaster visionEvents = visionServices == null ? null : visionServices.events();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         // The re-architected agent team (dynamic, specialized, parallel, self-correcting). Built once
@@ -165,7 +166,10 @@ public final class WebServer {
         standingAgents.startScheduler(30_000);
         byte[] page = loadDashboard();
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.setExecutor(Executors.newFixedThreadPool(4));
+        // Virtual threads, not a small fixed pool: /vision/events (SSE) holds its handler thread
+        // blocked for as long as a browser tab stays open, and a 4-thread fixed pool would be
+        // starved by a single open dashboard tab, wedging every other route.
+        server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
 
         server.createContext("/alerts", exchange -> {
             ArrayNode arr = MAPPER.createArrayNode();
@@ -184,6 +188,11 @@ public final class WebServer {
             t.put("ramUsedGb", Math.round(s.ramUsedGb() * 10) / 10.0);
             t.put("ramTotalGb", Math.round(s.ramTotalGb() * 10) / 10.0);
             t.put("cores", s.cores());
+            java.io.File root = new java.io.File("/");
+            long totalBytes = root.getTotalSpace();
+            long diskPercent = totalBytes > 0
+                    ? Math.round(100.0 * (totalBytes - root.getUsableSpace()) / totalBytes) : 0;
+            t.put("disk", diskPercent);
             respond(exchange, 200, "application/json", t.toString().getBytes(StandardCharsets.UTF_8));
         });
 
@@ -1982,7 +1991,26 @@ public final class WebServer {
             // Fire-and-forget: face recognition network latency must never block the webhook response.
             Thread.startVirtualThread(() -> {
                 try {
-                    motionEvents.handle(request);
+                    MotionEventService.MotionEventResult result = motionEvents.handle(request);
+                    if (visionEvents != null && result.greeting() != null) {
+                        ObjectNode event = MAPPER.createObjectNode();
+                        event.put("cameraId", request.cameraId());
+                        event.put("greeting", result.greeting());
+                        event.put("recognized", result.recognized());
+                        if (result.personName() != null) {
+                            event.put("personName", result.personName());
+                        }
+                        if (result.pendingToken() != null) {
+                            event.put("pendingToken", result.pendingToken());
+                        }
+                        // Global debounce (independent of per-camera cooldown above): reuses the same
+                        // configured motion cooldown so one setting governs both "how often can this
+                        // camera trigger face recognition" and "how often can the dashboard actually
+                        // be greeted/spoken at."
+                        int minIntervalSec = visionSettings == null ? 20
+                                : visionSettings.snapshot().motion().cooldownSec();
+                        visionEvents.publish(event.toString(), minIntervalSec);
+                    }
                 } catch (RuntimeException e) {
                     // Swallowed: this is a background task with no caller left to report to, and
                     // MotionEventService.handle already records an audit event for every expected
@@ -2064,6 +2092,21 @@ public final class WebServer {
                 }
             }
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        // Server-Sent Events stream of presence greetings: one event per motion webhook that produced
+        // a greeting (recognized owner or unknown-visitor prompt). The dashboard subscribes to drop
+        // the greeting into the chat log and speak it via browser TTS as it happens, with no polling.
+        server.createContext("/vision/events", exchange -> {
+            if (visionEvents == null) {
+                respond(exchange, 503, "text/plain", "vision unavailable".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"GET".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            visionEvents.subscribe(exchange);
         });
 
         server.createContext("/", exchange -> {

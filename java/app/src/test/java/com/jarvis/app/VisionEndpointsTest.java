@@ -83,7 +83,8 @@ class VisionEndpointsTest {
     /** Starts a server with the full vision subsystem wired in (governance non-null throughout). */
     private void startWired() throws Exception {
         AppWiring.VisionServices visionServices = new AppWiring.VisionServices(
-                visionSettings, motionEvents, enrollment, visitLogStore, faceClient);
+                visionSettings, motionEvents, enrollment, visitLogStore, faceClient,
+                new VisionEventBroadcaster());
         startWithGovernance(visionServices);
     }
 

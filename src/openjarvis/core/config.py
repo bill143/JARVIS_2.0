@@ -489,8 +489,20 @@ class IntelligenceConfig:
 class RoutingLearningConfig:
     """Routing sub-policy config within Learning."""
 
-    policy: str = "heuristic"  # heuristic | learned
+    policy: str = "heuristic"  # heuristic | learned | classifier | similarity
     min_samples: int = 5  # Min traces before trusting learned routing
+
+    # --- Classifier router (RouteLLM-style) -------------------------------
+    # Cost/quality dial: route to the strong model iff the classifier's
+    # P(strong model wins) >= cost_threshold. 0.0 always picks the strong
+    # model (max quality, max cost); 1.0 always picks the weak model (max
+    # savings, min quality). Adjustable live via PUT /v1/learning/routing/config.
+    cost_threshold: float = 0.5
+    classifier_model_path: str = ""  # Where the trained RouteClassifier JSON lives
+    classifier_hash_dim: int = 64  # Feature hashing dim; must match a loaded model
+
+    # --- Similarity router --------------------------------------------------
+    similarity_k: int = 3  # Nearest-neighbor exemplars to vote among
 
 
 @dataclass(slots=True)
@@ -744,6 +756,8 @@ class AgentConfig:
     system_prompt: str = ""  # inline system prompt (takes precedence if set)
     system_prompt_path: str = ""  # path to system prompt file (.txt, .md)
     context_from_memory: bool = True  # inject relevant memory context into prompts
+    session_memory_enabled: bool = False  # rolling short-term conversation memory
+    episodic_memory_enabled: bool = False  # long-term fact recall (Jarvis SDK)
 
     # Backward-compat property for old field name
     @property
@@ -1532,6 +1546,8 @@ max_turns = 10
 # system_prompt = ""           # Inline system prompt
 # system_prompt_path = ""      # Path to system prompt file
 context_from_memory = true
+# session_memory_enabled = false   # Rolling short-term conversation memory (Jarvis SDK)
+# episodic_memory_enabled = false  # Long-term fact recall (Jarvis SDK)
 
 [tools.storage]
 default_backend = "sqlite"
@@ -1558,6 +1574,10 @@ update_interval = 100
 [learning.routing]
 policy = "heuristic"
 # min_samples = 5
+# cost_threshold = 0.5         # classifier: strong model iff P(strong wins) >= t
+# classifier_model_path = ""   # trained RouteClassifier JSON (see routing.training)
+# classifier_hash_dim = 64
+# similarity_k = 3
 
 # [learning.intelligence]
 # policy = "none"              # "sft" to learn from traces

@@ -4,26 +4,102 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>J.A.R.V.I.S.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#03070e; --panel:rgba(10,20,34,.72); --line:rgba(41,120,180,.28);
-          --cyan:#41d9ff; --cyan-dim:#1c6f92; --dim:#6f8bab; --text:#d7e8f7; --green:#38e28e;
-          --amber:#ffb84d; --red:#ff5a72; }
+  :root { /* jarvis-design-system v2 (card-grid contract) -- supersedes the v1 orb/palette tokens
+             below, which remain ONLY because the ~20 content-page views (Solicitations, Tasks,
+             Workflows, Agents, Galaxy, Audit, etc.) still consume them and have not yet been
+             migrated. That migration is tracked separately, not silently finished here. */
+          --void:#080C14; --surface:#0D1527; --border:#1A2942;
+          --cg-cyan:#00F2FE; --cg-cyan2:#00C6FF; --cg-amber:#FFB300; --cg-green:#22C55E; --cg-red:#EF4444;
+          --cg-text:#E8EDF2; --cg-text-dim:#7A8AA0;
+          --font-ui:"Inter",system-ui,sans-serif; --font-mono2:"JetBrains Mono",ui-monospace,monospace;
+          /* v1 tokens, still consumed by unmigrated pages -- nothing below aliases the tokens above */
+          --edge:rgba(79,195,247,0.08); --reactor:#4FC3F7; --reactor-dim:#1A5F7A;
+          --text-dim:#6B7A8A; --text:#E8EDF2; --signal:#FFB454;
+          --bg:#03070e; --panel:rgba(10,20,34,.72); --line:rgba(41,120,180,.28);
+          --cyan:#41d9ff; --cyan-dim:#1c6f92; --dim:#6f8bab;
+          --green:#38e28e; --amber:#ffb84d; --red:#ff5a72; }
   * { box-sizing:border-box; margin:0; }
   html,body { height:100%; }
-  body { background:
-           radial-gradient(1100px 700px at 50% 42%, #0a1d33 0%, #05101d 45%, var(--bg) 100%);
-         color:var(--text); font:14px/1.5 "Segoe UI", system-ui, sans-serif; overflow:hidden; }
-  #app { display:grid; grid-template-rows:auto 1fr auto; height:100vh; padding-left:var(--navw); }
-  :root { --navw:210px; }
-  #sidenav { position:fixed; left:0; top:0; bottom:0; width:var(--navw); z-index:30;
-    background:linear-gradient(180deg,#061223,#040c17); border-right:1px solid var(--line);
-    display:flex; flex-direction:column; padding:14px 0; overflow-y:auto; }
-  #sidenav .brand { padding:4px 18px 16px; color:var(--cyan); font-size:11px; letter-spacing:3px; font-weight:700; }
-  #sidenav .navitem { display:flex; align-items:center; gap:11px; padding:11px 18px; color:var(--dim);
-    cursor:pointer; font-size:13px; border-left:3px solid transparent; user-select:none; }
-  #sidenav .navitem:hover { color:var(--text); background:rgba(80,140,200,.06); }
-  #sidenav .navitem.active { color:#eaf7ff; border-left-color:var(--cyan); background:rgba(65,217,255,.08); }
-  #sidenav .navitem .ic { width:18px; text-align:center; font-size:15px; }
+  body { background:var(--void);
+         color:var(--cg-text); font:14px/1.5 var(--font-ui); overflow:hidden; }
+  #app { display:grid; grid-template-rows:auto 1fr auto; height:100vh; }
+
+  /* ---- Persistent chrome: exactly 4 nav targets (wordmark, voice, palette hint, status dot) ---- */
+  header { display:flex; align-items:center; gap:16px; padding:16px 24px; }
+  .brand-mark { display:flex; align-items:center; gap:10px; }
+  .brand-mark .badge { width:22px; height:22px; border-radius:50%;
+    background:radial-gradient(circle, var(--reactor) 0%, var(--reactor-dim) 70%, transparent 100%); }
+  .wordmark { font-size:15px; letter-spacing:6px; font-weight:600; color:var(--text); }
+  .voice-toggle { margin-left:auto; }
+  .hbtn.voice-toggle.on { color:var(--reactor); border-color:var(--reactor-dim); }
+  .palette-hint { background:none; border:1px solid var(--edge); color:var(--text-dim); border-radius:6px;
+    padding:6px 12px; font:11px/1 var(--font-mono),ui-monospace,monospace; letter-spacing:.5px;
+    cursor:pointer; }
+  .palette-hint:hover { color:var(--text); border-color:var(--text-dim); }
+  header .hbtn.alert { margin-left:0; }
+
+  /* ---- Command palette (Ctrl/Cmd+K) — the one place all 14 content routes + 7 relocated
+     actions (Briefing/Mail/Calendar/Camera/People/Audit/Settings) now live. Transient: hidden
+     until opened, dismissed on Escape/scrim-click/selection. ---- */
+  .palette-scrim { position:fixed; inset:0; background:rgba(5,7,10,.6); opacity:0; pointer-events:none;
+    transition:opacity var(--anim,.22s); z-index:40; }
+  .palette-scrim.open { opacity:1; pointer-events:auto; }
+  .palette { position:fixed; top:14vh; left:50%; width:min(560px,90vw); max-height:64vh;
+    background:var(--surface); border:1px solid var(--edge); border-radius:var(--radius,10px);
+    z-index:41; display:flex; flex-direction:column; overflow:hidden;
+    opacity:0; pointer-events:none; transform:translate(-50%,8px);
+    transition:opacity 220ms cubic-bezier(0.16,1,0.3,1), transform 220ms cubic-bezier(0.16,1,0.3,1); }
+  .palette.open { opacity:1; pointer-events:auto; transform:translate(-50%,0); }
+  .palette-input { background:none; border:none; border-bottom:1px solid var(--edge); color:var(--text);
+    padding:14px 16px; font:15px/1 inherit; outline:none; }
+  .palette-list { overflow-y:auto; padding:8px; display:flex; flex-direction:column; gap:2px; }
+  .palette-item { display:block; width:100%; text-align:left; background:none; border:1px solid transparent;
+    color:var(--text-dim); border-radius:6px; padding:9px 12px; font:15px/1 inherit; cursor:pointer; }
+  .palette-item:hover, .palette-item.sel { color:var(--text); background:var(--surface);
+    border-color:var(--edge); }
+  .palette-empty { padding:16px; color:var(--text-dim); font-size:13px; text-align:center; }
+
+  /* ---- ONE primary surface: the orb, asymmetric at 42% horizontal, 55vh minimum ---- */
+  #main { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-height:0; padding:16px; position:relative; }
+  #main .stage { position:relative; left:-8%; flex:0 0 auto; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; min-height:55vh; }
+  #main .orch-modes, #main .attach-chips, #main .cmd { position:relative; left:-8%; }
+
+  /* ---- Bottom status strip: model / mic / notes / uptime -- real values only ---- */
+  .statusbar { display:flex; align-items:center; gap:24px; padding:8px 24px; font-size:11px;
+    letter-spacing:.5px; color:var(--text-dim); border-top:1px solid var(--edge);
+    font-family:var(--font-mono),ui-monospace,monospace; }
+  .statusbar b { color:var(--text); font-weight:400; }
+  .statusbar .spacer { margin-left:auto; }
+  .statusbar .sb-clickable { cursor:pointer; background:none; border:none; color:inherit;
+    font:inherit; letter-spacing:inherit; padding:0; display:flex; align-items:center; gap:8px; }
+  .statusbar .dot { width:6px; height:6px; border-radius:50%; background:var(--text-dim);
+    display:inline-block; }
+  .statusbar .dot.on { background:var(--reactor); }
+  .statusbar .dot.off { background:var(--signal); }
+
+  /* ---- Transient status panel: connection/brain/cpu/ram/usage/subsystems/activity --
+     everything the old always-visible accordion held, now on-demand only ---- */
+  .status-panel-scrim { position:fixed; inset:0; background:rgba(5,7,10,.6); opacity:0;
+    pointer-events:none; transition:opacity var(--anim,.22s); z-index:40; }
+  .status-panel-scrim.open { opacity:1; pointer-events:auto; }
+  .status-panel { position:fixed; bottom:44px; left:24px; width:320px; max-height:70vh;
+    overflow-y:auto; background:var(--surface); border:1px solid var(--edge);
+    border-radius:var(--radius,10px); z-index:41; padding:16px;
+    opacity:0; pointer-events:none; transform:translateY(8px);
+    transition:opacity 220ms cubic-bezier(0.16,1,0.3,1), transform 220ms cubic-bezier(0.16,1,0.3,1); }
+  .status-panel.open { opacity:1; pointer-events:auto; transform:translateY(0); }
+  .status-panel .sp-row { display:flex; align-items:center; gap:8px; font-size:13px;
+    color:var(--text-dim); padding:6px 0; border-bottom:1px solid var(--edge); }
+  .status-panel .sp-row b { color:var(--text); font-weight:400; }
+  .status-panel .sp-section { margin-top:16px; }
+  .status-panel h4 { font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--text-dim); margin:16px 0 8px; }
   .qcmds { display:flex; flex-wrap:wrap; gap:8px; }
   .qcmd { background:rgba(65,217,255,.08); border:1px solid var(--line); color:var(--text);
     border-radius:20px; padding:7px 13px; font-size:12px; cursor:pointer; }
@@ -116,15 +192,7 @@
   .agrole { color:var(--cyan); font-size:10px; letter-spacing:2px; margin-bottom:5px; }
   .agc { color:var(--text); font-size:13px; white-space:pre-wrap; line-height:1.5; }
 
-  /* Header */
-  header { display:flex; align-items:center; gap:14px; padding:12px 22px;
-           border-bottom:1px solid var(--line); background:rgba(4,10,18,.6); }
-  .badge { width:30px; height:30px; border-radius:50%;
-           background:radial-gradient(circle,#cdf4ff 0%,var(--cyan) 40%,rgba(65,217,255,.1) 72%);
-           box-shadow:0 0 16px 3px rgba(65,217,255,.5); }
-  h1 { font-size:17px; letter-spacing:7px; font-weight:600; color:#eaf7ff; }
-  .sub { font-size:9px; letter-spacing:3px; color:var(--dim); }
-  .tools { margin-left:auto; display:flex; align-items:center; gap:8px; }
+  header .hbtn:hover { border-color:var(--text-dim); }
   .hbtn { background:rgba(20,50,80,.4); color:#bfe6ff; border:1px solid var(--line);
           border-radius:7px; padding:7px 13px; font:inherit; font-size:12px; letter-spacing:1px;
           cursor:pointer; }
@@ -133,69 +201,19 @@
   .hbtn.alert { background:#3a1420; border-color:#a03040; color:#ffb3c0; display:none; }
   .hbtn.alert.show { display:inline-block; }
 
-  /* Main 3-column grid */
-  #main { display:grid; grid-template-columns:288px 1fr 380px; gap:16px; padding:16px; min-height:0; }
-  .col { min-height:0; display:flex; flex-direction:column; gap:14px; }
-
-  /* ---- Responsive: the 3-column HUD reflows instead of overflowing on smaller / OS-scaled
-     displays (e.g. a 1366 laptop at 125%, or a 1280 screen). Without these the centre orb starves
-     the grid and pushes the right rail off-screen. ---- */
-  @media (max-width:1500px){
-    #main{ grid-template-columns:250px 1fr 330px; gap:14px; }
-  }
-  @media (max-width:1240px){
-    /* Left rail + main on the first row; the right rail drops to a full-width row of cards below. */
-    #main{ grid-template-columns:230px 1fr; }
-    #main > .col:last-child{ grid-column:1 / -1; flex-direction:row; flex-wrap:wrap; align-items:flex-start; }
-    #main > .col:last-child > .card{ flex:1 1 300px; }
-    header{ flex-wrap:wrap; row-gap:8px; }
-  }
-  @media (max-width:820px){
-    /* Everything stacks into one column; keep the orb/chat at the top. The fixed sidebar is hidden
-       here so content reclaims the full width (this is a desktop HUD; the ☰ toggle still applies). */
-    #app{ padding-left:0; }
-    #sidenav{ display:none; }
-    #main{ grid-template-columns:1fr; }
-    #main > .col:last-child{ flex-direction:column; }
-    #main > .col:last-child > .card{ flex:1 1 auto; }   /* stack right-rail cards, no side-by-side clip */
-    .col.center{ order:-1; }
-    .orb{ width:min(42vh,300px); }
-    .pgrid{ grid-template-columns:1fr; }
-    header{ padding:12px 16px; }
-  }
-
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px;
-          backdrop-filter:blur(3px); }
-  .card h3 { font-size:10px; letter-spacing:3px; color:var(--cyan); text-transform:uppercase;
-             margin-bottom:12px; display:flex; align-items:center; gap:7px; }
-  .card h3::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--cyan);
-                     box-shadow:0 0 6px var(--cyan); }
-  /* Collapsible HUD cards: the chevron folds a card down to its one-line title. */
-  .cardtoggle { margin-left:auto; background:none; border:1px solid transparent; color:var(--dim);
-                font-size:12px; line-height:1; padding:1px 6px; border-radius:6px; cursor:pointer; }
-  .cardtoggle:hover { color:var(--cyan); border-color:var(--line); }
-  .card.folded > :not(h3) { display:none !important; }
-  .card.folded { flex:0 0 auto !important; }
-  .card.folded h3 { margin-bottom:0; }
-  /* Sidebar toggle: hide/show the left nav; content reclaims the width. */
-  #navToggle { margin-right:10px; }
-  body.navclosed #sidenav { display:none; }
-  body.navclosed #app { padding-left:0; }
-
   .metric { margin:11px 0; }
   .metric .top { display:flex; justify-content:space-between; font-size:12px; margin-bottom:5px; }
-  .metric .top b { color:#eaf7ff; font-weight:600; }
-  .bar { height:7px; border-radius:4px; background:rgba(41,120,180,.16); overflow:hidden; }
-  .bar > span { display:block; height:100%; width:0;
-                background:linear-gradient(90deg,var(--cyan-dim),var(--cyan));
-                box-shadow:0 0 8px rgba(65,217,255,.6); transition:width .6s ease; }
-  .bar.warn > span { background:linear-gradient(90deg,#b06a10,var(--amber)); }
-  .kv { display:flex; justify-content:space-between; font-size:12px; margin:7px 0; color:var(--dim); }
+  .metric .top b { color:var(--text); font-weight:500; }
+  .bar { height:4px; border-radius:2px; background:var(--edge); overflow:hidden; }
+  .bar > span { display:block; height:100%; width:0; background:var(--reactor-dim);
+                transition:width .6s ease; }
+  .bar.warn > span { background:var(--signal); }
+  .kv { display:flex; justify-content:space-between; font-size:12px; margin:7px 0; color:var(--text-dim); }
   .kv b { color:var(--text); font-weight:500; }
   .sub-list .item { display:flex; align-items:center; gap:8px; font-size:12px; margin:8px 0;
                     color:var(--text); }
-  .sdot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); }
-  .sdot.off { background:#4a5b6f; box-shadow:none; }
+  .sdot { width:6px; height:6px; border-radius:50%; background:var(--reactor); }
+  .sdot.off { background:var(--text-dim); }
 
   /* Center orb */
   .center { align-items:center; justify-content:space-between; }
@@ -203,45 +221,48 @@
            width:100%; min-height:0; }
   .orb { position:relative; width:min(46vh,420px); aspect-ratio:1; display:grid; place-items:center; }
   .orb svg { position:absolute; inset:0; width:100%; height:100%; }
-  .ring { fill:none; stroke:rgba(65,217,255,.22); }
-  .ring.bright { stroke:rgba(65,217,255,.5); }
+  .ring { fill:none; stroke:rgba(79,195,247,.22); }
+  .ring.bright { stroke:rgba(79,195,247,.5); }
   .rot { transform-origin:50% 50%; animation:spin 26s linear infinite; }
   .rot.rev { animation:spin 40s linear infinite reverse; }
-  .ticks line { stroke:rgba(65,217,255,.35); }
+  .ticks line { stroke:rgba(79,195,247,.35); }
   .sweep { transform-origin:50% 50%; animation:spin 4s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
   .core { position:relative; width:46%; aspect-ratio:1; border-radius:50%;
-          background:radial-gradient(circle at 50% 45%, #eafbff 0%, #8fe6ff 22%, var(--cyan) 44%,
+          background:radial-gradient(circle at 50% 45%, #eafbff 0%, #8fe6ff 22%, var(--reactor) 44%,
                      #1b7fb0 68%, rgba(20,90,130,.25) 82%, transparent 92%);
-          box-shadow:0 0 60px 12px rgba(65,217,255,.45), inset 0 0 40px rgba(255,255,255,.35);
-          animation:breathe 4s ease-in-out infinite; }
-  @keyframes breathe { 50% { transform:scale(1.05); box-shadow:0 0 80px 18px rgba(65,217,255,.6),
+          box-shadow:0 0 60px 12px rgba(79,195,247,.45), inset 0 0 40px rgba(255,255,255,.35);
+          animation:breathe 4s ease-in-out infinite;
+          transition:transform 120ms ease-out; }
+  @keyframes breathe { 50% { transform:scale(1.03); box-shadow:0 0 80px 18px rgba(79,195,247,.6),
                               inset 0 0 46px rgba(255,255,255,.45); } }
   .status-line { margin-top:22px; text-align:center; }
-  .status-line .st { font-size:20px; letter-spacing:8px; color:var(--cyan);
-                     text-shadow:0 0 14px rgba(65,217,255,.5); }
-  .status-line .hint { font-size:11px; letter-spacing:2px; color:var(--dim); margin-top:5px; }
+  .status-line .st { font-size:20px; letter-spacing:8px; color:var(--text);
+                     text-shadow:0 0 14px rgba(79,195,247,.5); }
+  .status-line .hint { font-size:11px; letter-spacing:2px; color:var(--text-dim); margin-top:5px; }
 
-  /* Orb reactive states */
-  .orb.listening .core { animation:breathe 1.6s ease-in-out infinite; }
-  .orb.listening .sweep { animation-duration:2.2s; }
+  /* Orb reactive states -- breathing stays the one continuous 4s cadence (LAYOUT LAW: "Orb:
+     continuous 4s breathing") in every state except speaking, which is driven by real
+     SpeechSynthesisUtterance 'boundary' events (see speak() in JS), not a fixed timer -- the orb's
+     scale is set inline per word as JARVIS actually speaks, then eases back via the transition
+     above. This is the closest a browser-TTS-based voice (no raw waveform is exposed by the Web
+     Speech API) can get to "pulses to voice amplitude" -- a real signal tied to actual speech
+     progress, not a placeholder animation. */
   .orb.thinking .core { animation:breathe 1s ease-in-out infinite;
-                        background:radial-gradient(circle at 50% 45%,#fff0d0,#ffcf7a 24%,var(--amber) 48%,#8a5a12 74%,transparent 90%); }
+                        background:radial-gradient(circle at 50% 45%,#fff0d0,#ffcf7a 24%,var(--signal) 48%,#8a5a12 74%,transparent 90%); }
   .orb.thinking .sweep { animation-duration:.9s; }
-  .orb.speaking .core { animation:pulseSpeak .5s ease-in-out infinite; }
-  .orb.speaking .sweep { animation-duration:1.4s; }
-  @keyframes pulseSpeak { 0%,100% { transform:scale(1); } 50% { transform:scale(1.12); } }
+  .orb.speaking .core { animation:none; }
 
   /* Command bar under orb */
-  .cmd { width:100%; max-width:640px; display:flex; gap:10px; margin-top:8px; }
-  .cmd input { flex:1; background:rgba(8,18,30,.8); border:1px solid var(--line); border-radius:9px;
-               color:var(--text); padding:12px 15px; font:inherit; outline:none; }
-  .cmd input:focus { border-color:var(--cyan); box-shadow:0 0 0 2px rgba(65,217,255,.15); }
-  .cmd button { background:linear-gradient(180deg,#14406b,#0e2c4b); color:#cfeeff;
-                border:1px solid #1c4a77; border-radius:9px; padding:0 20px; font:inherit;
-                letter-spacing:1px; cursor:pointer; }
-  .cmd button:hover { border-color:var(--cyan); }
-  .attach-btn { padding:0 13px !important; font-size:16px; }
+  /* Chat input: borderless, transparent, bottom-anchored -- no SEND button, Enter submits. */
+  .cmd { width:100%; max-width:640px; display:flex; align-items:center; gap:10px; margin-top:8px; }
+  .cmd input { flex:1; background:transparent; border:none; border-bottom:1px solid var(--edge);
+               color:var(--text); padding:12px 4px; font:15px/1.4 inherit; outline:none; }
+  .cmd input:focus { border-bottom-color:var(--text-dim); }
+  .cmd input::placeholder { color:var(--text-dim); }
+  .attach-btn { background:none; border:none; color:var(--text-dim); padding:0 6px !important;
+                font-size:16px; cursor:pointer; }
+  .attach-btn:hover { color:var(--text); }
   .attach-chips { width:100%; max-width:640px; display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   .attach-chips:empty { display:none; }
   .achip { display:inline-flex; align-items:center; gap:7px; padding:4px 6px 4px 10px; font-size:12px;
@@ -367,7 +388,7 @@
   .person button { background:none; border:none; color:#ff8ba0; cursor:pointer; font-size:16px; }
 
   /* Full page (People & About Me) */
-  .page { position:fixed; top:0; right:0; bottom:0; left:var(--navw); z-index:25; background:
+  .page { position:fixed; top:0; right:0; bottom:0; left:0; z-index:25; background:
             radial-gradient(1100px 700px at 50% 0%, #0a1d33 0%, #05101d 55%, var(--bg) 100%);
           display:none; flex-direction:column; }
   .page.open { display:flex; }
@@ -485,7 +506,6 @@
   html[data-mode="light"]{ --bg:#eef3f9; --panel:rgba(255,255,255,.9); --line:rgba(30,80,130,.22);
     --text:#0d2033; --dim:#4a6076; }
   html[data-mode="light"] body{ background:radial-gradient(1100px 700px at 50% 42%,#ffffff 0%,#eef4fb 60%,#e4edf6 100%); color:var(--text); }
-  html[data-mode="light"] .navitem, html[data-mode="light"] #sidenav .brand{ color:#33465a; }
   /* background style (solid = app default radial; others override) */
   body.bg-gradient{ background:linear-gradient(150deg, #0a1d33 0%, #06121f 55%, var(--bg) 100%) !important; }
   body.bg-grid::before{ content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
@@ -495,8 +515,8 @@
   body.bg-starfield #fxCanvas, body.fx-particles #fxCanvas{ display:block; }
   /* panel opacity + reduce transparency */
   body{ --pa:var(--panel-alpha); }
-  body.opaque .card,body.opaque .kcard,body.opaque .pcard,body.opaque .solkpi,body.opaque .drawer,
-  body.opaque #sidenav{ backdrop-filter:none !important; }
+  body.opaque .card,body.opaque .kcard,body.opaque .pcard,body.opaque .solkpi,body.opaque .drawer{
+    backdrop-filter:none !important; }
   /* radius */
   .card,.kcard,.pcard,.solcard,.solkpi,.hbtn,.minput,.set-item,.set-swatch{ border-radius:var(--radius) !important; }
   body.radius-sharp{ --radius:0px; } body.radius-pill{ --radius:22px; }
@@ -505,19 +525,13 @@
   body.border-neon{ --line:var(--cyan); }
   body.border-neon .card,body.border-neon .pcard,body.border-neon .kcard{ box-shadow:0 0 0 1px var(--cyan), 0 0 14px rgba(65,217,255,calc(.18*var(--glow))); }
   /* glow on accents */
-  .navitem.active,.hbtn:hover{ box-shadow:0 0 calc(14px*var(--glow)) rgba(65,217,255,calc(.28*var(--glow))); }
+  .hbtn:hover{ box-shadow:0 0 calc(14px*var(--glow)) rgba(65,217,255,calc(.28*var(--glow))); }
   body.hover-glow .card:hover,body.hover-glow .solcard:hover,body.hover-glow .pcard:hover{ box-shadow:0 0 calc(18px*var(--glow)) rgba(65,217,255,calc(.22*var(--glow))); }
   /* density */
   body.density-compact .sect,body.density-compact .page-body,body.density-compact .set-body{ padding-top:10px; padding-bottom:10px; }
   body.density-compact .row{ margin:5px 0; } body.density-compact .card,body.density-compact .pcard{ padding:9px 11px; }
   /* content width */
   body.content-contained #main,body.content-contained .page-body{ max-width:1440px; margin-left:auto; margin-right:auto; }
-  /* sidebar modes + width */
-  body.sb-icons #sidenav{ width:64px; } body.sb-icons #app{ padding-left:64px; }
-  body.sb-icons #sidenav .navitem span:not(.ic){ display:none; }
-  body.sb-icons #sidenav .brand{ font-size:0; }
-  body.sb-autohide #sidenav{ transform:translateX(calc(-1*var(--navw) + 8px)); transition:transform .18s; }
-  body.sb-autohide #sidenav:hover{ transform:translateX(0); }
   /* motion */
   body.motion-off *{ transition:none !important; animation:none !important; }
   body.motion-reduced *{ transition-duration:.08s !important; animation-duration:.08s !important; }
@@ -635,6 +649,190 @@
   .orch-dot{ width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
   .orch-dot.ok{ background:#38e28e; } .orch-dot.bad{ background:#ef4444; }
 
+  /* =====================================================================
+     jarvis-design-system v2 — card-grid dashboard. Replaces the v1 orb/
+     palette single-surface shell. The old shell's markup (orb, palette
+     input, hidden metric elements) stays in the DOM under .cg-legacy so
+     every existing JS hook (ask/speak/setOrb/loadActivity/etc.) keeps
+     running untouched — it just isn't rendered any more.
+     ===================================================================== */
+  .cg-legacy { position:absolute !important; width:0 !important; height:0 !important;
+    overflow:hidden !important; opacity:0 !important; pointer-events:none !important; }
+
+  #app.cg-app { grid-template-rows:auto 1fr auto; }
+
+  /* ---- Header ---- */
+  header.cg-header { display:flex; align-items:center; gap:20px; padding:0 20px; height:60px;
+    background:var(--surface); border-bottom:1px solid var(--border); font-family:var(--font-ui); }
+  .cg-brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:1px; }
+  .cg-brand .cg-logo { width:26px; height:26px; border-radius:8px;
+    background:linear-gradient(135deg,var(--cg-cyan),var(--cg-cyan2)); box-shadow:0 0 14px rgba(0,242,254,.4); }
+  .cg-brand .cg-ver { color:var(--cg-text-dim); font-size:10.5px; font-weight:400; margin-left:2px; }
+  .cg-status-pill { display:flex; align-items:center; gap:8px; background:rgba(34,197,94,.08);
+    border:1px solid rgba(34,197,94,.3); border-radius:999px; padding:6px 14px; font-size:11px;
+    letter-spacing:.06em; color:var(--cg-text-dim); text-transform:uppercase; }
+  .cg-status-pill .dot { width:7px; height:7px; border-radius:50%; background:var(--cg-green); box-shadow:0 0 6px var(--cg-green); }
+  .cg-status-pill.degraded { background:rgba(255,179,0,.08); border-color:rgba(255,179,0,.3); }
+  .cg-status-pill.degraded .dot { background:var(--cg-amber); box-shadow:0 0 6px var(--cg-amber); }
+  .cg-status-pill b { color:var(--cg-text); font-weight:600; }
+  .cg-clock { margin:0 auto; text-align:center; font-family:var(--font-mono2); color:var(--cg-text); font-size:13px; }
+  .cg-clock .cg-date { color:var(--cg-text-dim); font-size:11px; }
+  .cg-util { display:flex; align-items:center; gap:10px; }
+  .cg-search { display:flex; align-items:center; gap:8px; background:var(--void); border:1px solid var(--border);
+    border-radius:8px; padding:7px 12px; width:200px; }
+  .cg-search input { background:none; border:none; outline:none; color:var(--cg-text); font:12.5px var(--font-ui); width:100%; }
+  .cg-search svg { flex:0 0 auto; opacity:.6; }
+  .cg-icon-btn { width:34px; height:34px; border-radius:8px; background:var(--void); border:1px solid var(--border);
+    color:var(--cg-text-dim); display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative; }
+  .cg-icon-btn:hover { border-color:var(--cg-cyan); color:var(--cg-text); }
+  .cg-icon-btn .cg-badge-dot { position:absolute; top:5px; right:5px; width:7px; height:7px; border-radius:50%;
+    background:var(--cg-amber); box-shadow:0 0 5px var(--cg-amber); }
+  .cg-profile { display:flex; align-items:center; gap:8px; padding-left:10px; border-left:1px solid var(--border); }
+  .cg-profile .cg-avatar { width:30px; height:30px; border-radius:50%;
+    background:linear-gradient(135deg,var(--cg-cyan),var(--cg-cyan2)); display:flex; align-items:center;
+    justify-content:center; font-size:11px; font-weight:700; color:var(--void); }
+  .cg-profile .cg-role { font-size:10.5px; color:var(--cg-text-dim); }
+
+  /* ---- Shell: sidebar + content grid ---- */
+  #main.cg-shell { display:grid; grid-template-columns:230px 1fr; min-height:0; overflow:hidden;
+    padding:0; align-items:stretch; justify-content:normal; flex:none; }
+  .cg-sidebar { display:flex; flex-direction:column; background:var(--surface);
+    border-right:1px solid var(--border); padding:14px 10px; overflow-y:auto; }
+  .cg-nav { display:flex; flex-direction:column; gap:2px; flex:1; }
+  .cg-navitem { display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:8px;
+    color:var(--cg-text-dim); font-size:13px; cursor:pointer; border-left:3px solid transparent; user-select:none; }
+  .cg-navitem:hover { color:var(--cg-text); background:rgba(0,242,254,.05); }
+  .cg-navitem.active { color:var(--cg-text); background:rgba(0,242,254,.08); border-left-color:var(--cg-cyan); }
+  .cg-navitem .cg-ic { width:16px; text-align:center; opacity:.85; }
+  .cg-navitem .cg-nbadge { margin-left:auto; background:rgba(0,242,254,.12); color:var(--cg-cyan);
+    font-size:10px; font-weight:600; border-radius:999px; padding:1px 7px; font-family:var(--font-mono2); }
+  .cg-voice-widget { border-top:1px solid var(--border); margin-top:10px; padding-top:14px; text-align:center; }
+  .cg-voice-widget .cg-vw-label { font-size:10.5px; letter-spacing:.1em; color:var(--cg-text-dim); text-transform:uppercase; margin-bottom:8px; }
+  .cg-waveform { display:flex; align-items:flex-end; justify-content:center; gap:2px; height:26px; margin-bottom:8px; }
+  .cg-waveform span { width:3px; background:var(--cg-cyan); border-radius:2px; height:20%; opacity:.35;
+    transition:height .15s ease, opacity .15s ease; }
+  .cg-voice-widget.active .cg-waveform span { opacity:.9; animation:cg-wave 1s ease-in-out infinite; }
+  .cg-waveform span:nth-child(2n){ animation-delay:.1s; } .cg-waveform span:nth-child(3n){ animation-delay:.2s; }
+  .cg-waveform span:nth-child(5n){ animation-delay:.05s; }
+  @keyframes cg-wave { 0%,100%{ height:20%; } 50%{ height:90%; } }
+  .cg-tap-speak { width:64px; height:64px; border-radius:50%; margin:0 auto 8px; display:flex; align-items:center;
+    justify-content:center; background:radial-gradient(circle,rgba(0,242,254,.18),rgba(0,242,254,.02));
+    border:1px solid var(--cg-cyan); color:var(--cg-cyan); cursor:pointer; font-size:20px; }
+  .cg-voice-widget.active .cg-tap-speak { box-shadow:0 0 22px rgba(0,242,254,.5); }
+  .cg-vw-state { font-size:11px; color:var(--cg-text-dim); margin-bottom:10px; }
+  .cg-focus-toggle { width:100%; background:var(--void); border:1px solid var(--border); color:var(--cg-text-dim);
+    border-radius:8px; padding:8px; font-size:11.5px; letter-spacing:.04em; cursor:pointer; }
+  .cg-focus-toggle:hover { border-color:var(--cg-cyan); color:var(--cg-text); }
+  .cg-focus-toggle.on { color:var(--cg-cyan); border-color:var(--cg-cyan); background:rgba(0,242,254,.06); }
+
+  /* ---- Content grid + cards ---- */
+  .cg-content { padding:18px; overflow-y:auto; display:grid; grid-template-columns:repeat(12,1fr); gap:16px;
+    align-content:start; }
+  body.cg-focus-mode .cg-content > .cg-card:not(.cg-core-overview):not(.cg-sysmon) { display:none; }
+  .cg-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:16px;
+    grid-column:span 12; animation:cg-card-in .2s ease-out; }
+  @keyframes cg-card-in { from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:none; } }
+  .cg-card h3 { display:flex; align-items:center; gap:8px; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--cg-text-dim); font-weight:600; margin-bottom:14px; }
+  .cg-card h3 .cg-live { margin-left:auto; display:flex; align-items:center; gap:5px; color:var(--cg-green); font-size:10px; }
+  .cg-card h3 .cg-live .dot { width:6px; height:6px; border-radius:50%; background:var(--cg-green); box-shadow:0 0 5px var(--cg-green); }
+  .cg-card h3 a, button.cg-link { margin-left:auto; color:var(--cg-cyan); font-size:11px; background:none;
+    border:none; cursor:pointer; font-family:inherit; }
+  @media (min-width:900px){
+    .cg-core-overview{ grid-column:span 4; } .cg-agents{ grid-column:span 8; }
+    .cg-sysmon{ grid-column:span 6; } .cg-feed{ grid-column:span 6; }
+    .cg-quick{ grid-column:span 6; } .cg-providers{ grid-column:span 6; }
+  }
+
+  /* ---- Responsive: keeps the persistent header + sidebar chrome (LAYOUT LAW: "top header bar +
+     left sidebar, both always visible") from overflowing on smaller / OS-scaled displays (e.g. a
+     1366 laptop at 125% scaling, or a 1280/1024 screen). Ported from the v1 HUD's equivalent fix
+     onto the v2 selectors -- v1's #main/.col 3-column grid these targeted no longer exists
+     (superseded by .cg-shell above), so the old media queries had nothing left to act on. ---- */
+  @media (max-width:1400px){
+    .cg-header{ gap:12px; padding:0 16px; }
+    .cg-search{ width:140px; }
+    .cg-profile .cg-role{ display:none; }
+  }
+  @media (max-width:1100px){
+    .cg-search, .cg-clock .cg-date{ display:none; }
+    header.cg-header{ flex-wrap:wrap; height:auto; min-height:60px; padding:10px 16px; }
+  }
+  @media (max-width:900px){
+    /* Sidebar stays visible per LAYOUT LAW -- goes icon-only instead of disappearing, unlike the
+       old v1 fix which hid #sidenav outright (not contract-compliant here). */
+    .cg-sidebar{ width:64px; padding:14px 6px; }
+    #main.cg-shell{ grid-template-columns:64px 1fr; }
+    .cg-navitem{ justify-content:center; padding:9px 4px; }
+    .cg-navitem span:not(.cg-ic){ display:none; }
+    .cg-voice-widget .cg-vw-label, .cg-vw-state, .cg-focus-toggle{ display:none; }
+  }
+  .cg-status-row { display:flex; align-items:center; gap:10px; padding:8px 0; font-size:13px; }
+  .cg-status-row .cg-sic { width:26px; height:26px; border-radius:7px; background:var(--void); display:flex;
+    align-items:center; justify-content:center; font-size:13px; flex:0 0 auto; }
+  .cg-status-row .cg-slabel { flex:1; }
+  .cg-status-row .cg-sval { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  .cg-sval.ok { color:var(--cg-green); } .cg-sval.warn { color:var(--cg-amber); } .cg-sval.bad { color:var(--cg-red); }
+
+  .cg-agent-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+  .cg-agent-card { background:var(--void); border:1px solid var(--border); border-radius:10px; padding:12px; }
+  .cg-agent-card .cg-an { display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:8px; }
+  .cg-agent-card .cg-astate { font-size:10.5px; color:var(--cg-text-dim); display:flex; align-items:center; gap:5px; margin-bottom:8px; }
+  .cg-agent-card .cg-astate .dot { width:6px; height:6px; border-radius:50%; background:var(--cg-text-dim); }
+  .cg-agent-card .cg-waveform { height:16px; justify-content:flex-start; margin:0; }
+  .cg-agent-card .cg-waveform span { width:2px; }
+
+  .cg-gauges { display:flex; gap:18px; justify-content:space-around; margin-bottom:14px; }
+  .cg-gauge-wrap { text-align:center; }
+  /* Rotate only the two circles (around their own center) so the arc starts at 12 o'clock --
+     the <text> stays unrotated and centered, avoiding compounded-transform math entirely. */
+  .cg-gauge-track, .cg-gauge-val { transform:rotate(-90deg); transform-origin:38px 38px; }
+  .cg-gauge-track { fill:none; stroke:var(--border); stroke-width:8; }
+  .cg-gauge-val { fill:none; stroke:var(--cg-cyan); stroke-width:8; stroke-linecap:round;
+    transition:stroke-dasharray .5s ease-out, stroke .3s ease; }
+  .cg-gauge-num { font-family:var(--font-mono2); font-size:15px; font-weight:600; fill:var(--cg-text); }
+  .cg-gauge-lbl { font-size:10.5px; color:var(--cg-text-dim); text-transform:uppercase; letter-spacing:.06em; margin-top:4px; }
+  .cg-memmap { display:flex; align-items:center; gap:14px; border-top:1px solid var(--border); padding-top:12px; }
+  .cg-memmap svg { flex:0 0 auto; }
+  .cg-memmap .cg-mm-stat b { display:block; font-size:15px; color:var(--cg-text); }
+  .cg-memmap .cg-mm-stat span { font-size:10.5px; color:var(--cg-text-dim); text-transform:uppercase; }
+
+  .cg-feed-item, .cg-cmd-item { display:flex; align-items:center; gap:10px; padding:9px 0;
+    border-bottom:1px solid var(--border); font-size:12.5px; }
+  .cg-feed-item:last-child, .cg-cmd-item:last-child { border-bottom:none; }
+  .cg-feed-item .cg-fic { width:28px; height:28px; border-radius:7px; background:var(--void); display:flex;
+    align-items:center; justify-content:center; flex:0 0 auto; }
+  .cg-feed-item .cg-ftxt b { display:block; color:var(--cg-text); font-weight:500; }
+  .cg-feed-item .cg-ftxt span { color:var(--cg-text-dim); font-size:11px; }
+  .cg-feed-item .cg-fact { margin-left:auto; background:var(--void); border:1px solid var(--border); color:var(--cg-cyan);
+    border-radius:6px; padding:4px 10px; font-size:11px; cursor:pointer; white-space:nowrap; }
+  .cg-cmd-item { cursor:pointer; }
+  .cg-cmd-item .cg-cic { color:var(--cg-cyan); }
+
+  .cg-provider-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .cg-provider { background:var(--void); border:1px solid var(--border); border-radius:10px; padding:10px; font-size:12px; }
+  .cg-provider .cg-pn { display:flex; align-items:center; gap:7px; margin-bottom:4px; color:var(--cg-text); }
+  .cg-provider .cg-pstate { font-size:10.5px; color:var(--cg-text-dim); }
+  .cg-provider.connected .cg-pstate { color:var(--cg-green); }
+  .cg-providers-count { font-family:var(--font-mono2); font-size:11px; }
+
+  /* ---- Bottom dock ---- */
+  .cg-dock { display:flex; align-items:center; gap:16px; padding:12px 20px; background:var(--surface);
+    border-top:1px solid var(--border); }
+  .cg-dock-pill { display:flex; align-items:center; gap:8px; background:var(--void); border:1px solid var(--border);
+    border-radius:999px; padding:8px 14px; font-size:11.5px; color:var(--cg-text-dim); white-space:nowrap; }
+  .cg-dock-pill b { color:var(--cg-text); font-weight:500; }
+  .cg-talk { flex:1; max-width:520px; margin:0 auto; display:flex; align-items:center; justify-content:center;
+    gap:12px; background:radial-gradient(ellipse at center,rgba(0,242,254,.14),rgba(0,242,254,.02));
+    border:1px solid var(--cg-cyan); border-radius:999px; padding:12px 24px; cursor:pointer;
+    box-shadow:0 0 18px rgba(0,242,254,.25); }
+  .cg-talk .cg-waveform { height:16px; }
+  .cg-talk .cg-talk-txt { text-align:center; }
+  .cg-talk .cg-talk-txt b { display:block; font-size:12.5px; letter-spacing:.08em; color:var(--cg-text); }
+  .cg-talk .cg-talk-txt span { font-size:10.5px; color:var(--cg-text-dim); }
+  .cg-dock-btn { background:var(--void); border:1px solid var(--border); color:var(--cg-text-dim); border-radius:999px;
+    padding:9px 16px; font-size:11.5px; cursor:pointer; white-space:nowrap; }
+  .cg-dock-btn:hover { border-color:var(--cg-cyan); color:var(--cg-text); }
 </style>
 </head>
 <body>
@@ -645,165 +843,227 @@
   <filter id="cb-protanopia"><feColorMatrix type="matrix" values="0.567 0.433 0 0 0  0.558 0.442 0 0 0  0 0.242 0.758 0 0  0 0 0 1 0"/></filter>
   <filter id="cb-tritanopia"><feColorMatrix type="matrix" values="0.95 0.05 0 0 0  0 0.433 0.567 0 0  0 0.475 0.525 0 0  0 0 0 1 0"/></filter>
 </defs></svg>
-<nav id="sidenav">
-  <div class="brand">◆ J.A.R.V.I.S.</div>
-  <div class="navitem" data-nav="home"><span class="ic">⬡</span> Command Center</div>
-  <div class="navitem" data-nav="memory"><span class="ic">🧠</span> Memory</div>
-  <div class="navitem" data-nav="conv"><span class="ic">💬</span> Conversations</div>
-  <div class="navitem" data-nav="apis"><span class="ic">🔌</span> APIs &amp; Models</div>
-  <div class="navitem" data-nav="tasks"><span class="ic">✅</span> Tasks</div>
-  <div class="navitem" data-nav="workflows"><span class="ic">⚙</span> Workflows</div>
-  <div class="navitem" data-nav="kb"><span class="ic">📚</span> Knowledge</div>
-  <div class="navitem" data-nav="galaxy"><span class="ic">🌌</span> Galaxy</div>
-  <div class="navitem" data-nav="brain"><span class="ic">🧩</span> Brain</div>
-  <div class="navitem" data-nav="solicitations"><span class="ic">📑</span> Solicitations</div>
-  <div class="navitem" data-nav="intel"><span class="ic">✨</span> Intelligence</div>
-  <div class="navitem" data-nav="discussion"><span class="ic">🗣</span> Discussion</div>
-  <div class="navitem" data-nav="agents"><span class="ic">🤖</span> Agents</div>
-  <div class="navitem" data-nav="tools"><span class="ic">🧩</span> Tools &amp; Skills</div>
-  <div class="navitem" data-nav="sysmon"><span class="ic">📈</span> System Monitor</div>
-</nav>
-<div id="app">
-  <header>
-    <button class="hbtn" id="navToggle" type="button" title="Show / hide the side panel">☰</button>
-    <div class="badge"></div>
-    <div><h1>J.A.R.V.I.S.</h1><div class="sub">JUST A RATHER VERY INTELLIGENT SYSTEM</div></div>
-    <div class="tools">
-      <button class="hbtn" id="brief" type="button" title="Time, reminders, weather, headlines">BRIEFING</button>
-      <button class="hbtn" id="mailTab" type="button" title="Your Gmail">✉ MAIL</button>
-      <button class="hbtn" id="calTab" type="button" title="Your Google Calendar">📅 CALENDAR</button>
-      <button class="hbtn" id="voice" type="button" title="Toggle voice; say your wake word, ESC interrupts">🎤 VOICE</button>
-      <button class="hbtn" id="camera" type="button" title="Look through the webcam">📷 CAMERA</button>
-      <button class="hbtn" id="peopleTab" type="button" title="People & About Me">👥 PEOPLE</button>
-      <button class="hbtn" id="auditTab" type="button" title="Audit log — every action JARVIS takes">🛡 AUDIT</button>
-      <button class="hbtn" id="settings" type="button" title="All settings">⚙ SETTINGS</button>
-      <button class="hbtn alert" id="interrupt" type="button" title="Stop JARVIS (or press ESC)">✋ STOP</button>
+<div class="palette-scrim" id="paletteScrim"></div>
+<div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <input class="palette-input" id="paletteInput" type="text" placeholder="Jump to…" autocomplete="off">
+  <div class="palette-list" id="paletteList">
+    <button class="palette-item" type="button" data-nav="memory">Memory</button>
+    <button class="palette-item" type="button" data-nav="conv">Conversations</button>
+    <button class="palette-item" type="button" data-nav="apis">APIs &amp; Models</button>
+    <button class="palette-item" type="button" data-nav="tasks">Tasks</button>
+    <button class="palette-item" type="button" data-nav="workflows">Workflows</button>
+    <button class="palette-item" type="button" data-nav="kb">Knowledge</button>
+    <button class="palette-item" type="button" data-nav="galaxy">Galaxy</button>
+    <button class="palette-item" type="button" data-nav="brain">Brain</button>
+    <button class="palette-item" type="button" data-nav="solicitations">Solicitations</button>
+    <button class="palette-item" type="button" data-nav="intel">Intelligence</button>
+    <button class="palette-item" type="button" data-nav="discussion">Discussion</button>
+    <button class="palette-item" type="button" data-nav="agents">Agents</button>
+    <button class="palette-item" type="button" data-nav="tools">Tools &amp; Skills</button>
+    <button class="palette-item" type="button" data-nav="sysmon">System Monitor</button>
+    <button class="palette-item" id="brief" type="button" title="Time, reminders, weather, headlines">Briefing</button>
+    <button class="palette-item" id="mailTab" type="button" title="Your Gmail">Mail</button>
+    <button class="palette-item" id="calTab" type="button" title="Your Google Calendar">Calendar</button>
+    <button class="palette-item" id="camera" type="button" title="Look through the webcam">Camera</button>
+    <button class="palette-item" id="peopleTab" type="button" title="People &amp; About Me">People</button>
+    <button class="palette-item" id="auditTab" type="button" title="Audit log — every action JARVIS takes">Audit</button>
+    <button class="palette-item" id="settings" type="button" title="All settings">Settings</button>
+    <button class="palette-item qcmd" data-cmd="Give me my briefing" type="button">Give me my briefing</button>
+    <button class="palette-item qcmd" data-cmd="What's my system status?" type="button">What's my system status?</button>
+    <button class="palette-item qcmd" data-cmd="Any new email?" type="button">Any new email?</button>
+    <button class="palette-item qcmd" data-cmd="What's on my calendar today?" type="button">What's on my calendar today?</button>
+    <button class="palette-item qcmd" data-cmd="What can you do?" type="button">What can you do?</button>
+  </div>
+  <div class="palette-empty" id="paletteEmpty" style="display:none;">No matches</div>
+</div>
+<div id="app" class="cg-app">
+  <header class="cg-header">
+    <div class="cg-brand"><span class="cg-logo"></span>J.A.R.V.I.S <span class="cg-ver">COMMAND CENTER · v0.1.0</span></div>
+    <div class="cg-status-pill" id="cgStatusPill"><span class="dot"></span>SYSTEM STATUS <b id="cgStatusWord">—</b></div>
+    <div class="cg-clock"><div id="cgClockTime">--:--:--</div><div class="cg-date" id="cgClockDate">—</div></div>
+    <div class="cg-util">
+      <label class="cg-search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="cgSearch" placeholder="Search…" autocomplete="off"></label>
+      <button class="cg-icon-btn" id="cgViewToggle" type="button" title="Toggle Focus Mode">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
+      <button class="cg-icon-btn" id="cgBell" type="button" title="Alerts">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span class="cg-badge-dot" id="cgBellDot" style="display:none;"></span></button>
+      <button class="cg-icon-btn" id="cgSettingsBtn" type="button" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      <div class="cg-profile"><span class="cg-avatar">OP</span><span class="cg-role">Operator</span></div>
     </div>
   </header>
 
-  <div id="main">
-    <!-- LEFT: metrics -->
-    <div class="col">
-      <div class="card">
-        <h3>System</h3>
-        <div class="metric"><div class="top"><span>CPU LOAD</span><b id="cpuVal">—</b></div>
-          <div class="bar" id="cpuBar"><span></span></div></div>
-        <div class="metric"><div class="top"><span>MEMORY</span><b id="ramVal">—</b></div>
-          <div class="bar" id="ramBar"><span></span></div></div>
-        <div class="kv"><span>CORES</span><b id="cores">—</b></div>
-        <div class="kv"><span>MEMORY</span><b id="ramGb">—</b></div>
+  <div id="main" class="cg-shell">
+    <aside class="cg-sidebar">
+      <nav class="cg-nav" id="cgNav">
+        <div class="cg-navitem active" data-nav="home"><span class="cg-ic">◧</span>Command Center</div>
+        <div class="cg-navitem" data-nav="conv"><span class="cg-ic">💬</span>Chat</div>
+        <div class="cg-navitem" data-nav="apis"><span class="cg-ic">◎</span>AI Core</div>
+        <div class="cg-navitem" data-nav="agents"><span class="cg-ic">◈</span>Agents</div>
+        <div class="cg-navitem" data-nav="tasks"><span class="cg-ic">☑</span>Tasks</div>
+        <div class="cg-navitem" data-nav="calendar"><span class="cg-ic">▦</span>Calendar</div>
+        <div class="cg-navitem" data-nav="memory"><span class="cg-ic">◐</span>Memory</div>
+        <div class="cg-navitem" data-nav="kb"><span class="cg-ic">▤</span>Knowledge Base</div>
+        <div class="cg-navitem" data-nav="tools"><span class="cg-ic">✦</span>Tools &amp; Skills<span class="cg-nbadge" id="cgToolsBadge" style="display:none;"></span></div>
+        <div class="cg-navitem" data-nav="workflows"><span class="cg-ic">⇄</span>Workflows</div>
+        <div class="cg-navitem" data-nav="sysmon"><span class="cg-ic">◔</span>System Monitor</div>
+        <div class="cg-navitem" data-nav="solicitations"><span class="cg-ic">▥</span>Solicitations</div>
+        <div class="cg-navitem" data-nav="intel"><span class="cg-ic">✧</span>Intelligence</div>
+        <div class="cg-navitem" data-nav="discussion"><span class="cg-ic">◒</span>Discussion</div>
+      </nav>
+      <div class="cg-voice-widget" id="cgVoiceWidget">
+        <div class="cg-vw-label">Voice Status</div>
+        <div class="cg-waveform">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="cg-tap-speak" id="cgTapSpeak" title="Tap to speak">🎙</div>
+        <div class="cg-vw-state" id="cgVwState">Tap to Speak</div>
+        <button class="cg-focus-toggle" id="cgFocusToggle" type="button">Focus Mode</button>
       </div>
-      <div class="card">
-        <h3>Core Status</h3>
-        <div class="kv"><span>MODEL</span><b id="modelKv">—</b></div>
-        <div class="kv"><span>CONNECTION</span><b id="connKv">—</b></div>
-        <div class="kv"><span>UPTIME</span><b id="uptime">00:00:00</b></div>
+    </aside>
+
+    <div class="cg-content" id="cgContent">
+      <div class="cg-card cg-core-overview">
+        <h3>AI Core Overview</h3>
+        <div class="cg-status-row"><span class="cg-sic">◎</span><span class="cg-slabel">AI Core</span><span class="cg-sval" id="cgAiCoreState">—</span></div>
+        <div class="cg-status-row"><span class="cg-sic">◐</span><span class="cg-slabel">Memory</span><span class="cg-sval ok">Ready</span></div>
+        <div class="cg-status-row"><span class="cg-sic">🎙</span><span class="cg-slabel">Voice</span><span class="cg-sval" id="cgVoiceState">—</span></div>
+        <div class="cg-status-row"><span class="cg-sic">◈</span><span class="cg-slabel">Agents</span><span class="cg-sval ok">Standby</span></div>
+        <div class="cg-status-row"><span class="cg-sic">⬡</span><span class="cg-slabel">LLMs</span><span class="cg-sval" id="cgLlmState">—</span></div>
+        <div class="cg-status-row"><span class="cg-sic">◔</span><span class="cg-slabel">System</span><span class="cg-sval" id="cgSysState">—</span></div>
       </div>
-      <div class="card">
-        <h3>Usage
-          <button class="hbtn" id="usageMore" type="button" title="Token & cost history"
-                  style="float:right;font-size:10px;padding:2px 8px;">HISTORY ▸</button></h3>
-        <div class="kv"><span>EST. COST</span><b id="uCost">$0.00</b></div>
-        <div class="kv"><span>TOKENS</span><b id="uTokens">0</b></div>
-        <div class="kv"><span>CALLS</span><b id="uCalls">0</b></div>
-      </div>
-      <div class="card">
-        <h3>Subsystems</h3>
-        <div class="sub-list">
-          <div class="item"><span class="sdot" id="ssAi"></span>Cognitive core</div>
-          <div class="item"><span class="sdot" id="ssVoice"></span>Voice interface</div>
-          <div class="item"><span class="sdot" id="ssVision"></span>Vision (screen/webcam)</div>
-          <div class="item"><span class="sdot" id="ssGoogle"></span>Email &amp; Calendar (Google)</div>
-          <div class="item"><span class="sdot"></span>Persistent memory</div>
-          <div class="item"><span class="sdot"></span>Tool execution</div>
-          <div class="item"><span class="sdot"></span>Hardware monitor</div>
+
+      <div class="cg-card cg-agents">
+        <h3>Active Agents</h3>
+        <div class="cg-agent-grid">
+          <div class="cg-agent-card"><div class="cg-an">Coding Agent</div>
+            <div class="cg-astate"><span class="dot"></span>Standby</div>
+            <div class="cg-waveform"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+          <div class="cg-agent-card"><div class="cg-an">Research Agent</div>
+            <div class="cg-astate"><span class="dot"></span>Standby</div>
+            <div class="cg-waveform"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+          <div class="cg-agent-card"><div class="cg-an">Browser Agent</div>
+            <div class="cg-astate"><span class="dot"></span>Standby</div>
+            <div class="cg-waveform"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+          <div class="cg-agent-card"><div class="cg-an">Task Agent</div>
+            <div class="cg-astate"><span class="dot"></span>Standby</div>
+            <div class="cg-waveform"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
         </div>
       </div>
-      <div class="card" style="flex:1;">
-        <h3>Activity <span id="actCount" class="actcount"></span>
-          <button class="hbtn" id="actMore" type="button" title="Open the full Audit Log"
-                  style="float:right;font-size:10px;padding:2px 8px;">AUDIT ▸</button></h3>
-        <div id="activityFeed" class="afeed"><div class="hint">Waiting for activity…</div></div>
+
+      <div class="cg-card cg-sysmon">
+        <h3>System Monitor</h3>
+        <div class="cg-gauges" id="cgGauges">
+          <div class="cg-gauge-wrap"><svg width="76" height="76" viewBox="0 0 76 76">
+            <circle class="cg-gauge-track" cx="38" cy="38" r="30"/>
+            <circle class="cg-gauge-val" id="cgGaugeCpu" cx="38" cy="38" r="30" stroke-dasharray="0 999"/>
+            <text class="cg-gauge-num" x="38" y="43" text-anchor="middle" id="cgGaugeCpuNum">—</text></svg>
+            <div class="cg-gauge-lbl">CPU</div></div>
+          <div class="cg-gauge-wrap"><svg width="76" height="76" viewBox="0 0 76 76">
+            <circle class="cg-gauge-track" cx="38" cy="38" r="30"/>
+            <circle class="cg-gauge-val" id="cgGaugeRam" cx="38" cy="38" r="30" stroke-dasharray="0 999"/>
+            <text class="cg-gauge-num" x="38" y="43" text-anchor="middle" id="cgGaugeRamNum">—</text></svg>
+            <div class="cg-gauge-lbl">RAM</div></div>
+          <div class="cg-gauge-wrap"><svg width="76" height="76" viewBox="0 0 76 76">
+            <circle class="cg-gauge-track" cx="38" cy="38" r="30"/>
+            <circle class="cg-gauge-val" id="cgGaugeDisk" cx="38" cy="38" r="30" stroke-dasharray="0 999"/>
+            <text class="cg-gauge-num" x="38" y="43" text-anchor="middle" id="cgGaugeDiskNum">—</text></svg>
+            <div class="cg-gauge-lbl">DISK</div></div>
+        </div>
+        <div class="cg-memmap">
+          <svg width="70" height="46" viewBox="0 0 70 46"><g stroke="var(--cg-cyan)" stroke-width="1" opacity=".5">
+            <line x1="8" y1="10" x2="26" y2="22"/><line x1="26" y1="22" x2="20" y2="38"/>
+            <line x1="26" y1="22" x2="48" y2="16"/><line x1="48" y1="16" x2="62" y2="30"/></g>
+            <g fill="var(--cg-cyan)"><circle cx="8" cy="10" r="3"/><circle cx="26" cy="22" r="3"/>
+            <circle cx="20" cy="38" r="3"/><circle cx="48" cy="16" r="3"/><circle cx="62" cy="30" r="3"/></g></svg>
+          <div class="cg-mm-stat"><b id="cgMemStat">Ready</b><span>Memories</span></div>
+          <button class="cg-link" id="cgViewMemMap" type="button" style="margin-left:auto;">View Memory Map →</button>
+        </div>
+      </div>
+
+      <div class="cg-card cg-feed">
+        <h3>Live Intelligence Feed<span class="cg-live"><span class="dot"></span>LIVE</span></h3>
+        <div id="cgFeed"><div class="cg-feed-item"><span class="cg-fic">…</span><div class="cg-ftxt"><b>Loading…</b></div></div></div>
+      </div>
+
+      <div class="cg-card cg-quick">
+        <h3>Quick Commands</h3>
+        <div id="cgQuick"></div>
+      </div>
+
+      <div class="cg-card cg-providers">
+        <h3>Manage Providers<span class="cg-providers-count" id="cgProvCount" style="margin-left:auto;color:var(--cg-text-dim);"></span></h3>
+        <div class="cg-provider-grid" id="cgProviderGrid"></div>
       </div>
     </div>
 
-    <!-- CENTER: orb -->
-    <div class="col center">
+    <!-- v1 shell (orb, palette, status panel) stays wired but hidden -- every existing JS hook
+         (ask/speak/setOrb/loadActivity/loadTimeline/providers/etc.) keeps running unchanged. -->
+    <div class="cg-legacy">
       <div class="stage">
         <div class="orb idle" id="orb">
           <svg viewBox="0 0 400 400" aria-hidden="true">
             <circle class="ring" cx="200" cy="200" r="196"/>
-            <g class="rot">
-              <circle class="ring bright" cx="200" cy="200" r="170" stroke-dasharray="3 12"/>
-            </g>
+            <g class="rot"><circle class="ring bright" cx="200" cy="200" r="170" stroke-dasharray="3 12"/></g>
             <circle class="ring" cx="200" cy="200" r="150"/>
-            <g class="rot rev ticks">
-              <g id="tickGroup"></g>
-            </g>
+            <g class="rot rev ticks"><g id="tickGroup"></g></g>
             <circle class="ring bright" cx="200" cy="200" r="120"/>
-            <g class="sweep">
-              <defs>
-                <radialGradient id="sw" cx="50%" cy="50%" r="50%">
-                  <stop offset="55%" stop-color="rgba(65,217,255,0)"/>
-                  <stop offset="100%" stop-color="rgba(65,217,255,.28)"/>
-                </radialGradient>
-              </defs>
-              <path d="M200 200 L200 40 A160 160 0 0 1 340 130 Z" fill="url(#sw)"/>
-            </g>
+            <g class="sweep"><defs><radialGradient id="sw" cx="50%" cy="50%" r="50%">
+              <stop offset="55%" stop-color="rgba(65,217,255,0)"/><stop offset="100%" stop-color="rgba(65,217,255,.28)"/>
+            </radialGradient></defs><path d="M200 200 L200 40 A160 160 0 0 1 340 130 Z" fill="url(#sw)"/></g>
             <circle class="ring" cx="200" cy="200" r="96"/>
           </svg>
           <div class="core"></div>
         </div>
-        <div class="status-line">
-          <div class="st" id="statusText">STANDBY</div>
-          <div class="hint" id="statusHint">Press 🎤 VOICE or type a command</div>
-        </div>
+        <div class="status-line"><div class="st" id="statusText">STANDBY</div>
+          <div class="hint" id="statusHint">Press VOICE or type a command</div></div>
       </div>
       <div class="orch-modes" id="orchModes">
-        <button type="button" class="omode active" data-omode="single" title="One active model answers">🧠 Single</button>
-        <button type="button" class="omode" data-omode="ensemble" title="Every rostered model answers in parallel; answers are fused">⚖️ Ensemble</button>
-        <button type="button" class="omode" data-omode="hierarchy" title="Conductor decomposes → Workers run concurrently → Conductor arbitrates">🏛 Hierarchy</button>
+        <button type="button" class="omode active" data-omode="single">Single</button>
+        <button type="button" class="omode" data-omode="ensemble">Ensemble</button>
+        <button type="button" class="omode" data-omode="hierarchy">Hierarchy</button>
       </div>
       <div class="attach-chips" id="attachChips"></div>
       <form class="cmd" id="form" autocomplete="off">
-        <input id="box" placeholder="Ask JARVIS anything…" autofocus>
-        <button type="button" class="attach-btn" id="attachBtn" title="Attach a file JARVIS can read (txt, md, csv, json, pdf, docx, xlsx)">📎</button>
+        <input id="box" placeholder="Ask JARVIS anything…">
+        <button type="button" class="attach-btn" id="attachBtn">📎</button>
         <button id="send" type="submit">SEND</button>
-        <input type="file" id="fileInput" style="display:none" multiple accept=".txt,.text,.log,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.pdf,.docx,.xlsx,.html,.htm,.rtf">
+        <input type="file" id="fileInput" multiple accept=".txt,.text,.log,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.pdf,.docx,.xlsx,.html,.htm,.rtf">
       </form>
-    </div>
-
-    <!-- RIGHT: chat -->
-    <div class="col">
-      <div class="card">
-        <h3>Quick Commands</h3>
-        <div class="qcmds">
-          <button class="qcmd" data-cmd="Give me my briefing" type="button">📋 Briefing</button>
-          <button class="qcmd" data-cmd="What's my system status?" type="button">🖥 System status</button>
-          <button class="qcmd" data-cmd="Any new email?" type="button">✉ New email</button>
-          <button class="qcmd" data-cmd="What's on my calendar today?" type="button">📅 Today</button>
-          <button class="qcmd" data-cmd="What can you do?" type="button">✨ Capabilities</button>
-        </div>
-      </div>
-      <div class="card chat" style="flex:1;">
-        <h3>Command Log</h3>
-        <div id="log"></div>
-      </div>
-      <div class="card">
-        <h3>Mission Timeline</h3>
-        <div id="timeline" class="tline"><div class="hint">No activity yet.</div></div>
-      </div>
+      <div id="log"></div>
+      <button class="hbtn voice-toggle" id="voice" type="button">VOICE</button>
+      <button class="palette-hint" id="paletteHint" type="button">Ctrl K</button>
+      <button class="hbtn alert" id="interrupt" type="button">STOP</button>
+      <button class="hbtn" id="emergencyMute" type="button">MUTE</button>
+      <button class="sb-clickable" id="statusDotBtn" type="button"><span class="dot" id="sbDot"></span><span id="sbModel">—</span></button>
+      <div id="statusPanel"></div>
+      <div id="statusPanelScrim"></div>
+      <span id="sbMode">CONNECTING…</span><span class="dot" id="sbBrainDot"></span><span id="sbBrainLabel">BRAIN: CHECKING…</span>
+      <span id="sbClock">--:--:--</span><span class="sbupd" id="sbUpdate"></span><span id="sbVersion">0.1.0</span>
+      <b id="cpuVal">—</b><div class="bar" id="cpuBar"><span></span></div>
+      <b id="ramVal">—</b><div class="bar" id="ramBar"><span></span></div>
+      <b id="cores">—</b><b id="ramGb">—</b><b id="modelKv">—</b><b id="connKv">—</b>
+      <button id="usageMore" type="button"></button>
+      <b id="uCost">$0.00</b><b id="uTokens">0</b><b id="uCalls">0</b>
+      <span class="sdot" id="ssAi"></span><span class="sdot" id="ssVoice"></span>
+      <span class="sdot" id="ssVision"></span><span class="sdot" id="ssGoogle"></span>
+      <span id="actCount"></span><button id="actMore" type="button"></button>
+      <div id="activityFeed"></div>
+      <div id="timeline" class="tline"></div>
+      <span id="sbMic">OFF</span><span id="sbNotes">0</span><b id="uptime">00:00:00</b>
     </div>
   </div>
 
-  <div class="statusbar">
-    <span><span class="dot" id="sbDot"></span><span id="sbMode">CONNECTING…</span></span>
-    <span><span class="dot" id="sbBrainDot"></span><span id="sbBrainLabel">BRAIN: CHECKING…</span></span>
-    <span>MIC: <b id="sbMic">OFF</b></span>
-    <span class="sbupd" id="sbUpdate"></span>
-    <span class="spacer"></span>
-    <span id="sbClock">--:--:--</span>
-    <span>J.A.R.V.I.S. · v<span id="sbVersion">0.1.0</span></span>
+  <div class="cg-dock">
+    <div class="cg-dock-pill" id="cgLocation">📍 <b>—</b></div>
+    <div class="cg-dock-pill" id="cgNetwork">📶 Network <b id="cgNetState">—</b></div>
+    <button class="cg-talk" id="cgTalk" type="button">
+      <span class="cg-waveform" id="cgTalkWave"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span>
+      <span class="cg-talk-txt"><b>TALK TO JARVIS</b><span id="cgTalkState">Tap to speak</span></span>
+    </button>
+    <button class="cg-dock-btn" id="cgSettingsDock" type="button">Settings</button>
   </div>
 </div>
 
@@ -1703,6 +1963,9 @@
     isOnline = s.online; jarvisModel = s.model || '';
     document.getElementById('sbDot').className = 'dot ' + (s.online ? 'on' : 'off');
     document.getElementById('sbMode').textContent = s.online ? ('ONLINE · ' + s.model.toUpperCase()) : 'OFFLINE ECHO MODE';
+    const hDot = document.getElementById('hdrDot');
+    if (hDot) hDot.className = 'dot ' + (s.online ? 'on' : 'off');
+    document.getElementById('sbModel').textContent = s.online ? s.model.toUpperCase() : 'OFFLINE';
     applyBrainBadge(s);
     document.getElementById('modelKv').textContent = s.online ? s.model : 'offline';
     document.getElementById('connKv').textContent = s.online ? 'SECURE' : 'LOCAL';
@@ -1710,6 +1973,7 @@
     document.getElementById('ssVision').className = 'sdot' + (s.online ? '' : ' off');
     document.getElementById('ssGoogle').className = 'sdot' + (s.google ? '' : ' off');
     const n = s.notes || 0;
+    document.getElementById('sbNotes').textContent = n;
     const noteStr = n ? (' I have ' + n + ' note' + (n === 1 ? '' : 's') + ' indexed and at the ready.') : '';
     const hr = new Date().getHours();
     const tod = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
@@ -1839,6 +2103,17 @@
   document.getElementById('form').addEventListener('submit', (e) => {
     e.preventDefault(); const p = box.value.trim(); if (!p) return; box.value=''; ask(p);
   });
+  // Explicit Enter handling: with no visible SEND button, Chrome's implicit
+  // submit-form-on-Enter-in-a-single-text-field behavior does not reliably engage against a
+  // display:none submit button (confirmed by direct testing -- a genuine physical Enter press did
+  // not fire the form's submit event). Rather than depend on that ambiguous native behavior, Enter
+  // in the chat input explicitly requests the form submission.
+  box.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('form').requestSubmit();
+    }
+  });
 
   // ---- Orchestration mode (Single / Ensemble / Hierarchy) + inline trace ----
   let orchMode='single';
@@ -1935,6 +2210,13 @@
   const interruptBtn = document.getElementById('interrupt');
   const sbMic = document.getElementById('sbMic');
   let voiceOn = false, speaking = false, recog = null;
+  // Bumped on every speak() call; a stale utterance's finish() checks this before touching shared
+  // state (see speak()) so an interrupted/superseded utterance can never re-arm the mic mid-speech.
+  let speechToken = 0;
+  // Emergency mute: a hard kill switch, independent of voiceOn/speaking. While true, speak() is a
+  // strict no-op (nothing queued, nothing spoken) regardless of caller -- vision greeting, chat
+  // answer, or anything else routed through the single speak() choke point.
+  let emergencyMuted = false;
   function voiceLang() { return S.lang || 'en-US'; }
 
   // Voice list loads asynchronously; getVoices() is often empty on first call. We cache it and pin
@@ -1962,12 +2244,39 @@
     return voices.find(v => v.lang === lang) || voices.find(v => v.lang && v.lang.slice(0,2)===two) || voices[0];
   }
 
+  // The Web Speech API exposes no raw waveform/amplitude for synthesized speech (there is no
+  // AnalyserNode-accessible audio graph behind speechSynthesis.speak, unlike a real <audio> stream
+  // or mic input). 'boundary' events are the closest real signal available: the browser's actual
+  // TTS engine fires one per word/character as it genuinely speaks that word, with real (not
+  // fixed-timer) variance from word length and the utterance's own rate. Each boundary pulses the
+  // orb's core scale directly, then the CSS transition on .core eases it back to baseline.
+  //
+  // Chrome has a documented gap here: LOCAL voices (e.g. Windows SAPI "Microsoft David") reliably
+  // fire 'boundary'; NETWORK voices (Google's cloud voices, e.g. "Google UK English Female" --
+  // this app's own default pin) frequently fire zero boundary events for an entire utterance,
+  // confirmed by direct testing in this session. There is no way to detect voice support ahead of
+  // time other than watching whether events actually arrive. So: real boundary events drive the
+  // pulse whenever the browser delivers them; a word-rate-estimated timer engages ONLY as a
+  // fallback if zero boundary events have fired shortly after the utterance starts, so a voice
+  // that doesn't support the real signal still gets a reasonably-timed pulse instead of a static
+  // orb -- and the moment a real boundary event does arrive, the fallback timer is torn down.
+  const orbCore = document.querySelector('.orb .core');
+  function pulseOrbSpeaking(){ if (orbCore) orbCore.style.transform = 'scale(1.08)';
+    clearTimeout(pulseOrbSpeaking._t);
+    pulseOrbSpeaking._t = setTimeout(() => { if (orbCore) orbCore.style.transform = ''; }, 140); }
+
   function speak(text) {
     // TTS is independent of the microphone: typed answers speak too (gated only by S.autoSpeak at
     // the call site). The mic (voiceOn) only governs pausing/resuming listening around speech.
+    if (emergencyMuted) { setOrb(restState()); return; }
     if (!window.speechSynthesis || !text) { setOrb(restState()); return; }
     if (voiceOn) stopListening();
     try { speechSynthesis.cancel(); } catch (e) {}
+    // Every call gets a new generation token. If this utterance gets superseded (cancel() above, from
+    // a LATER speak() call), its own finish() will still fire asynchronously -- but only the most
+    // recent token is allowed to touch shared state (speaking / interruptBtn / mic re-arm) below, so a
+    // stale utterance's finish() can never clobber a newer one that's still actively playing.
+    const myToken = ++speechToken;
     const u = new SpeechSynthesisUtterance(text);
     u.rate = S.rate || 1.05;
     if (!pinnedVoice) refreshVoices();
@@ -1975,12 +2284,31 @@
     u.voice = chosen || null;
     u.lang = chosen ? chosen.lang : (voiceLang().slice(0,2) === 'en' ? 'en-GB' : voiceLang());
     speaking = true; setOrb('speaking'); interruptBtn.classList.add('show');
+    let realBoundaryFired = false, fallbackPulse = null;
+    u.onboundary = () => { realBoundaryFired = true; clearInterval(fallbackPulse); pulseOrbSpeaking(); };
+    const fallbackCheck = setTimeout(() => {
+      if (realBoundaryFired || !speechSynthesis.speaking) return;
+      const msPerWord = Math.max(180, 3600 / (60 * u.rate));   // ~ a spoken-word cadence at this rate
+      fallbackPulse = setInterval(() => { if (speechSynthesis.speaking) pulseOrbSpeaking(); }, msPerWord);
+    }, 400);
     let finished = false;
     const finish = () => { if (finished) return; finished = true;
-      clearInterval(keepAlive); clearTimeout(watchdog); speaking = false;
+      clearInterval(keepAlive); clearTimeout(watchdog); clearTimeout(fallbackCheck); clearInterval(fallbackPulse);
+      clearTimeout(pulseOrbSpeaking._t); if (orbCore) orbCore.style.transform = '';
+      if (myToken !== speechToken) return;   // superseded by a newer utterance -- that one owns state now
+      speaking = false;
       interruptBtn.classList.remove('show');
       if (conversationActive) resetConvoTimer();      // count the quiet-timeout from his last word
-      if (voiceOn) startListening(); else setOrb('idle'); };
+      setOrb('idle');
+      // Grace period before the mic re-arms: the Web Speech synthesis API's 'onend' fires before the
+      // speaker's audio buffer has actually finished playing out, and SpeechRecognition has no way to
+      // apply echo cancellation to its own internal mic stream (it isn't handed a MediaStream we
+      // control) -- so re-arming immediately let the mic catch the tail of JARVIS's own voice and
+      // treat it as user speech. Re-check voiceOn/speaking/token/mute after the delay in case any
+      // changed (mic toggled off, another utterance started, or emergency mute engaged) while waiting.
+      if (voiceOn) setTimeout(() => {
+        if (voiceOn && !speaking && !emergencyMuted && myToken === speechToken) startListening();
+      }, 500); };
     u.onend = finish; u.onerror = finish;
     const keepAlive = setInterval(() => {
       if (!speechSynthesis.speaking && !speechSynthesis.pending) { finish(); return; }
@@ -1990,6 +2318,34 @@
     speechSynthesis.speak(u);
   }
   function interrupt() { if (speaking && window.speechSynthesis) speechSynthesis.cancel(); }
+
+  // ---------- Emergency mute ----------
+  // A single, always-available panic button: instantly stops any in-flight/queued speech, disables
+  // the mic outright, and makes speak() a no-op until unmuted -- independent of and stronger than
+  // stopListening()/interrupt(), which only ever address one utterance or the mic in isolation.
+  const muteBtn = document.getElementById('emergencyMute');
+  function emergencyMute() {
+    emergencyMuted = true;
+    speechToken++;                          // invalidate every in-flight finish() closure
+    try { speechSynthesis.cancel(); } catch (e) {}
+    speaking = false;
+    interruptBtn.classList.remove('show');
+    voiceOn = false; voiceBtn.classList.remove('on');
+    document.getElementById('ssVoice').className = 'sdot off';
+    stopListening();
+    conversationActive = false; clearTimeout(convoTimer);
+    sbMic.textContent = 'MUTED';
+    setOrb('idle'); statusHint.textContent = 'Muted -- press MUTE again to re-enable voice';
+    if (muteBtn) { muteBtn.classList.add('alert', 'show'); muteBtn.textContent = '🔇 MUTED'; }
+  }
+  function emergencyUnmute() {
+    emergencyMuted = false;
+    if (muteBtn) { muteBtn.classList.remove('alert', 'show'); muteBtn.textContent = '🔇 MUTE'; }
+    setOrb(restState());
+  }
+  if (muteBtn) {
+    muteBtn.addEventListener('click', () => { emergencyMuted ? emergencyUnmute() : emergencyMute(); });
+  }
 
   // Conversation mode: after the wake word, keep talking without repeating it until it goes quiet.
   let conversationActive = false, convoTimer = null;
@@ -2008,7 +2364,7 @@
   }
 
   function startListening() {
-    if (!SR || recog || !voiceOn || speaking) return;
+    if (!SR || recog || !voiceOn || speaking || emergencyMuted) return;
     // Speech recognition requires a secure context (HTTPS or localhost); on a plain-http LAN address
     // the browser silently refuses. Fail loudly instead of leaving a dead mic. (TTS still works.)
     if (!window.isSecureContext) { sbMic.textContent = 'NO MIC';
@@ -2046,6 +2402,9 @@
 
   voiceBtn.addEventListener('click', () => {
     if (!SR || !window.speechSynthesis) { statusHint.textContent='Voice not supported in this browser'; return; }
+    // While emergency-muted, VOICE must not silently flip to an "on"-looking state that doesn't
+    // actually listen or speak -- require an explicit unmute first so the toggle stays honest.
+    if (emergencyMuted) { statusHint.textContent = 'Muted -- press MUTE to re-enable voice first'; return; }
     voiceOn = !voiceOn; voiceBtn.classList.toggle('on', voiceOn);
     document.getElementById('ssVoice').className = 'sdot' + (voiceOn ? '' : ' off');
     if (voiceOn) { startListening(); speak('Voice interface online, sir.'); }
@@ -2129,49 +2488,266 @@
   const drawer=document.getElementById('drawer'), scrim=document.getElementById('scrim');
   const $=id=>document.getElementById(id);
 
-  // ---- Command Center shell: left-nav page switching ----
+  // ---- Command Center shell: page switching (now driven by the Ctrl/Cmd+K palette below,
+  //      the old persistent left sidebar is gone) ----
   const pageLoaders={};
   function navTo(id){
-    document.querySelectorAll('#sidenav .navitem').forEach(n=>n.classList.toggle('active', n.dataset.nav===id));
     document.querySelectorAll('.cpage').forEach(p=>p.classList.remove('open'));
     if(id!=='home'){ const p=$('cpage-'+id); if(p) p.classList.add('open'); }
     if(pageLoaders[id]) pageLoaders[id]();
   }
-  document.querySelectorAll('#sidenav .navitem').forEach(n=>n.addEventListener('click',()=>navTo(n.dataset.nav)));
   document.querySelectorAll('.pgclose').forEach(b=>b.addEventListener('click',()=>navTo('home')));
   navTo('home');
 
-  // ---- Collapsible HUD cards: every .card gets a top-right chevron that folds it down to its
-  //      one-line title. Folded state is remembered per card across restarts (localStorage). ----
-  let hudFolds={}; try{ hudFolds=JSON.parse(localStorage.getItem('hudFolds')||'{}'); }catch(e){}
-  document.querySelectorAll('.card > h3').forEach(h=>{
-    const card=h.parentElement;
-    const key=((h.firstChild&&h.firstChild.textContent)||h.textContent||'card')
-      .trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,24)||'card';
-    const btn=document.createElement('button');
-    btn.className='cardtoggle'; btn.type='button'; btn.title='Collapse / expand';
-    const apply=f=>{ card.classList.toggle('folded',!!f); btn.textContent=f?'▸':'▾'; };
-    btn.addEventListener('click',e=>{
-      e.stopPropagation();
-      const f=!card.classList.contains('folded');
-      apply(f); hudFolds[key]=f;
-      try{ localStorage.setItem('hudFolds',JSON.stringify(hudFolds)); }catch(e2){}
+  // ==================== jarvis-design-system v2: card-grid dashboard ====================
+  // Every card here reads REAL data off the same endpoints/state the legacy shell already
+  // uses (ask/speak/voiceOn/navTo/openWorkspace/etc.) -- nothing on this dashboard is mocked.
+
+  // ---- Clock ----
+  function cgTickClock(){
+    const d=new Date();
+    $('cgClockDate').textContent = d.toLocaleDateString([], {weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    $('cgClockTime').textContent = d.toLocaleTimeString([]);
+  }
+  setInterval(cgTickClock,1000); cgTickClock();
+
+  // ---- Sidebar navigation ----
+  const CG_SPECIAL_NAV = { calendar: () => openWorkspace('calendar') };
+  document.querySelectorAll('.cg-navitem').forEach(item=>{
+    item.addEventListener('click', ()=>{
+      document.querySelectorAll('.cg-navitem').forEach(n=>n.classList.toggle('active', n===item));
+      const id = item.dataset.nav;
+      if (CG_SPECIAL_NAV[id]) CG_SPECIAL_NAV[id](); else navTo(id);
     });
-    h.appendChild(btn);
-    apply(!!hudFolds[key]);
   });
 
-  // ---- Sidebar toggle (☰ in the header): hide/show the left nav, remembered across restarts. ----
-  (function(){
-    const t=$('navToggle'); if(!t) return;
-    const apply=c=>document.body.classList.toggle('navclosed',!!c);
-    t.addEventListener('click',()=>{
-      const c=!document.body.classList.contains('navclosed');
-      apply(c);
-      try{ localStorage.setItem('navClosed',c?'1':''); }catch(e){}
+  // ---- System status pill + AI Core Overview (real /status) ----
+  function cgRenderStatus(s){
+    $('cgStatusPill').classList.toggle('degraded', !s.online);
+    $('cgStatusWord').textContent = s.online ? 'OPTIMAL' : 'DEGRADED';
+    $('cgAiCoreState').textContent = s.online ? 'Optimal' : 'Degraded';
+    $('cgAiCoreState').className = 'cg-sval ' + (s.online?'ok':'warn');
+    $('cgSysState').textContent = s.online ? 'Optimal' : 'Degraded';
+    $('cgSysState').className = 'cg-sval ' + (s.online?'ok':'warn');
+  }
+  function cgPollStatus(){ fetch('/status').then(r=>r.json()).then(cgRenderStatus).catch(()=>{}); }
+  cgPollStatus(); setInterval(cgPollStatus, 15000);
+
+  // ---- Voice state: polls the real voiceOn/speaking closures, no duplicate state machine ----
+  function cgSetVoiceState(label, active){
+    $('cgVoiceState').textContent = label;
+    $('cgVoiceState').className = 'cg-sval ' + (active?'ok':'warn');
+    const busyTxt = active ? (speaking ? 'Speaking…' : 'Listening…') : 'Tap to Speak';
+    $('cgVwState').textContent = busyTxt;
+    $('cgTalkState').textContent = active ? (speaking ? 'Speaking…' : 'I am listening…') : 'Tap to speak';
+    $('cgVoiceWidget').classList.toggle('active', active);
+    $('cgTalk').classList.toggle('active', active);
+  }
+  setInterval(()=>{
+    if (!voiceOn) cgSetVoiceState('Standby', false);
+    else if (speaking) cgSetVoiceState('Speaking', true);
+    else cgSetVoiceState('Listening', true);
+  }, 300);
+  $('cgTapSpeak').addEventListener('click', ()=>voiceBtn.click());
+  $('cgTalk').addEventListener('click', ()=>voiceBtn.click());
+
+  // ---- Focus Mode: declutters the grid down to the two overview cards ----
+  let cgFocusOn = false;
+  function cgSetFocus(on){
+    cgFocusOn = on;
+    document.body.classList.toggle('cg-focus-mode', on);
+    $('cgFocusToggle').classList.toggle('on', on);
+    $('cgViewToggle').classList.toggle('on', on);
+  }
+  $('cgFocusToggle').addEventListener('click', ()=>cgSetFocus(!cgFocusOn));
+  $('cgViewToggle').addEventListener('click', ()=>cgSetFocus(!cgFocusOn));
+
+  // ---- System Monitor gauges (real /telemetry, same poll the legacy shell drives) ----
+  const CG_GAUGE_C = 2*Math.PI*30;
+  function cgSetGauge(circleId, numId, pct){
+    const c = $(circleId); if (!c) return;
+    const frac = Math.max(0, Math.min(100, pct))/100;
+    c.setAttribute('stroke-dasharray', (frac*CG_GAUGE_C)+' '+CG_GAUGE_C);
+    c.style.stroke = pct>=90 ? 'var(--cg-red)' : pct>=75 ? 'var(--cg-amber)' : 'var(--cg-cyan)';
+    $(numId).textContent = Math.round(pct)+'%';
+  }
+  async function cgPollTelemetry(){
+    try {
+      const t = await (await fetch('/telemetry')).json();
+      cgSetGauge('cgGaugeCpu','cgGaugeCpuNum', t.cpu||0);
+      cgSetGauge('cgGaugeRam','cgGaugeRamNum', t.ram||0);
+      if (t.disk!=null) cgSetGauge('cgGaugeDisk','cgGaugeDiskNum', t.disk);
+    } catch(e) {}
+  }
+  cgPollTelemetry(); setInterval(cgPollTelemetry, 2500);
+  $('cgViewMemMap').addEventListener('click', ()=>navTo('kb'));
+
+  // ---- Live Intelligence Feed (real /alerts + recent /audit) ----
+  async function cgLoadFeed(){
+    try {
+      const rows = await (await fetch('/audit?limit=5')).json();
+      const box = $('cgFeed'); box.innerHTML='';
+      if (!rows.length){ box.innerHTML='<div class="cg-feed-item"><span class="cg-fic">–</span><div class="cg-ftxt"><b>No activity yet.</b></div></div>'; return; }
+      rows.forEach(e=>{
+        const d=document.createElement('div'); d.className='cg-feed-item';
+        d.innerHTML='<span class="cg-fic">•</span><div class="cg-ftxt"><b></b><span></span></div>';
+        d.querySelector('b').textContent = e.action || 'event';
+        d.querySelector('.cg-ftxt span').textContent = (e.outcome==='FAILURE'?'Failed — ':'') + fmtWhen(e.at);
+        box.appendChild(d);
+      });
+    } catch(e) {}
+  }
+  cgLoadFeed(); setInterval(cgLoadFeed, 8000);
+
+  // ---- Notification bell: lights up on real pending alerts ----
+  async function cgPollBell(){
+    try {
+      const alerts = await (await fetch('/alerts')).json();
+      $('cgBellDot').style.display = alerts.length ? 'block' : 'none';
+    } catch(e) {}
+  }
+  cgPollBell(); setInterval(cgPollBell, 20000);
+  $('cgBell').addEventListener('click', ()=>navTo('sysmon'));
+  $('cgSettingsBtn').addEventListener('click', openSettings);
+  $('cgSettingsDock').addEventListener('click', openSettings);
+
+  // ---- Quick Commands: reuses the real .qcmd buttons, just renders them into the new card ----
+  (function cgBuildQuick(){
+    const box = $('cgQuick');
+    document.querySelectorAll('.qcmd').forEach(b=>{
+      const d=document.createElement('div'); d.className='cg-cmd-item';
+      d.innerHTML='<span class="cg-cic">▸</span><span></span>';
+      d.querySelector('span:last-child').textContent = b.dataset.cmd;
+      d.addEventListener('click', ()=>b.click());
+      box.appendChild(d);
     });
-    try{ apply(localStorage.getItem('navClosed')==='1'); }catch(e){}
   })();
+
+  // ---- Manage Providers (real ProviderSettingsService via /providers) ----
+  async function cgLoadProviders(){
+    try {
+      const data = await (await fetch('/providers')).json();
+      const connectedNames = new Set((data.configured||[]).filter(c=>c.hasKey).map(c=>c.name));
+      const count = connectedNames.size;
+      $('cgLlmState').textContent = count + ' Connected';
+      $('cgLlmState').className = 'cg-sval ' + (count?'ok':'warn');
+      $('cgProvCount').textContent = count + ' Connected';
+      const grid = $('cgProviderGrid'); grid.innerHTML='';
+      const presetNames = new Set((data.presets||[]).map(p=>p.name));
+      function addTile(name, connected){
+        const el=document.createElement('div'); el.className='cg-provider'+(connected?' connected':'');
+        el.innerHTML='<div class="cg-pn"></div><div class="cg-pstate"></div>';
+        el.querySelector('.cg-pn').textContent = name;
+        el.querySelector('.cg-pstate').textContent = connected ? 'Connected' : 'Not Linked';
+        el.addEventListener('click', ()=>navTo('apis'));
+        grid.appendChild(el);
+      }
+      (data.presets||[]).forEach(p=>addTile(p.name, connectedNames.has(p.name)));
+      // Custom-named saved connections (e.g. a renamed model-roster entry) don't match any
+      // preset by name -- surface them too so the grid accounts for every real connection.
+      (data.configured||[]).filter(c=>c.hasKey && !presetNames.has(c.name)).forEach(c=>addTile(c.name, true));
+    } catch(e) {}
+  }
+  cgLoadProviders(); setInterval(cgLoadProviders, 15000);
+
+  // ---- Tools & Skills badge (real tool count) ----
+  fetch('/tools').then(r=>r.json()).then(list=>{
+    if (Array.isArray(list) && list.length){
+      const b=$('cgToolsBadge'); b.textContent=list.length; b.style.display='inline-block';
+    }
+  }).catch(()=>{});
+
+  // ---- Location dock pill: real configured city, no fabricated weather ----
+  $('cgLocation').querySelector('b').textContent = S.city || 'Not set';
+
+  // ---- Network dock pill: real reachability of this app's own backend ----
+  function cgPollNetwork(){
+    fetch('/status', {cache:'no-store'}).then(r=>{
+      $('cgNetState').textContent = r.ok ? 'Excellent' : 'Degraded';
+    }).catch(()=>{ $('cgNetState').textContent = 'Offline'; });
+  }
+  cgPollNetwork(); setInterval(cgPollNetwork, 10000);
+
+  // ---- Header search: filters sidebar nav items + dashboard cards by visible text ----
+  $('cgSearch').addEventListener('input', (e)=>{
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('.cg-navitem').forEach(n=>{
+      n.style.display = !q || n.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+    document.querySelectorAll('.cg-content > .cg-card').forEach(c=>{
+      c.style.display = !q || c.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+
+  // ---- Command palette (Ctrl/Cmd+K): the single place all content routes and the relocated
+  //      Briefing/Mail/Calendar/Camera/People/Audit/Settings actions now live. The 7 action
+  //      buttons keep their original ids and are wired by their own addEventListener calls
+  //      elsewhere in this script (independent of DOM position) -- this block only needs to
+  //      open/close/filter the palette and call navTo() for the 14 data-nav content routes. ----
+  const palette=$('palette'), paletteScrim=$('paletteScrim'), paletteInput=$('paletteInput'),
+        paletteList=$('paletteList'), paletteEmpty=$('paletteEmpty'), paletteHint=$('paletteHint');
+  let paletteSel=-1;
+  function visiblePaletteItems(){
+    return Array.from(paletteList.querySelectorAll('.palette-item')).filter(it=>it.style.display!=='none');
+  }
+  function setPaletteSel(i){
+    const vis=visiblePaletteItems();
+    vis.forEach(it=>it.classList.remove('sel'));
+    paletteSel=i;
+    if(i>=0 && vis[i]){ vis[i].classList.add('sel'); vis[i].scrollIntoView({block:'nearest'}); }
+  }
+  function filterPalette(q){
+    q=q.trim().toLowerCase();
+    let shown=0;
+    paletteList.querySelectorAll('.palette-item').forEach(it=>{
+      const match=!q || it.textContent.toLowerCase().includes(q);
+      it.style.display=match?'':'none';
+      if(match) shown++;
+    });
+    paletteEmpty.style.display=shown?'none':'block';
+    setPaletteSel(shown?0:-1);
+  }
+  function openPalette(){
+    palette.classList.add('open'); paletteScrim.classList.add('open');
+    paletteInput.value=''; filterPalette('');
+    paletteInput.focus();
+  }
+  function closePalette(){
+    palette.classList.remove('open'); paletteScrim.classList.remove('open'); paletteSel=-1;
+  }
+  paletteHint.addEventListener('click', openPalette);
+  paletteScrim.addEventListener('click', closePalette);
+  paletteInput.addEventListener('input', e=>filterPalette(e.target.value));
+  paletteList.addEventListener('click', e=>{
+    const it=e.target.closest('.palette-item'); if(!it) return;
+    if(it.dataset.nav) navTo(it.dataset.nav);
+    closePalette();
+  });
+  document.addEventListener('keydown', e=>{
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){ e.preventDefault(); openPalette(); return; }
+    if(!palette.classList.contains('open')) return;
+    if(e.key==='Escape'){ e.preventDefault(); closePalette(); return; }
+    const vis=visiblePaletteItems();
+    if(e.key==='ArrowDown'){ e.preventDefault(); setPaletteSel(Math.min(paletteSel+1, vis.length-1)); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); setPaletteSel(Math.max(paletteSel-1,0)); }
+    else if(e.key==='Enter'){ e.preventDefault(); const it=vis[paletteSel]; if(it) it.click(); }
+  });
+
+  // ---- Status panel (click the header status dot): connection/brain/cpu/ram/usage/
+  //      subsystems/activity/timeline -- everything the old always-visible accordion held,
+  //      now transient like every other panel. ----
+  const statusPanel=$('statusPanel'), statusPanelScrim=$('statusPanelScrim'),
+        statusDotBtn=$('statusDotBtn');
+  function openStatusPanel(){ statusPanel.classList.add('open'); statusPanelScrim.classList.add('open'); }
+  function closeStatusPanel(){ statusPanel.classList.remove('open'); statusPanelScrim.classList.remove('open'); }
+  statusDotBtn.addEventListener('click', ()=>{
+    statusPanel.classList.contains('open') ? closeStatusPanel() : openStatusPanel();
+  });
+  statusPanelScrim.addEventListener('click', closeStatusPanel);
+  document.addEventListener('keydown', e=>{
+    if(e.key==='Escape' && statusPanel.classList.contains('open')){ e.preventDefault(); closeStatusPanel(); }
+  });
+
   // ---- Settings modal: sidebar pane switching ----
   function setSettingsPane(id){
     document.querySelectorAll('.set-item').forEach(n=>n.classList.toggle('active', n.dataset.set===id));
@@ -2676,6 +3252,8 @@
     jarvisModel=s.model||''; isOnline=s.online;
     const mk=document.getElementById('modelKv'); if(mk) mk.textContent=s.online?s.model:'offline';
     const sb=document.getElementById('sbMode'); if(sb) sb.textContent=s.online?('ONLINE · '+(s.model||'').toUpperCase()):'OFFLINE ECHO MODE';
+    const sModel=document.getElementById('sbModel'); if(sModel) sModel.textContent=s.online?(s.model||'').toUpperCase():'OFFLINE';
+    const hDot=document.getElementById('hdrDot'); if(hDot) hDot.className='dot '+(s.online?'on':'off');
     const sm=document.getElementById('s_model'); if(sm) sm.textContent=jarvisModel||'offline';
   }).catch(()=>{}); }
   function provFill(c){
@@ -4038,6 +4616,21 @@
     loadPeople();
   });
   fetch('/people').then(r=>r.json()).then(p=>{ peopleCount=p.length; }).catch(()=>{});
+
+  // ---------- Vision presence greetings (motion + face recognition, server-pushed) ----------
+  // Voiced unconditionally (not gated by S.autoSpeak, which only governs typed answers) -- a
+  // proactive greeting on motion IS the feature; a silent chat-only entry would defeat the point.
+  if (window.EventSource) {
+    const visionEvents = new EventSource('/vision/events');
+    visionEvents.onmessage = (e) => {
+      let j; try { j = JSON.parse(e.data); } catch (err) { return; }
+      if (!j.greeting) return;
+      add('jarvis', j.greeting);
+      speak(j.greeting);
+    };
+    // EventSource retries on its own; nothing to do here beyond not letting an error go unhandled.
+    visionEvents.onerror = () => {};
+  }
 </script>
 </body>
 </html>
