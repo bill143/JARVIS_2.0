@@ -171,6 +171,16 @@ def create_app(
     config:
         Optional JarvisConfig for other settings.
     """
+    # Load secrets from .env then ~/.openjarvis/credentials.toml into the
+    # environment before anything reads them. Real env vars always win, and
+    # missing files are a no-op, so this is safe on every startup.
+    try:
+        from openjarvis.core.credentials import bootstrap_secrets
+
+        bootstrap_secrets()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("Secret bootstrap skipped: %s", exc)
+
     app = FastAPI(
         title="OpenJarvis API",
         description="OpenAI-compatible API server for OpenJarvis",
@@ -220,6 +230,12 @@ def create_app(
     app.include_router(dashboard_router)
     app.include_router(comparison_router)
     app.include_router(create_connectors_router())
+    try:
+        from openjarvis.server.vault_router import create_vault_router
+
+        app.include_router(create_vault_router())
+    except Exception as exc:
+        logger.debug("Vault router init skipped: %s", exc)
     include_all_routes(app)
 
     # Restore SendBlue channel bindings from database on startup
@@ -261,6 +277,63 @@ def create_app(
             app.include_router(webhook_router)
         except Exception as exc:
             logger.debug("Webhook routes init skipped: %s", exc)
+
+    # Session-auth gateway (opt-in). When enabled, every route except the login
+    # flow requires a valid session cookie — see SessionAuthMiddleware.
+    import os
+
+    auth_cfg = getattr(config, "auth", None)
+    auth_enabled = bool(getattr(auth_cfg, "enabled", False)) or os.environ.get(
+        "OPENJARVIS_AUTH_ENABLED", ""
+    ).lower() in ("1", "true", "yes")
+    if auth_enabled:
+        try:
+            from openjarvis.core.config import DEFAULT_CONFIG_DIR
+            from openjarvis.server.auth import AuthStore
+            from openjarvis.server.session_auth import (
+                SessionAuthMiddleware,
+                create_auth_router,
+            )
+
+            db_path = getattr(auth_cfg, "db_path", None) or str(
+                DEFAULT_CONFIG_DIR / "auth.db"
+            )
+            cookie_name = getattr(auth_cfg, "cookie_name", "oj_session")
+            ttl_hours = int(getattr(auth_cfg, "session_ttl_hours", 12))
+            cookie_secure = bool(getattr(auth_cfg, "cookie_secure", True))
+            store = AuthStore(db_path)
+            # First-boot bootstrap: create the admin from env only if no users exist.
+            store.ensure_admin(
+                os.environ.get("OPENJARVIS_ADMIN_USER", ""),
+                os.environ.get("OPENJARVIS_ADMIN_PASSWORD", ""),
+            )
+            app.state.auth_store = store
+            app.include_router(
+                create_auth_router(
+                    store,
+                    cookie_name=cookie_name,
+                    ttl_hours=ttl_hours,
+                    cookie_secure=cookie_secure,
+                )
+            )
+            app.add_middleware(
+                SessionAuthMiddleware, store=store, cookie_name=cookie_name
+            )
+        except Exception as exc:
+            logger.warning("Session auth init failed: %s", exc)
+
+    # Dynamic Obsidian vault sync (opt-in). When config.vault.enabled and a path
+    # is set, a background watcher auto-commits/pulls and re-indexes on change.
+    app.state.vault_watcher = None
+    try:
+        from openjarvis.connectors.vault_sync import build_vault_watcher
+
+        watcher = build_vault_watcher(config)
+        if watcher is not None:
+            watcher.start()
+            app.state.vault_watcher = watcher
+    except Exception as exc:
+        logger.warning("Vault watcher init skipped: %s", exc)
 
     # Serve static frontend assets if the static/ directory exists
     static_dir = pathlib.Path(__file__).parent / "static"

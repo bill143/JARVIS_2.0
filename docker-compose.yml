@@ -1,0 +1,65 @@
+# Production deployment: JARVIS app behind a Caddy reverse proxy with automatic
+# TLS, on an isolated bridge network. The app publishes no host port — it is
+# only reachable through Caddy.
+#
+#   1. cp .env.example .env   and fill in secrets + JARVIS_DOMAIN / ACME_EMAIL
+#   2. docker compose up -d --build
+#
+# See docs/DEPLOYMENT.md for the full guide.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jarvis-app:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Enable the auth gateway by default in the containerized deployment.
+      OPENJARVIS_AUTH_ENABLED: "${OPENJARVIS_AUTH_ENABLED:-true}"
+    volumes:
+      # Persistent app state: config, credentials.toml, sqlite stores.
+      - jarvis_data:/home/jarvis/.openjarvis
+      # Obsidian vault (host path -> container /vault). Point config.vault.path
+      # at /vault to enable git-sync.
+      - "${VAULT_PATH:-./vault}:/vault"
+    expose:
+      - "8000"
+    networks:
+      - jarvis_net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      JARVIS_DOMAIN: "${JARVIS_DOMAIN:-localhost}"
+      ACME_EMAIL: "${ACME_EMAIL:-}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - jarvis_net
+
+networks:
+  jarvis_net:
+    driver: bridge
+
+volumes:
+  jarvis_data:
+  caddy_data:
+  caddy_config:

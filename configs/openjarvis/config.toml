@@ -75,6 +75,9 @@ enabled = false                           # No learning during eval
 
 [learning.routing]
 policy = "heuristic"
+cost_threshold = 0.5
+classifier_hash_dim = 64
+similarity_k = 3
 
 [learning.intelligence]
 policy = "none"

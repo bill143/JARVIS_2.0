@@ -1,0 +1,37 @@
+# Render blueprint for JARVIS.
+#
+# Render terminates TLS automatically and provides a managed HTTPS domain, so
+# no Caddy is needed. Commit this file (Render reads render.yaml from the repo
+# root — copy or symlink it there) and create a Blueprint instance, or point a
+# new Web Service at the Dockerfile.
+#
+# Secrets marked `sync: false` are NOT stored in the repo — set them in the
+# Render dashboard (or `render env set`) after the first deploy.
+
+services:
+  - type: web
+    name: jarvis
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Bind the app + Docker healthcheck to the port Render routes to.
+      - key: PORT
+        value: "8000"
+      - key: OPENJARVIS_AUTH_ENABLED
+        value: "true"
+      # Secrets — fill these in via the dashboard (never committed).
+      - key: OPENJARVIS_ADMIN_USER
+        sync: false
+      - key: OPENJARVIS_ADMIN_PASSWORD
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    disk:
+      name: jarvis-data
+      mountPath: /home/jarvis/.openjarvis
+      sizeGB: 1

@@ -34,8 +34,10 @@ final class AutonomousService {
                     + " is fully achieved, end your reply with the token " + AutonomousRunner.DONE_MARKER + ".";
             String out = api.chat(new ChatRequest("autonomous", prompt)).response();
             if (audit != null) {
+                // An autonomous iteration takes "the single next step ... using tools if needed",
+                // i.e. it can act on the world — classified MUTATING rather than left UNKNOWN.
                 audit.record(new AuditEvent(AuditCategory.SYSTEM, "autonomous-step",
-                        AuditTrigger.AUTONOMOUS, RiskTier.UNKNOWN, AuditOutcome.SUCCESS, "goal: " + g));
+                        AuditTrigger.AUTONOMOUS, RiskTier.MUTATING, AuditOutcome.SUCCESS, "goal: " + g));
             }
             return out;
         });

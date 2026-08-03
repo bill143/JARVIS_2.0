@@ -249,9 +249,14 @@ def channels(agent_id: str) -> None:
         table.add_column("Type", style="green")
         table.add_column("Config", style="white")
         table.add_column("Mode", style="yellow")
+        from openjarvis.core.secrets import redact_mapping
+
         for b in bindings:
             table.add_row(
-                b["id"], b["channel_type"], str(b["config"]), b["routing_mode"]
+                b["id"],
+                b["channel_type"],
+                str(redact_mapping(b["config"])),
+                b["routing_mode"],
             )
         console.print(table)
     except Exception as exc:

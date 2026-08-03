@@ -273,6 +273,11 @@ def create_webhook_router(
             if response and reply_channel:
                 reply_channel.send(from_number, response)
 
+            logger.info(
+                "SendBlue message handled in %.2fs",
+                _time.monotonic() - start,
+            )
+
         task = asyncio.create_task(asyncio.to_thread(_handle_and_reply))
         task.add_done_callback(_log_task_exception)
 
