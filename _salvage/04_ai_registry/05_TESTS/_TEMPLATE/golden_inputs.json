@@ -1,0 +1,12 @@
+{
+  "agent_id": "nxs-xxx-000",
+  "test_suite_version": "0.0.1",
+  "golden_inputs": [
+    {
+      "test_id": "T001",
+      "input": "sample input here",
+      "expected_output_schema": "schemas/output_v1.json",
+      "expected_confidence_min": 0.85
+    }
+  ]
+}

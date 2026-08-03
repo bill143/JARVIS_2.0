@@ -1,0 +1,46 @@
+{
+  "name": "echo-cognitive-runtime",
+  "version": "3.0.0",
+  "description": "ECHO Cognitive Runtime — Autonomous AI Operating System for ON Estimating Platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch echo/index.ts",
+    "start": "node dist/echo/index.js",
+    "boot": "tsx echo/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": "O'Neill Contractors, Inc. — Preconstruction Excellence Division",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@e2b/code-interpreter": "^2.4.0",
+    "@elevenlabs/elevenlabs-js": "^2.41.1",
+    "@google/generative-ai": "^0.24.1",
+    "@langchain/core": "^1.1.39",
+    "@langchain/langgraph": "^1.2.7",
+    "@supabase/supabase-js": "^2.101.1",
+    "axios": "^1.14.0",
+    "dockerode": "^4.0.10",
+    "elevenlabs": "^1.59.0",
+    "exa-js": "^2.11.0",
+    "groq-sdk": "^1.1.2",
+    "neo4j-driver": "^6.0.1",
+    "simli-client": "^3.0.1",
+    "uuid": "^13.0.0",
+    "ws": "^8.20.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^4.0.1",
+    "@types/node": "^25.5.2",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

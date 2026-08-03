@@ -1,0 +1,23 @@
+{
+  "registry_version": "0.1.0",
+  "last_updated": "2026-05-08",
+  "owner": "Bill Asmar",
+  "total_agents_planned": 219,
+  "agents": [
+    {
+      "agent_id": "nxs-est-001",
+      "call_sign": "@Marcus",
+      "display_name": "Marcus — Plan Reader",
+      "tier": "module",
+      "module": "estimating",
+      "role_title": "Senior Plan Analyst",
+      "reports_to": "@ChiefEstimator",
+      "model_tier": "sonnet",
+      "status": "draft",
+      "persona_path": "01_PERSONAS/estimating/marcus_plan_reader.md",
+      "prompt_path": "02_PROMPTS/nxs-est-001/current.md",
+      "guardrails_path": "03_GUARDRAILS/nxs-est-001_guardrails.yaml",
+      "tools_path": "04_TOOLS/nxs-est-001_tools.yaml"
+    }
+  ]
+}

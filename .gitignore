@@ -101,3 +101,6 @@ CLAUDE.md
 # Research output
 research_mining_*
 .python-version
+
+# Runtime logs
+*.log

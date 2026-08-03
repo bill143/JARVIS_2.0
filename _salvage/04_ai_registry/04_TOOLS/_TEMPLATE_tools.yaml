@@ -1,0 +1,19 @@
+# Tool Authorization Template
+agent_id: nxs-xxx-000
+
+authorized_tools:
+  - tool_id: plan_vision
+    scope: read
+  - tool_id: takeoff_db
+    scope: write
+  - tool_id: rsmeans_api
+    scope: read
+
+blocked_tools:
+  - email_send
+  - payment_api
+
+data_scope:
+  projects: read
+  estimates: write
+  financials: blocked

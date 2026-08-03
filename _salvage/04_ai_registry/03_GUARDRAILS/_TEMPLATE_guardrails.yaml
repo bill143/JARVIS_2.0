@@ -1,0 +1,32 @@
+# Guardrails Template
+agent_id: nxs-xxx-000
+version: 0.0.1
+
+output_schema:
+  required: true
+  schema_ref: "schemas/output_v1.json"
+
+pii_redaction:
+  enabled: true
+  strip: [ssn, bank_account, routing_number, dob]
+
+banned_phrases:
+  - "guaranteed"
+  - "certified"
+  - "warranty"
+
+external_actions:
+  email_send: requires_approval
+  procore_post: requires_approval
+  payment_api: blocked
+
+cost_limits:
+  per_call_usd: 0.50
+  per_day_usd: 200
+
+loop_detector:
+  max_self_calls: 3
+  max_peer_calls: 5
+
+time_box:
+  max_execution_seconds: 60
