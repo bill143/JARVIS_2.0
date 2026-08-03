@@ -743,6 +743,30 @@
     .cg-sysmon{ grid-column:span 6; } .cg-feed{ grid-column:span 6; }
     .cg-quick{ grid-column:span 6; } .cg-providers{ grid-column:span 6; }
   }
+
+  /* ---- Responsive: keeps the persistent header + sidebar chrome (LAYOUT LAW: "top header bar +
+     left sidebar, both always visible") from overflowing on smaller / OS-scaled displays (e.g. a
+     1366 laptop at 125% scaling, or a 1280/1024 screen). Ported from the v1 HUD's equivalent fix
+     onto the v2 selectors -- v1's #main/.col 3-column grid these targeted no longer exists
+     (superseded by .cg-shell above), so the old media queries had nothing left to act on. ---- */
+  @media (max-width:1400px){
+    .cg-header{ gap:12px; padding:0 16px; }
+    .cg-search{ width:140px; }
+    .cg-profile .cg-role{ display:none; }
+  }
+  @media (max-width:1100px){
+    .cg-search, .cg-clock .cg-date{ display:none; }
+    header.cg-header{ flex-wrap:wrap; height:auto; min-height:60px; padding:10px 16px; }
+  }
+  @media (max-width:900px){
+    /* Sidebar stays visible per LAYOUT LAW -- goes icon-only instead of disappearing, unlike the
+       old v1 fix which hid #sidenav outright (not contract-compliant here). */
+    .cg-sidebar{ width:64px; padding:14px 6px; }
+    #main.cg-shell{ grid-template-columns:64px 1fr; }
+    .cg-navitem{ justify-content:center; padding:9px 4px; }
+    .cg-navitem span:not(.cg-ic){ display:none; }
+    .cg-voice-widget .cg-vw-label, .cg-vw-state, .cg-focus-toggle{ display:none; }
+  }
   .cg-status-row { display:flex; align-items:center; gap:10px; padding:8px 0; font-size:13px; }
   .cg-status-row .cg-sic { width:26px; height:26px; border-radius:7px; background:var(--void); display:flex;
     align-items:center; justify-content:center; font-size:13px; flex:0 0 auto; }
