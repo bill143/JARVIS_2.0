@@ -56,6 +56,8 @@ memory-colbert = [
 ]
 memory-pdf = ["pdfplumber>=0.10"]
 memory-bm25 = ["rank-bm25>=0.2.2"]
+memory-reranker = ["FlagEmbedding>=1.2"]
+context-tiktoken = ["tiktoken>=0.7"]
 server = [
     "fastapi>=0.110",
     "uvicorn>=0.30",
