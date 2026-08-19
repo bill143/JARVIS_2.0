@@ -21,6 +21,7 @@ import MemoryGovTab from "@/components/MemoryGovTab";
 import CostTab from "@/components/CostTab";
 import ComplianceTab from "@/components/ComplianceTab";
 import EvalsTab from "@/components/EvalsTab";
+import IntegrationsPanel from "@/components/IntegrationsPanel";
 
 type Group = "assistant" | "governance";
 type PanelDef = { name: string; group: Group; minRole: string; render: () => JSX.Element };
@@ -33,6 +34,7 @@ const PANELS: PanelDef[] = [
   { name: "Planner", group: "assistant", minRole: "user", render: () => <PlannerTab /> },
   { name: "Agents", group: "assistant", minRole: "user", render: () => <AgentsTab /> },
   { name: "Knowledge", group: "assistant", minRole: "user", render: () => <KnowledgeTab /> },
+  { name: "Integrations", group: "assistant", minRole: "user", render: () => <IntegrationsPanel /> },
   { name: "Memory Gov", group: "assistant", minRole: "user", render: () => <MemoryGovTab /> },
   { name: "Cost", group: "assistant", minRole: "operator", render: () => <CostTab /> },
   { name: "Policy", group: "governance", minRole: "operator", render: () => <PolicyConsole /> },
@@ -95,7 +97,6 @@ export default function Home() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Rail */}
         <aside className="w-44 shrink-0 overflow-y-auto border-r border-zinc-800 p-2">
           <button
             onClick={() => setPanel(null)}
@@ -112,12 +113,10 @@ export default function Home() {
           <div className="space-y-0.5">{governance.map(railButton)}</div>
         </aside>
 
-        {/* Primary surface: Chat is always present */}
         <section className="flex-1 overflow-y-auto p-4">
           <ChatTab />
         </section>
 
-        {/* Contextual side panel next to chat */}
         {panel && (
           <aside className="flex w-[440px] shrink-0 flex-col overflow-hidden border-l border-zinc-800">
             <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
