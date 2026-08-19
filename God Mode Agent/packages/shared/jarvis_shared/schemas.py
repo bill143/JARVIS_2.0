@@ -80,6 +80,8 @@ class VisionAnalysis(BaseModel):
     mean_brightness: float | None = None
     ocr_text: str = ""
     ocr_engine: str = "unavailable"
+    objects: list[dict] = Field(default_factory=list)
+    object_engine: str = "unavailable"
     caption: str = ""
     note: str = ""
 
