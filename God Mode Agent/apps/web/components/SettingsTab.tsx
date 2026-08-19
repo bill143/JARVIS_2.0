@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { BACKEND, getJson } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import AccountPanel from "@/components/settings/AccountPanel";
+import ApiKeysPanel from "@/components/settings/ApiKeysPanel";
+import UsersPanel from "@/components/settings/UsersPanel";
 
 type HealthData = {
   status: string;
@@ -15,6 +19,7 @@ type HealthData = {
 };
 
 export default function SettingsTab() {
+  const { hasRole } = useAuth();
   const [health, setHealth] = useState<HealthData | null>(null);
   const [error, setError] = useState("");
 
@@ -27,6 +32,9 @@ export default function SettingsTab() {
 
   return (
     <div className="space-y-4 text-sm">
+      <AccountPanel />
+      {hasRole("admin") && <UsersPanel />}
+      {hasRole("admin") && <ApiKeysPanel />}
       <div className="rounded-lg border border-zinc-800 p-4">
         <h2 className="mb-2 font-medium text-emerald-400">Backend</h2>
         <p>

@@ -54,6 +54,40 @@ class UserStore:
         with self._lock:
             return self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
+    def list_all(self) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, username, email, role, tenant, disabled, created_at FROM users ORDER BY created_at"
+            ).fetchall()
+        return [{"id": r[0], "username": r[1], "email": r[2], "role": r[3],
+                 "tenant": r[4], "disabled": bool(r[5]), "created_at": r[6]} for r in rows]
+
+    def count_active_admins(self) -> int:
+        with self._lock:
+            return self.conn.execute(
+                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0"
+            ).fetchone()[0]
+
+    def set_role(self, user_id: str, role: str) -> None:
+        with self._lock:
+            self.conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+            self.conn.commit()
+
+    def set_disabled(self, user_id: str, disabled: bool) -> None:
+        with self._lock:
+            self.conn.execute("UPDATE users SET disabled = ? WHERE id = ?", (1 if disabled else 0, user_id))
+            self.conn.commit()
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> None:
+        with self._lock:
+            self.conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+            self.conn.commit()
+
+    def get_password_hash(self, user_id: str) -> str | None:
+        with self._lock:
+            row = self.conn.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+        return row[0] if row else None
+
 
 class RefreshStore:
     def __init__(self, conn: sqlite3.Connection, lock: threading.Lock):
@@ -120,3 +154,19 @@ class ApiKeyStore:
         with self._lock:
             self.conn.execute("UPDATE api_keys SET revoked = 1 WHERE id = ?", (key_id,))
             self.conn.commit()
+
+    def list_all(self) -> list[dict]:
+        """Metadata only — key hashes never leave the store."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, name, prefix, role, tenant, scopes, created_at, revoked FROM api_keys ORDER BY created_at"
+            ).fetchall()
+        return [{"id": r[0], "name": r[1], "prefix": r[2], "role": r[3], "tenant": r[4],
+                 "scopes": r[5], "created_at": r[6], "revoked": bool(r[7])} for r in rows]
+
+    def get_meta(self, key_id: str) -> dict | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT id, name, revoked FROM api_keys WHERE id = ?", (key_id,)
+            ).fetchone()
+        return {"id": row[0], "name": row[1], "revoked": bool(row[2])} if row else None

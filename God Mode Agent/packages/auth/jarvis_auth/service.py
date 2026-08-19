@@ -180,6 +180,54 @@ class AuthService:
             role=claims.get("role", "user"), tenant=claims.get("tenant", "default"), auth_type="jwt",
         )
 
+    # --- self-service & admin user management ---
+
+    def change_password(self, user_id: str, current_password: str, new_password: str) -> None:
+        """Self-service rotation: requires the current password, revokes all sessions."""
+        stored = self.users.get_password_hash(user_id)
+        if stored is None or not verify_password(current_password, stored):
+            raise AuthError("current password is incorrect")
+        self.users.set_password_hash(user_id, hash_password(new_password))
+        self.refresh.revoke_all_for_user(user_id)
+        log_event(logger, "auth.password_changed", user_id=user_id)
+
+    def admin_reset_password(self, user_id: str) -> str:
+        """Admin reset: returns a one-time temporary password, revokes all sessions."""
+        if not self.users.get_by_id(user_id):
+            raise AuthError("user not found")
+        temp = "tmp-" + secrets.token_urlsafe(18)
+        self.users.set_password_hash(user_id, hash_password(temp))
+        self.refresh.revoke_all_for_user(user_id)
+        log_event(logger, "auth.password_reset", user_id=user_id)
+        return temp
+
+    def _guard_last_admin(self, user_id: str) -> None:
+        user = self.users.get_by_id(user_id)
+        if not user:
+            raise AuthError("user not found")
+        if user["role"] == "admin" and not user["disabled"] and self.users.count_active_admins() <= 1:
+            raise AuthError("cannot demote or disable the last active admin")
+
+    def set_user_role(self, user_id: str, role: str) -> dict:
+        current = self.users.get_by_id(user_id)
+        if not current:
+            raise AuthError("user not found")
+        if current["role"] == "admin" and role != "admin":
+            self._guard_last_admin(user_id)
+        self.users.set_role(user_id, role)
+        self.refresh.revoke_all_for_user(user_id)  # force re-login so tokens carry the new role
+        log_event(logger, "auth.role_changed", user_id=user_id, role=role)
+        return self.users.get_by_id(user_id)
+
+    def set_user_disabled(self, user_id: str, disabled: bool) -> dict:
+        if disabled:
+            self._guard_last_admin(user_id)
+        self.users.set_disabled(user_id, disabled)
+        if disabled:
+            self.refresh.revoke_all_for_user(user_id)
+        log_event(logger, "auth.user_disabled" if disabled else "auth.user_enabled", user_id=user_id)
+        return self.users.get_by_id(user_id)
+
     # --- API keys (machine-to-machine) ---
 
     def create_api_key(self, name: str, role: str = "user", tenant: str = "default", scopes: str = "") -> dict:

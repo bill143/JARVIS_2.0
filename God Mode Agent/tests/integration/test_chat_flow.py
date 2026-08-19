@@ -59,5 +59,5 @@ def test_health_reports_configuration(client):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["status"] == "ok"
-    assert data["providers"] == {"openai": False, "anthropic": False, "deepgram": False, "elevenlabs": False}
+    assert data["providers"] == {"nvidia": False, "openai": False, "anthropic": False, "deepgram": False, "elevenlabs": False}
     assert "python_exec" in data["tools"]
