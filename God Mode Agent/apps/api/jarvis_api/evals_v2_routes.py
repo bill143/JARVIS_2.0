@@ -175,8 +175,6 @@ def register_evals_v2(app) -> None:
     async def rerun(run_id: str, request: Request):
         p = require_min_role(request, "operator")
         j = request.app.state.jarvis
-        result = platform(request).rerun(eval_context(j), triggered_by=p.username) if False else None
-        # rerun needs the original run's metadata; call platform.rerun with context.
         result = platform(request).rerun(run_id, eval_context(j), triggered_by=p.username)
         if not result:
             raise NotFound("run not found")

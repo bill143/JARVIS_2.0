@@ -32,7 +32,8 @@ export type ApiError = {
   approval_id?: string;
 };
 export type Envelope<T> =
-  { success: true; data: T } | { success: false; error: ApiError };
+  | { success: true; data: T }
+  | { success: false; error: ApiError };
 
 export type ToolEvent = {
   tool: string;
@@ -79,14 +80,15 @@ async function authedFetch(
   return resp;
 }
 
-export async function postJson<T>(
+async function bodyRequest<T>(
+  method: string,
   path: string,
   body: unknown,
   extraHeaders?: Record<string, string>,
 ): Promise<Envelope<T>> {
   try {
     const resp = await authedFetch(path, {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json", ...(extraHeaders || {}) },
       body: JSON.stringify(body),
     });
@@ -101,6 +103,22 @@ export async function postJson<T>(
       },
     };
   }
+}
+
+export async function postJson<T>(
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<Envelope<T>> {
+  return bodyRequest<T>("POST", path, body, extraHeaders);
+}
+
+export async function putJson<T>(
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<Envelope<T>> {
+  return bodyRequest<T>("PUT", path, body, extraHeaders);
 }
 
 export async function getJson<T>(path: string): Promise<Envelope<T>> {
