@@ -13,6 +13,7 @@ export default function MemoryGovTab() {
   async function load() {
     const r = await getJson<{ items: Item[] }>("/memory/items");
     if (r.success) setItems(r.data.items);
+    else setStatus(`${r.error.code}: ${r.error.message}`);
   }
   useEffect(() => { load(); }, []);
 
@@ -24,12 +25,27 @@ export default function MemoryGovTab() {
     load();
   }
   async function act(id: string, path: string) {
-    await postJson(`/memory/items/${id}/${path}`, {});
+    const r = await postJson(`/memory/items/${id}/${path}`, {});
+    if (!r.success) setStatus(`${r.error.code}: ${r.error.message}`);
     load();
   }
   async function exportData() {
-    const r = await getJson<{ count: number }>("/memory/export");
-    if (r.success) setStatus(`exported ${r.data.count} item(s)`);
+    const r = await getJson<Record<string, unknown> & { count?: number; items?: unknown[] }>("/memory/export");
+    if (!r.success) {
+      setStatus(`${r.error.code}: ${r.error.message}`);
+      return;
+    }
+    const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "memory-export.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    const n = r.data.count ?? r.data.items?.length ?? 0;
+    setStatus(`exported ${n} item(s) — file downloaded`);
   }
 
   return (

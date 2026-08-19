@@ -11,13 +11,20 @@ export default function AgentsTab() {
   const [arbitration, setArbitration] = useState("critic-override");
   const [result, setResult] = useState<Result | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
 
   async function run() {
+    setBusy(true);
+    setErr("");
     const r = await postJson<Result>("/agents/run", { goal, arbitration });
     if (r.success) {
       setResult(r.data);
       await loadSession(r.data.session_id);
+    } else {
+      setErr(`${r.error.code}: ${r.error.message}`);
     }
+    setBusy(false);
   }
 
   async function loadSession(id: string) {
@@ -40,8 +47,11 @@ export default function AgentsTab() {
             className="rounded-md bg-zinc-900 px-2 py-1.5 text-sm">
             {["critic-override", "majority"].map((a) => <option key={a}>{a}</option>)}
           </select>
-          <button onClick={run} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium">Run agents</button>
+          <button onClick={run} disabled={busy} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium disabled:opacity-50">
+            {busy ? "Running…" : "Run agents"}
+          </button>
         </div>
+        {err && <p className="mt-2 text-xs text-red-400">{err}</p>}
       </div>
 
       {result && (

@@ -16,20 +16,29 @@ export default function CostTab() {
   const [route, setRoute] = useState<Route | null>(null);
   const [msg, setMsg] = useState("please reason step by step about this");
   const [limit, setLimit] = useState(25);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
 
   async function load() {
     const r = await getJson<Usage>("/cost/usage");
     if (r.success) setData(r.data);
+    else setErr(`${r.error.code}: ${r.error.message}`);
   }
   useEffect(() => { load(); }, []);
 
   async function explain() {
+    setBusy(true);
+    setErr("");
     const r = await postJson<Route>("/routing/plan", { message: msg, risk: "low" });
     if (r.success) setRoute(r.data);
+    else setErr(`${r.error.code}: ${r.error.message}`);
+    setBusy(false);
   }
   async function setBudget() {
-    await postJson("/cost/budget", { daily_usd: limit });
-    load();
+    setErr("");
+    const r = await postJson("/cost/budget", { daily_usd: limit });
+    if (r.success) load();
+    else setErr(`${r.error.code}: ${r.error.message}`);
   }
 
   return (
@@ -76,7 +85,7 @@ export default function CostTab() {
         <div className="flex gap-2">
           <input value={msg} onChange={(e) => setMsg(e.target.value)} aria-label="message"
             className="flex-1 rounded-md bg-zinc-900 px-3 py-2 text-sm" />
-          <button onClick={explain} className="rounded-md bg-zinc-700 px-4 py-2 text-sm">Explain</button>
+          <button onClick={explain} disabled={busy} className="rounded-md bg-zinc-700 px-4 py-2 text-sm disabled:opacity-50">{busy ? "…" : "Explain"}</button>
         </div>
         {route && (
           <p className="mt-2 text-xs">
@@ -85,6 +94,8 @@ export default function CostTab() {
           </p>
         )}
       </div>
+
+      {err && <p className="text-xs text-red-400">{err}</p>}
     </div>
   );
 }
