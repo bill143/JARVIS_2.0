@@ -1,0 +1,20 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - DATABASE_URL=sqlite:////app/data/jarvis.db
+      - CHROMA_PERSIST_DIR=/app/data/chroma
+      - SAFE_WORKSPACE_DIR=/app/workspace
+    volumes:
+      - jarvis-data:/app/data
+      - jarvis-workspace:/app/workspace
+
+volumes:
+  jarvis-data:
+  jarvis-workspace:

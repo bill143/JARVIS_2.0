@@ -1,0 +1,36 @@
+{
+  "exported_at": "2026-08-19T05:13:46.771672+00:00",
+  "requested_by": "admin",
+  "tenant": null,
+  "verification": {
+    "ok": true,
+    "entries": 2,
+    "head": "a4940c572be8d11ffde7157a15a31b6bc1585b96225473a7b1a118ecf0815359"
+  },
+  "entries": [
+    {
+      "id": 2,
+      "ts": "2026-08-19T05:13:46.767957+00:00",
+      "category": "compliance",
+      "actor": "admin",
+      "tenant": "default",
+      "action": "toggle",
+      "detail": {
+        "audit_strict_mode": true
+      },
+      "prev_hash": "2bd599e4b5f3802883d77beabfaa7d8b7748fe0fac371a0fb91df6bbd71464e7",
+      "hash": "a4940c572be8d11ffde7157a15a31b6bc1585b96225473a7b1a118ecf0815359"
+    },
+    {
+      "id": 1,
+      "ts": "2026-08-19T05:13:46.677463+00:00",
+      "category": "auth",
+      "actor": "admin",
+      "tenant": "default",
+      "action": "login",
+      "detail": {},
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "2bd599e4b5f3802883d77beabfaa7d8b7748fe0fac371a0fb91df6bbd71464e7"
+    }
+  ]
+}

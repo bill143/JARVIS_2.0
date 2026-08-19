@@ -1,0 +1,29 @@
+[project]
+name = "jarvis-god-mode-agent"
+version = "0.1.0"
+description = "JARVIS God Mode Agent - Phase 1 multimodal AI agent monorepo"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = [
+    "packages/agent-core", "packages/model-adapters", "packages/vision",
+    "packages/voice", "packages/memory", "packages/tools", "packages/shared",
+    "packages/auth", "packages/safety", "packages/policy",
+    "packages/reliability", "packages/observability",
+    "packages/planner", "packages/agents", "packages/rag",
+    "packages/routing", "packages/compliance", "packages/evals",
+    "apps/api", "apps/desktop-runtime",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# E402: test path bootstrap imports; E702/E741: terse store code; UP031: the
+# python sandbox runner intentionally uses %%-escaped %-formatting.
+ignore = ["E501", "B008", "E402", "E702", "E741", "UP031"]
