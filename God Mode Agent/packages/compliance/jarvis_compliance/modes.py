@@ -8,6 +8,25 @@ class ComplianceModes:
 
     RESTRICTED_TOOLS = {"web_search", "file_read"}
 
+    DESCRIPTIONS = {
+        "compliance_mode": (
+            "Master compliance switch. When on, enables stricter governance defaults "
+            "across tools, audit logging, and evidence exports."
+        ),
+        "audit_strict_mode": (
+            "Write every action to the tamper-evident, hash-chained audit log so the "
+            "complete activity record is verifiable and exportable as evidence."
+        ),
+        "restricted_tool_mode": (
+            "Restrict tool execution to a vetted safe subset "
+            "(web_search, file_read); higher-risk tools require elevated role or approval."
+        ),
+        "export_controls": (
+            "Guard data leaving the system. Evidence exports are gated to admins and "
+            "recorded in the audit log with the requester and scope."
+        ),
+    }
+
     def __init__(self, settings):
         self.settings = settings
         self._overrides: dict[str, bool] = {}
@@ -49,3 +68,11 @@ class ComplianceModes:
             "restricted_tool_mode": self.restricted_tool_mode,
             "export_controls": self.export_controls,
         }
+
+    def describe(self) -> list[dict]:
+        """Each toggle with its current value and a human-readable definition."""
+        status = self.status()
+        return [
+            {"key": key, "value": status[key], "description": self.DESCRIPTIONS.get(key, "")}
+            for key in status
+        ]

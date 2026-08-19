@@ -34,8 +34,30 @@ class EvidenceExporter:
         """Complete audit chain validation + tamper-evidence verification."""
         return self.audit.verify()
 
-    def export(self, *, requested_by: str, tenant: str | None = None, fmt: str = "json") -> dict:
-        entries = self.audit.query(tenant=tenant, limit=100000)
+    def validation_report(self) -> dict:
+        """verify() plus a human-facing summary: totals, per-category counts, date range."""
+        v = self.audit.verify()
+        entries = self.audit.query(limit=100000)
+        by_category: dict[str, int] = {}
+        for e in entries:
+            by_category[e["category"]] = by_category.get(e["category"], 0) + 1
+        timestamps = [e["ts"] for e in entries]
+        return {
+            **v,
+            "by_category": by_category,
+            "categories": sorted(by_category),
+            "first_ts": min(timestamps) if timestamps else None,
+            "last_ts": max(timestamps) if timestamps else None,
+        }
+
+    def export(self, *, requested_by: str, tenant: str | None = None, fmt: str = "json",
+               start: str | None = None, end: str | None = None, category: str | None = None) -> dict:
+        entries = self.audit.query(tenant=tenant, category=category, limit=100000)
+        # Inclusive date filtering by ISO-8601 prefix (works for date or datetime bounds).
+        if start:
+            entries = [e for e in entries if e["ts"][: len(start)] >= start]
+        if end:
+            entries = [e for e in entries if e["ts"][: len(end)] <= end]
         verification = self.audit.verify()
         export_id = uuid.uuid4().hex[:16]
         now = datetime.now(UTC).isoformat()
@@ -51,6 +73,7 @@ class EvidenceExporter:
         else:
             payload_text = json.dumps(
                 {"exported_at": now, "requested_by": requested_by, "tenant": tenant,
+                 "filters": {"start": start, "end": end, "category": category},
                  "verification": verification, "entries": entries}, indent=2, default=str)
             ext = "json"
 
@@ -67,6 +90,19 @@ class EvidenceExporter:
 
         return {"id": export_id, "path": str(path), "format": fmt, "record_count": len(entries),
                 "digest": digest, "verification": verification}
+
+    def read_export(self, export_id: str) -> dict | None:
+        """Return a previously generated export's content for (re-)download."""
+        with self._lock:
+            r = self.conn.execute(
+                "SELECT path, kind FROM evidence_exports WHERE id = ?", (export_id,)).fetchone()
+        if not r:
+            return None
+        path = Path(r[0])
+        fmt = r[1]
+        if not path.exists():
+            return None
+        return {"filename": path.name, "format": fmt, "content": path.read_text(encoding="utf-8")}
 
     def list_exports(self, limit: int = 50) -> list[dict]:
         with self._lock:
