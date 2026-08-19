@@ -8,6 +8,17 @@ preserving all Phase 1 endpoints and behavior.
 
 from __future__ import annotations
 
+# Use the Windows certificate store for TLS verification. Local AV/proxy HTTPS
+# inspection (e.g. Norton Web/Mail Shield) re-signs traffic with a root CA that
+# certifi rejects but the OS store trusts; without this every provider call
+# fails CERTIFICATE_VERIFY_FAILED and the router silently degrades to mock.
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 import base64
 import uuid
 from types import SimpleNamespace
@@ -253,10 +264,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return ok_envelope({
             "status": "ok", "version": API_VERSION, "phase": 3,
             "providers": {
+                "nvidia": bool(settings.nvidia_api_key),
                 "openai": bool(settings.openai_api_key), "anthropic": bool(settings.anthropic_api_key),
                 "deepgram": bool(settings.deepgram_api_key), "elevenlabs": bool(settings.elevenlabs_api_key),
             },
             "default_provider": settings.default_model_provider, "default_model": settings.default_model_name,
+            "router_order": [a.name for a in router.adapters],
             "fallbacks_enabled": settings.enable_fallbacks, "memory_backend": getattr(vector, "backend", "unknown"),
             "queue_backend": queue.backend, "auth_mode": settings.auth_mode,
             "dev_auth_bypass": settings.allow_dev_auth_bypass, "policy_default": settings.policy_default_action,

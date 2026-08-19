@@ -11,6 +11,14 @@ class TransientProviderError(Exception):
     """Retryable provider failure (network, 429, 5xx)."""
 
 
+class PermanentProviderError(Exception):
+    """Non-retryable provider failure (auth, quota, bad request — 4xx except 429).
+
+    The router skips straight to the next provider without retrying. Only these
+    two provider error types may activate fallback; anything else (e.g. policy
+    denials) propagates unchanged."""
+
+
 class ModelAdapter(ABC):
     name: str = "base"
 

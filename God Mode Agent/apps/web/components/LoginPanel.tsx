@@ -23,7 +23,7 @@ export default function LoginPanel() {
     <div className="mx-auto mt-24 max-w-sm rounded-lg border border-zinc-800 p-6">
       <h2 className="mb-1 text-lg font-semibold">Sign in to JARVIS</h2>
       <p className="mb-4 text-xs text-zinc-500">
-        Default admin on first boot: admin / admin123
+        Sign in with your JARVIS account
       </p>
       <form onSubmit={submit} className="space-y-3">
         <input

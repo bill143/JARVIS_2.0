@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from jarvis_adapters.base import ModelAdapter, TransientProviderError
+from jarvis_adapters.base import ModelAdapter, PermanentProviderError, TransientProviderError
 from jarvis_shared.schemas import Message, ModelResponse, ToolCall
 
 API_URL = "https://api.anthropic.com/v1/messages"
@@ -63,7 +63,8 @@ class AnthropicAdapter(ModelAdapter):
         if resp.status_code == 429 or resp.status_code >= 500:
             raise TransientProviderError(f"anthropic status {resp.status_code}")
         if resp.status_code != 200:
-            raise TransientProviderError(f"anthropic error {resp.status_code}: {resp.text[:200]}")
+            # 4xx other than 429: auth/quota/bad-request — retrying is pointless.
+            raise PermanentProviderError(f"anthropic error {resp.status_code}: {resp.text[:200]}")
         data = resp.json()
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []

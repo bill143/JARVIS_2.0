@@ -6,7 +6,7 @@ import json
 
 import httpx
 
-from jarvis_adapters.base import ModelAdapter, TransientProviderError
+from jarvis_adapters.base import ModelAdapter, PermanentProviderError, TransientProviderError
 from jarvis_shared.schemas import Message, ModelResponse, ToolCall
 
 API_URL = "https://api.openai.com/v1/chat/completions"
@@ -38,10 +38,13 @@ def _to_openai_messages(messages: list[Message]) -> list[dict]:
 class OpenAIAdapter(ModelAdapter):
     name = "openai"
 
-    def __init__(self, api_key: str, default_model: str = "gpt-4o", timeout: float = 60.0):
+    def __init__(self, api_key: str, default_model: str = "gpt-4o", timeout: float = 60.0, base_url: str = ""):
         self.api_key = api_key
         self.default_model = default_model
         self.timeout = timeout
+        # Any OpenAI-compatible endpoint (NVIDIA NIM, OpenRouter, Groq, ...) can be
+        # served by this adapter by overriding base_url.
+        self.api_url = f"{base_url.rstrip('/')}/chat/completions" if base_url else API_URL
 
     def available(self) -> bool:
         return bool(self.api_key)
@@ -56,13 +59,14 @@ class OpenAIAdapter(ModelAdapter):
             ]
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(API_URL, json=body, headers={"Authorization": f"Bearer {self.api_key}"})
+                resp = await client.post(self.api_url, json=body, headers={"Authorization": f"Bearer {self.api_key}"})
         except httpx.HTTPError as exc:
-            raise TransientProviderError(f"openai network error: {exc}") from exc
+            raise TransientProviderError(f"{self.name} network error: {exc}") from exc
         if resp.status_code == 429 or resp.status_code >= 500:
-            raise TransientProviderError(f"openai status {resp.status_code}")
+            raise TransientProviderError(f"{self.name} status {resp.status_code}")
         if resp.status_code != 200:
-            raise TransientProviderError(f"openai error {resp.status_code}: {resp.text[:200]}")
+            # 4xx other than 429: auth/quota/bad-request — retrying is pointless.
+            raise PermanentProviderError(f"{self.name} error {resp.status_code}: {resp.text[:200]}")
         choice = resp.json()["choices"][0]["message"]
         tool_calls = [
             ToolCall(id=tc["id"], name=tc["function"]["name"], arguments=json.loads(tc["function"].get("arguments") or "{}"))

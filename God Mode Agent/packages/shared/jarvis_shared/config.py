@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     deepgram_api_key: str = ""
     elevenlabs_api_key: str = ""
 
+    # NVIDIA NIM (OpenAI-compatible endpoint)
+    nvidia_api_key: str = ""
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    nvidia_model: str = "nvidia/nemotron-3-super-120b-a12b"
+
     database_url: str = "sqlite:///./jarvis.db"
     chroma_persist_dir: str = "./data/chroma"
 
