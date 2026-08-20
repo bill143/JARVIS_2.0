@@ -26,13 +26,15 @@ class VoiceSession:
     tts.audio, interrupted, error.
     """
 
-    def __init__(self, agent, settings: Settings, send, session_id: str = "voice"):
+    def __init__(self, agent, settings: Settings, send, session_id: str = "voice", agent_id: str = "ECHO"):
         self.agent = agent
         self.settings = settings
         self.send = send  # async callable(dict)
         self.session_id = session_id
+        self.agent_id = agent_id
         self._buffer = bytearray()
         self._task: asyncio.Task | None = None
+        self._partial_task: asyncio.Task | None = None
         self._interrupted = False
 
     async def handle(self, msg: dict) -> None:
@@ -43,11 +45,18 @@ class VoiceSession:
             except Exception:
                 await self.send({"type": "error", "message": "invalid base64 audio chunk"})
                 return
-            partial = await transcribe_audio(bytes(self._buffer), self.settings)
-            await self.send({"type": "transcript.partial", "text": partial.get("text", ""), "engine": partial.get("engine")})
+            # Partial transcription runs in the background, at most one in
+            # flight — appends stay instant. Transcribing the whole buffer
+            # per chunk INLINE serialized an STT round trip behind every
+            # 250ms chunk and added ~10s+ of backlog after release.
+            if self._partial_task is None or self._partial_task.done():
+                self._partial_task = asyncio.create_task(self._emit_partial())
         elif msg_type == "text":
             await self._respond(str(msg.get("text", "")).strip(), engine="direct")
         elif msg_type == "commit":
+            if self._partial_task and not self._partial_task.done():
+                self._partial_task.cancel()
+            self._partial_task = None
             final = await transcribe_audio(bytes(self._buffer), self.settings)
             self._buffer.clear()
             await self._respond(final.get("text", ""), engine=final.get("engine", "mock"))
@@ -55,6 +64,13 @@ class VoiceSession:
             await self.barge_in()
         else:
             await self.send({"type": "error", "message": f"unknown message type '{msg_type}'"})
+
+    async def _emit_partial(self) -> None:
+        try:
+            partial = await transcribe_audio(bytes(self._buffer), self.settings)
+            await self.send({"type": "transcript.partial", "text": partial.get("text", ""), "engine": partial.get("engine")})
+        except asyncio.CancelledError:
+            pass  # commit superseded this partial
 
     async def _respond(self, transcript: str, engine: str) -> None:
         await self.send({"type": "transcript.final", "text": transcript, "engine": engine})
@@ -75,7 +91,7 @@ class VoiceSession:
         if self._interrupted:
             return
         await self.send({"type": "reply.text", "text": result.reply, "provider": result.provider})
-        tts = await synthesize_speech(result.reply, self.settings)
+        tts = await synthesize_speech(result.reply, self.settings, agent_id=self.agent_id)
         if self._interrupted:
             return
         await self.send({

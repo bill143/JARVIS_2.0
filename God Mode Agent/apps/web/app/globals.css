@@ -2,6 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ECHO voice route tokens — JARVIS_UI_LOCKED_SPEC.md §6 (scoped, exact values) */
+.voice-root {
+  --bg: #000308;
+  --ink: #E8FBFF;
+  --ink-2: #7FA8B4;
+  --ink-3: #3C5B66;
+  --cyan: #22D3EE;
+  --cyan-hot: #8FF3FF;
+  --amber: #F5A524;
+  --red: #FF4D4D;
+  --hair: rgba(34, 211, 238, .16);
+  --hair-2: rgba(34, 211, 238, .08);
+}
+
 :root {
   --jarvis-bg: #07121d;
   --jarvis-surface: #0d1b2a;

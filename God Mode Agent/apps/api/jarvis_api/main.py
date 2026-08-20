@@ -69,7 +69,7 @@ from jarvis_voice.loop import VoiceSession
 
 logger = get_logger("jarvis.api")
 
-API_VERSION = "0.3.0"
+API_VERSION = "0.4.0"
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -290,6 +290,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_governance_routes(app)
     from jarvis_api.phase3_routes import register_phase3_routes
     register_phase3_routes(app)
+    from jarvis_api.activity_routes import register_activity_routes
+    register_activity_routes(app)
+    from jarvis_api.crew_routes import register_crew_routes
+    register_crew_routes(app)
 
     @app.get("/observability/slo")
     async def slo():
@@ -360,6 +364,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         result, decision = await governed.execute(principal, body.tool, body.arguments, session_id=f"{principal.tenant}:{body.session_id}")
         metrics.counter("jarvis_tool_calls_total", labels={"tool": body.tool, "status": result.status})
+        from jarvis_observability.activity import get_activity_log
+        get_activity_log().record(
+            "JARVIS", f"tool: {body.tool}",
+            "completed" if result.status == "ok" else "failed",
+            detail=f"direct execute by {principal.username}, {result.duration_ms:.0f}ms, policy={decision.action}",
+        )
         data = {"tool": result.tool, "status": result.status, "output": result.output,
                 "duration_ms": result.duration_ms, "policy": decision.as_dict()}
         if idem_key:

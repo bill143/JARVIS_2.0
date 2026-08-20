@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from jarvis_agents.bus import MessageBus
 from jarvis_agents.roles import ROLE_PROMPTS, Coder, MemorySteward, Researcher, Verifier
+from jarvis_observability.activity import get_activity_log
 from jarvis_shared.logging import get_logger, log_event
 
 logger = get_logger("jarvis.agents")
@@ -79,6 +80,12 @@ class MultiAgentOrchestrator:
                 self.audit.record("agents", "session_completed", actor=owner, tenant=tenant,
                                   detail={"session_id": session_id, "decision": result["decision"], "rounds": rnd})
             log_event(logger, "agents.completed", session_id=session_id, decision=result["decision"], rounds=rnd)
+            # Agent map v3: ORCHESTRATOR merged into JARVIS — multi-agent
+            # debate is a JARVIS capability, not a separate agent identity.
+            get_activity_log().record(
+                "JARVIS", goal[:200], "completed",
+                detail=f"multi-agent decision={result['decision']} rounds={rnd} arbitration={arb_note}",
+            )
             return {"session_id": session_id, **result}
 
         except Exception as exc:
@@ -88,4 +95,8 @@ class MultiAgentOrchestrator:
             result = {"goal": goal, "decision": "single-agent-fallback", "answer": single["finding"],
                       "citations": single["citations"], "mode": "single-agent", "error": str(exc)}
             self.bus.finish(session_id, "fallback", result)
+            get_activity_log().record(
+                "JARVIS", goal[:200], "failed",
+                detail=f"multi-agent error, single-agent fallback served: {exc}"[:400],
+            )
             return {"session_id": session_id, **result}

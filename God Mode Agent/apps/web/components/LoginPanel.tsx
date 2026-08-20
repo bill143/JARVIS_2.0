@@ -21,9 +21,9 @@ export default function LoginPanel() {
 
   return (
     <div className="mx-auto mt-24 max-w-sm rounded-lg border border-zinc-800 p-6">
-      <h2 className="mb-1 text-lg font-semibold">Sign in to JARVIS</h2>
+      <h2 className="mb-1 text-lg font-semibold">Sign in to ECHO Command</h2>
       <p className="mb-4 text-xs text-zinc-500">
-        Sign in with your JARVIS account
+        Sign in with your ECHO Command account
       </p>
       <form onSubmit={submit} className="space-y-3">
         <input

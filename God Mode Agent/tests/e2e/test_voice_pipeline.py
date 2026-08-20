@@ -25,7 +25,7 @@ def test_voice_transcript_reply_tts_pipeline(client, admin_tokens):
 
         tts = ws.receive_json()
         assert tts["type"] == "tts.audio"
-        assert tts["engine"] in ("elevenlabs", "pyttsx3", "mock")
+        assert tts["engine"] in ("kokoro", "elevenlabs", "pyttsx3", "mock")
         assert len(tts["audio_b64"]) > 100  # real audio payload, whatever the engine
 
 

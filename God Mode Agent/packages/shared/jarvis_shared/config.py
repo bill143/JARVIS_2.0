@@ -125,6 +125,18 @@ class Settings(BaseSettings):
     data_retention_days: int = 180
     evidence_export_dir: str = "./exports/evidence"
 
+    # --- ECHO Command Stage 3: activity log / system health ---
+    activity_log_db: str = "./data/activity-log.db"
+    tailscale_exe: str = ""
+
+    # --- ECHO Command Stage 2: Kokoro TTS ---
+    kokoro_tts_enabled: bool = True
+    kokoro_tts_url: str = "http://127.0.0.1:8767"
+    kokoro_default_voice: str = "bm_george"
+    # CPU synthesis of long replies can exceed 30s; fall back only past 120s.
+    kokoro_timeout_seconds: float = 120.0
+    voices_config_path: str = ""
+
     # --- Phase 3: evals / quality gates ---
     evals_required_for_release: bool = True
     eval_pass_threshold: float = 0.85
@@ -140,6 +152,10 @@ class Settings(BaseSettings):
     def approved_providers(self) -> set[str]:
         # Providers permitted for sensitive tasks in compliance mode.
         return {"anthropic", "openai", "mock"}
+
+    @property
+    def activity_log_path(self) -> Path:
+        return Path(self.activity_log_db).resolve()
 
     @property
     def sqlite_path(self) -> Path:
