@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import LoginPanel from "@/components/LoginPanel";
 import StatusStrip from "@/components/StatusStrip";
+import HudCanvas from "@/components/hud/HudCanvas";
+import SystemRail from "@/components/hud/SystemRail";
 import ChatTab from "@/components/ChatTab";
 import VoiceTab from "@/components/VoiceTab";
 import VisionTab from "@/components/VisionTab";
@@ -25,6 +27,8 @@ import IntegrationsPanel from "@/components/IntegrationsPanel";
 
 type Group = "assistant" | "governance";
 type PanelDef = { name: string; group: Group; minRole: string; render: () => JSX.Element };
+
+const HUD_ENABLED = process.env.NEXT_PUBLIC_HUD_ENABLED !== "false";
 
 const PANELS: PanelDef[] = [
   { name: "Voice", group: "assistant", minRole: "user", render: () => <VoiceTab /> },
@@ -98,10 +102,11 @@ export default function Home() {
 
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-44 shrink-0 overflow-y-auto border-r border-zinc-800 p-2">
+          <SystemRail />
           <button
             onClick={() => setPanel(null)}
             aria-current={panel === null ? "true" : undefined}
-            className={`mb-2 w-full rounded-md px-2 py-1.5 text-left text-sm font-medium ${
+            className={`mb-2 mt-2 w-full rounded-md px-2 py-1.5 text-left text-sm font-medium ${
               panel === null ? "bg-emerald-600 text-white" : "text-zinc-200 hover:bg-zinc-800"
             }`}
           >
@@ -113,7 +118,8 @@ export default function Home() {
           <div className="space-y-0.5">{governance.map(railButton)}</div>
         </aside>
 
-        <section className="flex-1 overflow-y-auto p-4">
+        <section className="flex-1 space-y-3 overflow-y-auto p-4">
+          {HUD_ENABLED && <HudCanvas state="idle" compact={panel !== null} />}
           <ChatTab />
         </section>
 
