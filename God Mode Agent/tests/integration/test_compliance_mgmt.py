@@ -93,7 +93,9 @@ def test_evidence_export_returns_downloadable_content(cc_client):
 
 
 def test_audit_summary_reports_details(cc_client):
-    cc_client.post("/compliance/mode", json={"key": "compliance_mode", "value": True, "reason": "x"})
+    mode = cc_client.post("/compliance/mode",
+                          json={"key": "compliance_mode", "value": True, "reason": "seed audit category"})
+    assert mode.status_code == 200, mode.text
     r = cc_client.get("/compliance/audit/summary")
     assert r.status_code == 200, r.text
     data = r.json()["data"]
