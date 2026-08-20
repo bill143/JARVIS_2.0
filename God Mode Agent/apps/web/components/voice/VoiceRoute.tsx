@@ -69,7 +69,10 @@ export default function VoiceRoute() {
 
   const bumpErr = useCallback(() => setErrNonce((n) => n + 1), []);
 
+  const ttsQueueRef = useRef<string[]>([]);
+
   const stopTts = useCallback((barge: boolean) => {
+    ttsQueueRef.current = [];
     try { ttsSourceRef.current?.stop(); } catch { /* already stopped */ }
     ttsSourceRef.current = null;
     if (barge && wsRef.current?.readyState === WebSocket.OPEN) {
@@ -78,7 +81,15 @@ export default function VoiceRoute() {
     setOrbState("standby");
   }, []);
 
-  const playTts = useCallback(async (b64: string) => {
+  // Sentence-streamed TTS: chunks queue up and play back-to-back; the first
+  // chunk starts while later ones are still synthesizing server-side.
+  const drainTts = useCallback(async () => {
+    if (ttsSourceRef.current) return; // a chunk is already playing
+    const b64 = ttsQueueRef.current.shift();
+    if (!b64) {
+      setOrbState("standby");
+      return;
+    }
     try {
       const ctx = audioCtxRef.current ?? new AudioContext();
       audioCtxRef.current = ctx;
@@ -95,7 +106,7 @@ export default function VoiceRoute() {
       source.onended = () => {
         if (ttsSourceRef.current === source) {
           ttsSourceRef.current = null;
-          setOrbState("standby");
+          void drainTts(); // next queued chunk, or standby when empty
         }
       };
       analyserRef.current = analyser; // speaking amplitude = returned WAV
@@ -104,9 +115,15 @@ export default function VoiceRoute() {
       source.start();
     } catch {
       bumpErr();
+      ttsQueueRef.current = [];
       setOrbState("standby");
     }
   }, [bumpErr]);
+
+  const playTts = useCallback(async (b64: string) => {
+    ttsQueueRef.current.push(b64);
+    void drainTts();
+  }, [drainTts]);
 
   // WebSocket lifecycle with reconnect.
   useEffect(() => {

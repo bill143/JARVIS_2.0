@@ -52,6 +52,12 @@ class OpenAIAdapter(ModelAdapter):
     async def complete(self, messages, tools=None, model=None) -> ModelResponse:
         model = model or self.default_model
         body: dict = {"model": model, "messages": _to_openai_messages(messages)}
+        if model.endswith("#nothink"):
+            # "<model>#nothink" disables the reasoning pass on NIM Nemotron
+            # models (fast tier for voice). The suffix never reaches the API.
+            body["model"] = model.removesuffix("#nothink")
+            body["chat_template_kwargs"] = {"thinking": False}
+            model = body["model"]
         if tools:
             body["tools"] = [
                 {"type": "function", "function": {"name": t["name"], "description": t.get("description", ""), "parameters": t.get("parameters", {"type": "object", "properties": {}})}}

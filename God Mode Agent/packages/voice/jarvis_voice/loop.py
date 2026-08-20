@@ -86,21 +86,45 @@ class VoiceSession:
         finally:
             self._task = None
 
+    @staticmethod
+    def _sentence_chunks(text: str, min_chars: int = 40) -> list[str]:
+        """Split a reply on sentence boundaries, merging fragments shorter than
+        min_chars into the next chunk so TTS audio does not sound choppy."""
+        import re
+
+        parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text.strip()) if p.strip()]
+        chunks: list[str] = []
+        acc = ""
+        for part in parts:
+            acc = f"{acc} {part}".strip()
+            if len(acc) >= min_chars:
+                chunks.append(acc)
+                acc = ""
+        if acc:
+            chunks.append(acc)
+        return chunks or ([text.strip()] if text.strip() else [])
+
     async def _reply_pipeline(self, transcript: str) -> None:
         result = await self.agent.run(transcript, session_id=self.session_id)
         if self._interrupted:
             return
         await self.send({"type": "reply.text", "text": result.reply, "provider": result.provider})
-        tts = await synthesize_speech(result.reply, self.settings, agent_id=self.agent_id)
-        if self._interrupted:
-            return
-        await self.send({
-            "type": "tts.audio",
-            "engine": tts.get("engine"),
-            "audio_b64": tts.get("audio_b64", ""),
-            "media_type": tts.get("media_type", ""),
-            "note": tts.get("note", ""),
-        })
+        # Stream TTS sentence-by-sentence: the first chunk starts playing while
+        # the rest is still synthesizing.
+        chunks = self._sentence_chunks(result.reply)
+        for seq, chunk in enumerate(chunks):
+            tts = await synthesize_speech(chunk, self.settings, agent_id=self.agent_id)
+            if self._interrupted:
+                return
+            await self.send({
+                "type": "tts.audio",
+                "engine": tts.get("engine"),
+                "audio_b64": tts.get("audio_b64", ""),
+                "media_type": tts.get("media_type", ""),
+                "note": tts.get("note", ""),
+                "seq": seq,
+                "final": seq == len(chunks) - 1,
+            })
 
     async def barge_in(self) -> None:
         self._interrupted = True

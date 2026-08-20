@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_model: str = "nvidia/nemotron-3-super-120b-a12b"
 
+    # Fast tier for realtime voice turns (no reasoning pass); console/chat
+    # keeps DEFAULT_MODEL_NAME. Empty string = voice uses the default model.
+    # ("#nothink" suffix = NIM chat_template_kwargs thinking:false; the
+    # gpt-oss-120b NIM endpoint hangs, so Super-without-reasoning is the tier.)
+    voice_model: str = "nvidia/nemotron-3-super-120b-a12b#nothink"
+
     database_url: str = "sqlite:///./jarvis.db"
     chroma_persist_dir: str = "./data/chroma"
 

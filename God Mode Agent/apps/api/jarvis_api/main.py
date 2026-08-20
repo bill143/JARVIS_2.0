@@ -111,9 +111,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     auth_limiter = RateLimiter(max(5, settings.auth_max_failed_attempts * 2))
     ws_conn_counts: dict[str, int] = {}
 
-    def base_agent() -> AgentLoop:
+    def base_agent(model: str | None = None) -> AgentLoop:
         return AgentLoop(router, registry, context=context, max_iterations=settings.max_tool_iterations,
-                         injection_threshold=settings.injection_block_threshold)
+                         injection_threshold=settings.injection_block_threshold, model=model)
 
     # queue handlers for long-running jobs
     def _handle_vision_batch(payload: dict) -> dict:
@@ -518,7 +518,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         principal, ip = await _ws_guard(ws)
         if principal is None:
             return
-        agent = base_agent()
+        # Voice turns route to the fast tier; console/chat keeps the default model.
+        agent = base_agent(model=settings.voice_model or None)
         agent.registry = PrincipalBoundTools(governed, principal)
         session = VoiceSession(agent, settings, ws.send_json, session_id=f"{principal.tenant}:voice-{uuid.uuid4().hex[:8]}")
         try:

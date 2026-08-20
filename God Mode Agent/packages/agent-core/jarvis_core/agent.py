@@ -49,6 +49,7 @@ class AgentLoop:
         max_iterations: int = 6,
         injection_threshold: float = 0.7,
         scan_input: bool = True,
+        model: str | None = None,
     ):
         self.router = router
         self.registry = registry
@@ -56,6 +57,9 @@ class AgentLoop:
         self.max_iterations = max(1, max_iterations)
         self.injection_threshold = injection_threshold
         self.scan_input = scan_input
+        # Optional per-loop model override (e.g. a fast tier for voice turns);
+        # None keeps the router's primary-adapter default.
+        self.model = model
 
     async def _emit(self, on_event, event: ToolEvent) -> None:
         if on_event is None:
@@ -113,7 +117,7 @@ class AgentLoop:
         with span(logger, "agent.run", session_id=session_id):
             for iteration in range(1, self.max_iterations + 1):  # noqa: B007 - read after the loop
                 messages = [Message(role="system", content=SYSTEM_PROMPT)] + self.context.get(session_id)
-                response = await self.router.complete(messages, tools=self.registry.schemas())
+                response = await self.router.complete(messages, tools=self.registry.schemas(), model=self.model)
                 provider, model = response.provider, response.model
 
                 if not response.tool_calls:
