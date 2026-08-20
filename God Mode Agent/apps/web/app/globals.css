@@ -2,6 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --jarvis-bg: #07121d;
+  --jarvis-surface: #0d1b2a;
+  --jarvis-surface-strong: #112438;
+  --jarvis-primary: #7dd3fc;
+  --jarvis-accent: #34d399;
+  --jarvis-text: #e2e8f0;
+  --jarvis-muted: #94a3b8;
+  --jarvis-border: rgba(148, 163, 184, 0.2);
+  --jarvis-radius: 18px;
+  --jarvis-spacing: 12px;
+  --jarvis-success: #22c55e;
+  --jarvis-warn: #f59e0b;
+  --jarvis-error: #ef4444;
+  --jarvis-ring: #7dd3fc;
+}
+
+html {
+  color-scheme: dark;
+}
+
 body {
   @apply bg-zinc-950 text-zinc-100 antialiased;
+  background: var(--jarvis-bg);
+  color: var(--jarvis-text);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
 }
