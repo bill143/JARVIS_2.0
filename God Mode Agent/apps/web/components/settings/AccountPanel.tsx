@@ -88,6 +88,7 @@ export default function AccountPanel() {
       </div>
       <p className="mt-2 text-xs text-zinc-500">
         Changing your password signs out every active session for this account.
+        For the admin account, ADMIN_CREDENTIALS.local.txt is rewritten to match.
       </p>
     </div>
   );

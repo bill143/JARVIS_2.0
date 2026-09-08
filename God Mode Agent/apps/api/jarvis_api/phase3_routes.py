@@ -270,6 +270,27 @@ def register_phase3_routes(app):
         p = require_min_role(request, "user")
         return ok_envelope({"conflicts": J(request).mem_gov.conflicts(p.tenant, p.user_id)})
 
+    # ---- Run 2: vector-store browse + delete ----
+    @router.get("/memory/vector")
+    async def vector_browse(request: Request,
+                            namespace: str = Query(default="", max_length=80),
+                            limit: int = Query(default=100, ge=1, le=500)):
+        p = require_min_role(request, "operator")
+        vector = J(request).vector
+        if not namespace:
+            return ok_envelope({"namespaces": vector.namespaces(), "backend": getattr(vector, "backend", "unknown")})
+        return ok_envelope({"namespace": namespace, "records": vector.list(namespace, limit)})
+
+    @router.delete("/memory/vector/{namespace}/{record_id}")
+    async def vector_delete(namespace: str, record_id: str, request: Request):
+        p = require_min_role(request, "operator")
+        deleted = J(request).vector.delete(namespace, record_id)
+        if not deleted:
+            raise NotFound("vector record not found")
+        J(request).audit.record("memory", "vector_delete", actor=p.username, tenant=p.tenant,
+                                detail={"namespace": namespace, "id": record_id})
+        return ok_envelope({"deleted": True, "namespace": namespace, "id": record_id})
+
     # ================= ROUTING / COST =================
     @router.post("/routing/plan")
     async def routing_plan(body: RouteBody, request: Request):

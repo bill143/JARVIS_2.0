@@ -122,6 +122,11 @@ class VoiceSession:
                 "audio_b64": tts.get("audio_b64", ""),
                 "media_type": tts.get("media_type", ""),
                 "note": tts.get("note", ""),
+                # Which agent spoke and the voice it resolved to — makes the
+                # per-agent voice map observable from the client instead of
+                # being an invisible server-side decision.
+                "agent": self.agent_id,
+                "voice": tts.get("voice", ""),
                 "seq": seq,
                 "final": seq == len(chunks) - 1,
             })

@@ -2,12 +2,43 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from jarvis_api.deps import require_min_role, resolve_principal
 from jarvis_auth.rbac import ROLES
+from jarvis_shared.logging import get_logger, log_event
 from jarvis_shared.schemas import ok_envelope
+
+logger = get_logger("jarvis.api.auth")
+
+# …/God Mode Agent/apps/api/jarvis_api/auth_routes.py -> parents[3] = God Mode Agent
+_CREDENTIALS_FILE = Path(__file__).resolve().parents[3] / "ADMIN_CREDENTIALS.local.txt"
+
+
+def _rewrite_admin_credentials(new_password: str) -> bool:
+    """Keep the on-disk admin credential note in sync (Bill's single source of
+    truth). Only ever called for the admin account; failure never blocks the
+    actual password change — it is reported in the response instead."""
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    content = (
+        f"ECHO Command — local admin credentials (changed via Settings, {stamp})\n\n"
+        f"username: admin\n"
+        f"password: {new_password}\n\n"
+        "URL: http://127.0.0.1:3000  (voice route /, console at /console)\n"
+        "Tailnet: https://bill-oneill.tail59f219.ts.net\n\n"
+        "This file is rewritten automatically whenever the admin password is\n"
+        "changed in Console -> Settings -> Account.\n"
+    )
+    try:
+        _CREDENTIALS_FILE.write_text(content, encoding="utf-8")
+        return True
+    except OSError as exc:
+        log_event(logger, "auth.credentials_file_write_failed", error=str(exc))
+        return False
 
 router = APIRouter()
 
@@ -133,7 +164,14 @@ def register_auth_routes(app):
         auth = request.app.state.jarvis.auth
         auth.change_password(p.user_id, body.current_password, body.new_password)
         request.app.state.jarvis.audit.record("auth", "password_change", actor=p.username)
-        return ok_envelope({"changed": True, "note": "all sessions revoked — sign in again"})
+        note = "all sessions revoked — sign in again"
+        if p.username == "admin":
+            # Run 2: the credentials file follows the account, never the reverse.
+            if _rewrite_admin_credentials(body.new_password):
+                note += "; ADMIN_CREDENTIALS.local.txt updated"
+            else:
+                note += "; WARNING: ADMIN_CREDENTIALS.local.txt could not be updated"
+        return ok_envelope({"changed": True, "note": note})
 
     # ---- admin user management ----
 

@@ -5,6 +5,7 @@
 // Speaking-state amplitude comes from the returned Kokoro WAV via the
 // WebAudio graph (never the mic); listening amplitude comes from the mic.
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { blobToBase64, getJson, wsUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -359,7 +360,7 @@ export default function VoiceRoute() {
         <button style={railBtn} onClick={() => setTranscriptOpen(true)}>transcript t</button>
         <button style={railBtn} onClick={() => setSystemsOpen(true)}>systems s</button>
         <button style={railBtn} onClick={() => setPaletteOpen(true)}>palette ctrl+k</button>
-        <a style={{ ...railBtn, textDecoration: "none", lineHeight: "44px" }} href="/console">console →</a>
+        <Link style={{ ...railBtn, textDecoration: "none", lineHeight: "44px" }} href="/console">console →</Link>
       </footer>
 
       <TextInputBar open={textOpen} onSend={sendText} onClose={() => setTextOpen(false)} />

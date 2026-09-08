@@ -1,5 +1,10 @@
-export const BACKEND =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8000";
+// Same-origin by design. An absolute host baked in at build time (the old
+// NEXT_PUBLIC_BACKEND_URL) pointed every browser at 127.0.0.1:8000 — which on a
+// phone over the tailnet means the phone itself, so nothing worked remotely.
+// "/api" is proxied to the backend by next.config.mjs rewrites (and, on the
+// tailnet, by a tailscale serve path handler), so this works identically from
+// localhost and from https://<host>.ts.net — and needs no CORS.
+export const BACKEND = "/api";
 
 // --- In-memory token store (NEVER localStorage: auth state stays in memory,
 // so a full page reload requires re-login, per the frontend security rules). ---
@@ -20,8 +25,14 @@ export function onLogout(fn: () => void) {
   _onLogout = fn;
 }
 
+// Derived from the page origin so it follows http->ws and https->wss without a
+// baked-in host: on the tailnet this becomes wss://<host>.ts.net/api/realtime/*.
 export const wsUrl = (path: string) => {
-  const base = BACKEND.replace(/^http/, "ws") + path;
+  // Websockets are a browser-only concern; there is deliberately no server-side
+  // fallback origin, so no absolute host can leak into the bundle.
+  if (typeof window === "undefined") return "";
+  const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${BACKEND}`;
+  const base = origin + path;
   return _tokens ? `${base}?token=${encodeURIComponent(_tokens.access)}` : base;
 };
 
@@ -32,8 +43,7 @@ export type ApiError = {
   approval_id?: string;
 };
 export type Envelope<T> =
-  | { success: true; data: T }
-  | { success: false; error: ApiError };
+  { success: true; data: T } | { success: false; error: ApiError };
 
 export type ToolEvent = {
   tool: string;
@@ -119,6 +129,29 @@ export async function putJson<T>(
   extraHeaders?: Record<string, string>,
 ): Promise<Envelope<T>> {
   return bodyRequest<T>("PUT", path, body, extraHeaders);
+}
+
+export async function delJson<T>(path: string): Promise<Envelope<T>> {
+  try {
+    const resp = await authedFetch(path, { method: "DELETE" });
+    return (await resp.json()) as Envelope<T>;
+  } catch (err) {
+    return {
+      success: false,
+      error: { code: "NETWORK_ERROR", message: String(err), requestId: "client" },
+    };
+  }
+}
+
+// Authenticated binary GET (e.g. voice preview WAV). Null on any failure.
+export async function getBlob(path: string): Promise<Blob | null> {
+  try {
+    const resp = await authedFetch(path, { method: "GET" });
+    if (!resp.ok) return null;
+    return await resp.blob();
+  } catch {
+    return null;
+  }
 }
 
 export async function getJson<T>(path: string): Promise<Envelope<T>> {

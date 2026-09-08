@@ -4,6 +4,7 @@
 // transcript overlay, systems overlay, command palette (§5, §7).
 // Hairlines and plain text only — no cards, no fills, no message bubbles.
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { getJson } from "@/lib/api";
 import type { ActivityRow } from "@/lib/activity";
@@ -130,6 +131,7 @@ type Services = Record<string, ServiceHealth>;
 export function SystemsOverlay({ onClose, panels }: { onClose: () => void; panels: string[] }) {
   const [services, setServices] = useState<Services | null>(null);
   const [rows, setRows] = useState<ActivityRow[] | null>(null);
+  const router = useRouter();
   useEffect(() => {
     let live = true;
     const load = async () => {
@@ -185,6 +187,11 @@ export function SystemsOverlay({ onClose, panels }: { onClose: () => void; panel
           <h3 style={{ ...mono, color: "var(--ink-3)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".28em", marginBottom: 10 }}>console panels</h3>
           {panels.map((p) => (
             <a key={p} href={`/console?panel=${encodeURIComponent(p)}`}
+               onClick={(e) => {
+                 e.preventDefault();
+                 router.push(`/console?panel=${encodeURIComponent(p)}`);
+                 onClose();
+               }}
                style={{ ...mono, display: "block", fontSize: 12, color: "var(--ink-2)", margin: "6px 0", textDecoration: "none", letterSpacing: ".08em" }}>
               → {p}
             </a>
@@ -199,11 +206,15 @@ export function CommandPalette({ onClose, panels }: { onClose: () => void; panel
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const router = useRouter();
   useEffect(() => inputRef.current?.focus(), []);
 
   const entries = ["Console", ...panels].filter((p) => p.toLowerCase().includes(query.toLowerCase()));
+  // Client-side push, never window.location: tokens live in module memory
+  // (lib/api.ts) by design, and a full document load would discard them.
   const go = (entry: string) => {
-    window.location.href = entry === "Console" ? "/console" : `/console?panel=${encodeURIComponent(entry)}`;
+    router.push(entry === "Console" ? "/console" : `/console?panel=${encodeURIComponent(entry)}`);
+    onClose();
   };
 
   return (

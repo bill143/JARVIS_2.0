@@ -78,6 +78,25 @@ class LocalVectorStore:
         scored.sort(key=lambda r: r["score"], reverse=True)
         return scored[:k]
 
+    def namespaces(self) -> list[dict]:
+        return [{"namespace": ns, "count": len(records)} for ns, records in sorted(self._data.items())]
+
+    def list(self, namespace: str, limit: int = 100) -> list[dict]:
+        return [
+            {"id": r["id"], "text": r["text"], "metadata": r["metadata"]}
+            for r in self._data.get(namespace, [])[:limit]
+        ]
+
+    def delete(self, namespace: str, record_id: str) -> bool:
+        with self._lock:
+            bucket = self._data.get(namespace, [])
+            kept = [r for r in bucket if r["id"] != record_id]
+            if len(kept) == len(bucket):
+                return False
+            self._data[namespace] = kept
+            self._save()
+            return True
+
 
 class ChromaVectorStore:
     """Chroma persistent client wrapper using our deterministic embeddings."""
@@ -118,6 +137,32 @@ class ChromaVectorStore:
                 "score": round(1.0 - distance, 4),
             })
         return hits
+
+
+    def namespaces(self) -> list[dict]:
+        return [{"namespace": c.name, "count": c.count()} for c in self.client.list_collections()]
+
+    def list(self, namespace: str, limit: int = 100) -> list[dict]:
+        col = self._collection(namespace)
+        if col.count() == 0:
+            return []
+        res = col.get(limit=limit)
+        return [
+            {
+                "id": rid,
+                "text": (res.get("documents") or [""] * len(res["ids"]))[i] or "",
+                "metadata": (res.get("metadatas") or [{}] * len(res["ids"]))[i] or {},
+            }
+            for i, rid in enumerate(res["ids"])
+        ]
+
+    def delete(self, namespace: str, record_id: str) -> bool:
+        col = self._collection(namespace)
+        existing = col.get(ids=[record_id])
+        if not existing["ids"]:
+            return False
+        col.delete(ids=[record_id])
+        return True
 
 
 def get_vector_store(persist_dir: Path, prefer: str = "chroma"):

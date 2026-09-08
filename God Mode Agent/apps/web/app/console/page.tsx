@@ -4,7 +4,9 @@
 // now owns `/`). Content unchanged from the Stage 3 dashboard, plus optional
 // `?panel=<name>` deep-linking used by the voice route's command palette.
 
-import { useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import LoginPanel from "@/components/LoginPanel";
 import StatusStrip from "@/components/StatusStrip";
@@ -58,17 +60,36 @@ const PANELS: PanelDef[] = [
   { name: "Settings", group: "governance", minRole: "readonly", render: () => <SettingsTab /> },
 ];
 
-function initialPanel(): PanelDef | null {
-  if (typeof window === "undefined") return null;
-  const wanted = new URLSearchParams(window.location.search).get("panel");
+function panelByName(wanted: string | null): PanelDef | null {
   if (!wanted) return null;
   return PANELS.find((p) => p.name.toLowerCase() === wanted.toLowerCase()) ?? null;
 }
 
 export default function ConsolePage() {
+  // useSearchParams needs a Suspense boundary during prerender.
+  return (
+    <Suspense fallback={null}>
+      <ConsoleView />
+    </Suspense>
+  );
+}
+
+function ConsoleView() {
   const { user, hasRole, logoutUser } = useAuth();
-  const [panel, setPanel] = useState<PanelDef | null>(initialPanel);
+  const searchParams = useSearchParams();
+  const [panel, setPanel] = useState<PanelDef | null>(null);
   const agents = useAgentActivity();
+
+  // Deep links (?panel=) arrive via client-side push from the palette/overlay,
+  // so this must react to the query changing, not just to first mount. The role
+  // check mirrors the rail button — a deep link must not open a panel the user
+  // is not allowed to see (the API enforces it too, this keeps the UI honest).
+  const wantedPanel = searchParams.get("panel");
+  useEffect(() => {
+    const target = panelByName(wantedPanel);
+    if (target && hasRole(target.minRole)) setPanel(target);
+    else if (wantedPanel === null) setPanel(null);
+  }, [wantedPanel, hasRole]);
   // HUD state derives from the activity log: any agent active -> processing.
   const hudState = agents?.some((a) => a.status === "active") ? "processing" : "idle";
 
@@ -84,7 +105,7 @@ export default function ConsolePage() {
         title={allowed ? p.name : `requires ${p.minRole} role`}
         aria-current={activeName ? "true" : undefined}
         onClick={() => setPanel(activeName ? null : p)}
-        className={`w-full rounded-md px-2 py-1 text-left text-xs transition-colors ${
+        className={`w-auto rounded-md px-2 py-1 text-left text-xs transition-colors md:w-full ${
           activeName
             ? "bg-emerald-600 text-white"
             : allowed
@@ -102,7 +123,7 @@ export default function ConsolePage() {
   const governance = PANELS.filter((p) => p.group === "governance");
 
   return (
-    <main className="flex h-screen flex-col">
+    <main className="flex h-[100dvh] flex-col">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-4 py-2">
         <h1 className="text-lg font-semibold tracking-tight">
           ECHO <span className="text-emerald-400">Command</span>
@@ -112,17 +133,20 @@ export default function ConsolePage() {
           <span>
             {user.username} · <span className="text-emerald-400">{user.role}</span> @ {user.tenant}
           </span>
-          <a href="/" className="rounded-md bg-zinc-800 px-3 py-1 hover:bg-zinc-700">
+          <Link href="/" className="rounded-md bg-zinc-800 px-3 py-1 hover:bg-zinc-700">
             ⦿ Voice
-          </a>
+          </Link>
           <button onClick={logoutUser} className="rounded-md bg-zinc-800 px-3 py-1 hover:bg-zinc-700">
             Sign out
           </button>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-44 shrink-0 overflow-y-auto border-r border-zinc-800 p-2">
+      {/* Below md the rail and panel stack above/below the main column instead
+          of forcing a ~1060px minimum width; from md up the 3-column desktop
+          layout is unchanged. */}
+      <div className="flex flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+        <aside className="w-full shrink-0 border-b border-zinc-800 p-2 md:w-44 md:overflow-y-auto md:border-b-0 md:border-r">
           <SystemRail />
           <button
             onClick={() => setPanel(null)}
@@ -134,12 +158,12 @@ export default function ConsolePage() {
             ◉ ECHO · Chat
           </button>
           <p className="mt-2 px-2 text-[10px] uppercase tracking-wide text-zinc-500">Assistant</p>
-          <div className="space-y-0.5">{assistant.map(railButton)}</div>
+          <div className="flex flex-wrap gap-1 md:block md:space-y-0.5">{assistant.map(railButton)}</div>
           <p className="mt-3 px-2 text-[10px] uppercase tracking-wide text-zinc-500">Governance</p>
-          <div className="space-y-0.5">{governance.map(railButton)}</div>
+          <div className="flex flex-wrap gap-1 md:block md:space-y-0.5">{governance.map(railButton)}</div>
         </aside>
 
-        <section className="flex-1 space-y-3 overflow-y-auto p-4">
+        <section className="flex-1 space-y-3 p-4 md:overflow-y-auto">
           {HUD_ENABLED && <HudCanvas state={hudState} compact={panel !== null} />}
           <SystemHealthRow />
           <AgentCards agents={agents} />
@@ -148,7 +172,7 @@ export default function ConsolePage() {
         </section>
 
         {panel && (
-          <aside className="flex w-[440px] shrink-0 flex-col overflow-hidden border-l border-zinc-800">
+          <aside className="flex w-full shrink-0 flex-col border-t border-zinc-800 md:w-[440px] md:overflow-hidden md:border-l md:border-t-0">
             <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
               <h2 className="text-sm font-medium text-emerald-400">{panel.name}</h2>
               <button onClick={() => setPanel(null)} className="text-xs text-zinc-400 hover:text-zinc-100" aria-label="close panel">

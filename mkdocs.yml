@@ -159,6 +159,8 @@ nav:
       - Engine: architecture/engine.md
       - Agents: architecture/agents.md
       - Tools & Memory: architecture/memory.md
+      - Context Compactor: architecture/context-compactor.md
+      - Dynamic Tool RAG: architecture/tool-rag.md
       - Learning: architecture/learning.md
       - Query Flow: architecture/query-flow.md
       - Security: architecture/security.md

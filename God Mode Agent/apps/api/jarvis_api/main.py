@@ -66,6 +66,7 @@ from jarvis_shared.schemas import (
 from jarvis_tools import AuditLog, build_default_registry
 from jarvis_vision.analyzer import analyze_image_bytes
 from jarvis_voice.loop import VoiceSession
+from jarvis_voice.voices import known_agents
 
 logger = get_logger("jarvis.api")
 
@@ -294,6 +295,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_activity_routes(app)
     from jarvis_api.crew_routes import register_crew_routes
     register_crew_routes(app)
+    from jarvis_api.settings_routes import register_settings_routes
+    register_settings_routes(app)
+    from jarvis_shared.runtime_store import get_runtime_store
+
+    def _tier_model(tier: str, fallback: str = "") -> str | None:
+        # Persisted override first (hot-swap per request), then the env default.
+        return get_runtime_store(settings).get(f"model.{tier}") or fallback or None
 
     @app.get("/observability/slo")
     async def slo():
@@ -322,7 +330,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user_id_var.set(principal.user_id)
         metadata.touch_session(session_id, principal.user_id)
 
-        agent = base_agent()
+        agent = base_agent(model=_tier_model("console"))
         agent.registry = PrincipalBoundTools(governed, principal)
         with trace_span("agent.chat", user=principal.username):
             try:
@@ -519,9 +527,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if principal is None:
             return
         # Voice turns route to the fast tier; console/chat keeps the default model.
-        agent = base_agent(model=settings.voice_model or None)
+        agent = base_agent(model=_tier_model("voice", settings.voice_model))
         agent.registry = PrincipalBoundTools(governed, principal)
-        session = VoiceSession(agent, settings, ws.send_json, session_id=f"{principal.tenant}:voice-{uuid.uuid4().hex[:8]}")
+        # Which persona is speaking decides the Kokoro voice (configs/voices.yaml).
+        # Unrecognised values fall back to ECHO rather than erroring the socket —
+        # an unknown agent id must not cost the user their voice session.
+        requested = str(ws.query_params.get("agent", "") or "ECHO").upper()
+        agent_id = requested if requested in known_agents(settings) else "ECHO"
+        session = VoiceSession(
+            agent, settings, ws.send_json,
+            session_id=f"{principal.tenant}:voice-{uuid.uuid4().hex[:8]}",
+            agent_id=agent_id,
+        )
         try:
             while True:
                 incoming = await ws.receive_json()

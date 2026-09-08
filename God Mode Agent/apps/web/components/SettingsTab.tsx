@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import AccountPanel from "@/components/settings/AccountPanel";
 import ApiKeysPanel from "@/components/settings/ApiKeysPanel";
 import UsersPanel from "@/components/settings/UsersPanel";
+import VoiceModelPanel from "@/components/settings/VoiceModelPanel";
 
 type HealthData = {
   status: string;
@@ -33,6 +34,7 @@ export default function SettingsTab() {
   return (
     <div className="space-y-4 text-sm">
       <AccountPanel />
+      <VoiceModelPanel />
       {hasRole("admin") && <UsersPanel />}
       {hasRole("admin") && <ApiKeysPanel />}
       <div className="rounded-lg border border-zinc-800 p-4">
@@ -41,30 +43,43 @@ export default function SettingsTab() {
           URL: <code className="text-zinc-300">{BACKEND}</code>
         </p>
         <p className="mt-1 text-xs text-zinc-500">
-          Override with <code>NEXT_PUBLIC_BACKEND_URL</code> (local dev reads BACKEND_PUBLIC_URL from{" "}
-          <code>.env</code>; on Vercel set it in project environment variables).
+          Same-origin by design — the browser calls <code>/api</code> and the
+          web server rewrites it to <code>BACKEND_ORIGIN</code> (server-side
+          env, defaults to the local API on the loopback interface). Keeps
+          localhost and the tailnet on one build.
         </p>
-        {error && <p className="mt-2 text-amber-400">⚠ {error} - is the API running?</p>}
+        {error && (
+          <p className="mt-2 text-amber-400">⚠ {error} - is the API running?</p>
+        )}
       </div>
 
       {health && (
         <>
           <div className="rounded-lg border border-zinc-800 p-4">
-            <h2 className="mb-2 font-medium text-emerald-400">Providers (from server env)</h2>
+            <h2 className="mb-2 font-medium text-emerald-400">
+              Providers (from server env)
+            </h2>
             <ul className="space-y-1">
               {Object.entries(health.providers).map(([name, configured]) => (
                 <li key={name}>
-                  <span className={configured ? "text-emerald-400" : "text-zinc-500"}>
+                  <span
+                    className={
+                      configured ? "text-emerald-400" : "text-zinc-500"
+                    }
+                  >
                     {configured ? "●" : "○"}
                   </span>{" "}
-                  {name} {configured ? "configured" : "not configured (fallback/mock in use)"}
+                  {name}{" "}
+                  {configured
+                    ? "configured"
+                    : "not configured (fallback/mock in use)"}
                 </li>
               ))}
             </ul>
             <p className="mt-2 text-xs text-zinc-500">
-              Default: {health.default_provider} / {health.default_model} · fallbacks{" "}
-              {health.fallbacks_enabled ? "enabled" : "disabled"} · memory backend:{" "}
-              {health.memory_backend}
+              Default: {health.default_provider} / {health.default_model} ·
+              fallbacks {health.fallbacks_enabled ? "enabled" : "disabled"} ·
+              memory backend: {health.memory_backend}
             </p>
           </div>
           <div className="rounded-lg border border-zinc-800 p-4">
