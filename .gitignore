@@ -49,6 +49,9 @@ AIMLAPI_APIkey_d7b094b8.txt
 results/
 logs/
 traces/
+# ...but keep the first-party source package (the pattern above is for runtime trace data dirs)
+!src/openjarvis/traces/
+!src/openjarvis/traces/*.py
 coding_task_*
 get-pip.py
 
