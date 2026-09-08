@@ -7,6 +7,7 @@ from typing import Any, Dict
 from unittest.mock import MagicMock
 
 import pytest
+from openjarvis.traces.store import TraceStore
 
 from openjarvis.core.types import Trace
 from openjarvis.evals.core.types import EvalRecord
@@ -17,7 +18,6 @@ from openjarvis.optimize.personal.synthesizer import (
     PersonalBenchmarkSample,
     PersonalBenchmarkSynthesizer,
 )
-from openjarvis.traces.store import TraceStore
 
 # ---------------------------------------------------------------------------
 # Helpers
