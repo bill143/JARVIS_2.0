@@ -55,6 +55,17 @@ traces/
 coding_task_*
 get-pip.py
 
+# Local-only artifacts (runtime services, backups, installers, side projects)
+services/
+my-contech-agent-platform/
+extracted_setup/
+backups/
+God Mode Agent/backups/
+God Mode Agent/hud-local-backup/
+*.exe
+*.bak
+MagicMock/
+
 # MkDocs build output
 site/
 

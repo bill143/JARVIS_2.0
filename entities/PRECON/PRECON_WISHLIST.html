@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRECON — Construction Wishlist</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-main: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #334155;
+            --accent-blue: #38bdf8;
+            --accent-indigo: #6366f1;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            
+            /* Status Colors */
+            --status-1: #64748b; /* Not Started */
+            --status-2: #f59e0b; /* Evaluating */
+            --status-3: #8b5cf6; /* In Dev */
+            --status-4: #0ea5e9; /* Testing */
+            --status-5: #10b981; /* Implemented */
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar Styling */
+        .sidebar {
+            width: 300px;
+            background-color: #090d16;
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 24px 16px;
+            flex-shrink: 0;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 0 12px 24px 12px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-indigo));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            font-size: 18px;
+        }
+
+        .brand-title {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            color: var(--text-main);
+        }
+
+        .brand-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            list-style: none;
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-item:hover {
+            background-color: var(--bg-card);
+            color: var(--text-main);
+        }
+
+        .nav-item.active {
+            background-color: var(--accent-indigo);
+            color: white;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+
+        .badge {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+        }
+
+        /* Sidebar Progress Stats */
+        .sidebar-stats {
+            margin-top: auto;
+            padding: 16px;
+            background-color: var(--bg-card);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .stats-title {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .progress-bar-bg {
+            height: 8px;
+            background-color: #334155;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent-blue), var(--status-5));
+            transition: width 0.4s ease;
+        }
+
+        .stats-text {
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Main Content Styling */
+        .main-content {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 32px 40px;
+            background-color: var(--bg-main);
+        }
+
+        .header {
+            margin-bottom: 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 20px;
+        }
+
+        .header-title {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--text-main);
+            letter-spacing: -0.5px;
+        }
+
+        .header-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            background-color: var(--bg-card);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        /* Tab Content Panel */
+        .tab-panel {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Section Cards */
+        .section-card {
+            background-color: var(--bg-card);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 24px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .section-header {
+            padding: 16px 20px;
+            background-color: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .section-code {
+            font-weight: 700;
+            color: var(--accent-blue);
+            margin-right: 8px;
+            font-size: 15px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        /* Task List Table/Rows */
+        .task-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .task-row {
+            border-bottom: 1px solid var(--border-color);
+            transition: background 0.15s ease;
+        }
+
+        .task-row:last-child {
+            border-bottom: none;
+        }
+
+        .task-row:hover {
+            background-color: var(--bg-card-hover);
+        }
+
+        .task-cell {
+            padding: 14px 20px;
+            font-size: 14px;
+            vertical-align: middle;
+        }
+
+        .cell-wbs {
+            width: 90px;
+            font-weight: 600;
+            color: var(--accent-blue);
+            font-size: 13px;
+        }
+
+        .cell-title {
+            font-weight: 500;
+            color: var(--text-main);
+        }
+
+        .cell-desc {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            line-height: 1.4;
+        }
+
+        .cell-status {
+            width: 220px;
+            text-align: right;
+        }
+
+        /* Custom Select Styling */
+        .status-select {
+            appearance: none;
+            -webkit-appearance: none;
+            background-color: var(--bg-main);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .status-select:focus {
+            border-color: var(--accent-blue);
+        }
+
+        /* Status Colors for Selects */
+        .status-select[data-status="1"] { color: var(--status-1); border-left: 4px solid var(--status-1); }
+        .status-select[data-status="2"] { color: var(--status-2); border-left: 4px solid var(--status-2); }
+        .status-select[data-status="3"] { color: var(--status-3); border-left: 4px solid var(--status-3); }
+        .status-select[data-status="4"] { color: var(--status-4); border-left: 4px solid var(--status-4); }
+        .status-select[data-status="5"] { color: #10b981; border-left: 4px solid #10b981; background-color: rgba(16, 185, 129, 0.05); }
+
+        .checkbox-container {
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            margin-right: 12px;
+        }
+
+        .checkbox-container input {
+            display: none;
+        }
+
+        .checkmark {
+            width: 18px;
+            height: 18px;
+            background-color: var(--bg-main);
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .checkbox-container input:checked ~ .checkmark {
+            background-color: var(--status-5);
+            border-color: var(--status-5);
+        }
+
+        .checkmark:after {
+            content: "✓";
+            color: white;
+            font-size: 12px;
+            display: none;
+            font-weight: bold;
+        }
+
+        .checkbox-container input:checked ~ .checkmark:after {
+            display: block;
+        }
+
+        .task-title-wrapper {
+            display: flex;
+            align-items: flex-start;
+        }
+
+        /* Responsive Adjustments */
+        @media (max-width: 900px) {
+            body {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                height: auto;
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+            }
+            .main-content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- SIDE PANEL NAVIGATION -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">AI</div>
+            <div>
+                <div class="brand-title">Executive AI PA</div>
+                <div class="brand-subtitle">Integration Roadmap</div>
+            </div>
+        </div>
+
+        <ul class="nav-tabs">
+            <li class="nav-item active" onclick="switchTab('dashboard')">
+                <span>📊 Overview Dashboard</span>
+            </li>
+            <li class="nav-item" onclick="switchTab('tab1')">
+                <span>1.0 Bid Pipeline</span>
+                <span class="badge" id="badge-1">0/4</span>
+            </li>
+            <li class="nav-item" onclick="switchTab('tab2')">
+                <span>2.0 Estimating</span>
+                <span class="badge" id="badge-2">0/7</span>
+            </li>
+            <li class="nav-item" onclick="switchTab('tab3')">
+                <span>3.0 Project Delivery</span>
+                <span class="badge" id="badge-3">0/5</span>
+            </li>
+            <li class="nav-item" onclick="switchTab('tab4')">
+                <span>4.0 Docs & Compliance</span>
+                <span class="badge" id="badge-4">0/3</span>
+            </li>
+        </ul>
+
+        <div class="sidebar-stats">
+            <div class="stats-title">Overall Implementation</div>
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" id="total-progress"></div>
+            </div>
+            <div class="stats-text">
+                <span id="progress-percent">0% Completed</span>
+                <span id="progress-count" style="color: var(--text-muted); font-weight: normal;">0/19</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="main-content">
+        
+        <div class="header">
+            <div>
+                <h1 class="header-title" id="page-title">Executive Overview Dashboard</h1>
+                <p class="header-desc" id="page-desc">Track and manage the development phases of your personal executive AI assistant capability matrix.</p>
+            </div>
+        </div>
+
+        <!-- STATUS LEGEND -->
+        <div class="legend">
+            <div class="legend-item"><div class="legend-dot" style="background: var(--status-1);"></div> 1. Not Commenced</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--status-2);"></div> 2. Evaluation & Scope</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--status-3);"></div> 3. AI Code Creation</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--status-4);"></div> 4. Active Integration</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--status-5);"></div> 5. Fully Implemented</div>
+        </div>
+
+        <!-- TAB: DASHBOARD OVERVIEW -->
+        <div id="dashboard" class="tab-panel active">
+            <div class="section-card">
+                <div class="section-header">
+                    <span class="section-title">WBS High-Level Module Summary</span>
+                </div>
+                <table class="task-table">
+                    <thead>
+                        <tr style="text-align: left; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 12px;">
+                            <th class="task-cell" style="width: 100px;">CODE</th>
+                            <th class="task-cell">MODULE NAME</th>
+                            <th class="task-cell">SCOPE SUMMARY</th>
+                            <th class="task-cell" style="width: 150px; text-align: right;">COMPLETION</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="task-row">
+                            <td class="task-cell cell-wbs">1.0</td>
+                            <td class="task-cell cell-title">Inbox & Communication Management</td>
+                            <td class="task-cell cell-desc">Smart triage, auto-drafting in tone, thread summarization, follow-up nudges.</td>
+                            <td class="task-cell" style="text-align: right; font-weight: 600;" id="summary-progress-1">0%</td>
+                        </tr>
+                        <tr class="task-row">
+                            <td class="task-cell cell-wbs">2.0</td>
+                            <td class="task-cell cell-title">Calendar & Dynamic Logistics</td>
+                            <td class="task-cell cell-desc">Proactive scheduling, daily briefings, and tiered dynamic transit/travel alerts.</td>
+                            <td class="task-cell" style="text-align: right; font-weight: 600;" id="summary-progress-2">0%</td>
+                        </tr>
+                        <tr class="task-row">
+                            <td class="task-cell cell-wbs">3.0</td>
+                            <td class="task-cell cell-title">Meeting Lifecycle & Task Oversight</td>
+                            <td class="task-cell cell-desc">Transcription, automated task allocation, distribution, and deadline nudges.</td>
+                            <td class="task-cell" style="text-align: right; font-weight: 600;" id="summary-progress-3">0%</td>
+                        </tr>
+                        <tr class="task-row">
+                            <td class="task-cell cell-wbs">4.0</td>
+                            <td class="task-cell cell-title">Executive Operations & Support</td>
+                            <td class="task-cell cell-desc">Presentation/memo drafting, voice-to-task parsing, personal logistics.</td>
+                            <td class="task-cell" style="text-align: right; font-weight: 600;" id="summary-progress-4">0%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- TAB 1: INBOX MANAGEMENT -->
+        <div id="tab1" class="tab-panel">
+            <div class="section-card">
+                <div class="section-header">
+                    <div>
+                        <span class="section-code">1.0</span>
+                        <span class="section-title">Inbox & Communication Management</span>
+                    </div>
+                </div>
+                <table class="task-table">
+                    <tbody id="group-1">
+                        <!-- JS populated -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- TAB 2: CALENDAR & TRAVEL -->
+        <div id="tab2" class="tab-panel">
+            <div class="section-card">
+                <div class="section-header">
+                    <div>
+                        <span class="section-code">2.0</span>
+                        <span class="section-title">Calendar & Dynamic Logistics Management</span>
+                    </div>
+                </div>
+                <table class="task-table">
+                    <tbody id="group-2">
+                        <!-- JS populated -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- TAB 3: MEETINGS & TASKS -->
+        <div id="tab3" class="tab-panel">
+            <div class="section-card">
+                <div class="section-header">
+                    <div>
+                        <span class="section-code">3.0</span>
+                        <span class="section-title">Meeting Lifecycle & Task Oversight</span>
+                    </div>
+                </div>
+                <table class="task-table">
+                    <tbody id="group-3">
+                        <!-- JS populated -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- TAB 4: EXEC OPERATIONS -->
+        <div id="tab4" class="tab-panel">
+            <div class="section-card">
+                <div class="section-header">
+                    <div>
+                        <span class="section-code">4.0</span>
+                        <span class="section-title">Executive Operations & Document Support</span>
+                    </div>
+                </div>
+                <table class="task-table">
+                    <tbody id="group-4">
+                        <!-- JS populated -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // Data Structure
+        const tasksData = [
+            // Group 1: Bid & Opportunity Pipeline
+            { id: "1.1", group: 1, title: "Weekly Go/No-Go Summary", desc: "Monday 8 AM: new solicitations ranked with deadlines and fit scores." },
+            { id: "1.2", group: 1, title: "Solicitation Deadline Tracker", desc: "Track all active pursuit deadlines with tiered reminders." },
+            { id: "1.3", group: 1, title: "GovTribe / SAM.gov Watchlist", desc: "Monitor saved searches and alert on new matching opportunities." },
+            // Group 2: Estimating
+            { id: "2.1", group: 2, title: "Estimate Kickoff Package", desc: "Auto-assemble scope docs, drawings index, and estimate template on Go decision." },
+            { id: "2.2", group: 2, title: "Sub Quote Tracking", desc: "Track ITBs sent, quotes received, and coverage gaps by trade." },
+            // Group 3: Project Delivery
+            { id: "3.1", group: 3, title: "Project 26020 Status Brief", desc: "Weekly Dayton VA pipeline status: SOW progress, RFIs, deadlines." },
+            { id: "3.2", group: 3, title: "RFI Log Monitoring", desc: "Track open RFIs and flag aging items." },
+            // Group 4: Documents & Compliance
+            { id: "4.1", group: 4, title: "SOW Document Generation", desc: "Trade-specific 11-section SOW documents in ONeill house style." },
+            { id: "4.2", group: 4, title: "Compliance Matrix Support", desc: "Build compliance matrices from solicitation requirements." }
+        ];
+
+        const statusOptions = [
+            { val: "1", label: "1. Not Commenced" },
+            { val: "2", label: "2. Evaluation & Scope" },
+            { val: "3", label: "3. AI Code Creation" },
+            { val: "4", label: "4. Active Integration" },
+            { val: "5", label: "5. Fully Implemented" }
+        ];
+
+        // Load saved state or default
+        let state = JSON.parse(localStorage.getItem('echo_precon_wbs_state')) || {};
+
+        // Initialize state defaults
+        tasksData.forEach(task => {
+            if (!state[task.id]) {
+                state[task.id] = { status: "1", completed: false };
+            }
+        });
+
+        function saveState() {
+            localStorage.setItem('echo_precon_wbs_state', JSON.stringify(state));
+            updateMetrics();
+        }
+
+        function renderTasks() {
+            [1, 2, 3, 4].forEach(groupId => {
+                const container = document.getElementById(`group-${groupId}`);
+                container.innerHTML = '';
+
+                const groupTasks = tasksData.filter(t => t.group === groupId);
+                groupTasks.forEach(task => {
+                    const taskState = state[task.id];
+                    
+                    const row = document.createElement('tr');
+                    row.className = 'task-row';
+                    row.innerHTML = `
+                        <td class="task-cell cell-wbs">${task.id}</td>
+                        <td class="task-cell">
+                            <div class="task-title-wrapper">
+                                <label class="checkbox-container">
+                                    <input type="checkbox" ${taskState.completed ? 'checked' : ''} onchange="toggleCheck('${task.id}', this.checked)">
+                                    <span class="checkmark"></span>
+                                </label>
+                                <div>
+                                    <div class="cell-title" style="${taskState.completed ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${task.title}</div>
+                                    <div class="cell-desc">${task.desc}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="task-cell cell-status">
+                            <select class="status-select" data-status="${taskState.status}" onchange="updateStatus('${task.id}', this.value)">
+                                ${statusOptions.map(opt => `<option value="${opt.val}" ${taskState.status === opt.val ? 'selected' : ''}>${opt.label}</option>`).join('')}
+                            </select>
+                        </td>
+                    `;
+                    container.appendChild(row);
+                });
+            });
+            updateMetrics();
+        }
+
+        function updateStatus(taskId, newStatus) {
+            state[taskId].status = newStatus;
+            if (newStatus === "5") {
+                state[taskId].completed = true;
+            } else if (state[taskId].completed && newStatus !== "5") {
+                state[taskId].completed = false;
+            }
+            saveState();
+            renderTasks();
+        }
+
+        function toggleCheck(taskId, isChecked) {
+            state[taskId].completed = isChecked;
+            if (isChecked) {
+                state[taskId].status = "5";
+            } else if (state[taskId].status === "5") {
+                state[taskId].status = "1";
+            }
+            saveState();
+            renderTasks();
+        }
+
+        function updateMetrics() {
+            let totalTasks = tasksData.length;
+            let completedTasks = 0;
+
+            [1, 2, 3, 4].forEach(groupId => {
+                const groupTasks = tasksData.filter(t => t.group === groupId);
+                const finishedGroup = groupTasks.filter(t => state[t.id].status === "5" || state[t.id].completed).length;
+                const groupPercent = Math.round((finishedGroup / groupTasks.length) * 100);
+
+                // Update tab badges & dashboard summary
+                document.getElementById(`badge-${groupId}`).innerText = `${finishedGroup}/${groupTasks.length}`;
+                document.getElementById(`summary-progress-${groupId}`).innerText = `${groupPercent}%`;
+                
+                completedTasks += finishedGroup;
+            });
+
+            const overallPercent = Math.round((completedTasks / totalTasks) * 100);
+            document.getElementById('total-progress').style.width = `${overallPercent}%`;
+            document.getElementById('progress-percent').innerText = `${overallPercent}% Completed`;
+            document.getElementById('progress-count').innerText = `${completedTasks}/${totalTasks}`;
+        }
+
+        function switchTab(tabId) {
+            // Update Navigation UI
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+
+            // Hide panels
+            document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+
+            // Header titles
+            const titles = {
+                'dashboard': 'Executive Overview Dashboard',
+                'tab1': '1.0 Inbox & Communication Management',
+                'tab2': '2.0 Calendar & Dynamic Logistics Management',
+                'tab3': '3.0 Meeting Lifecycle & Task Oversight',
+                'tab4': '4.0 Executive Operations & Document Support'
+            };
+            document.getElementById('page-title').innerText = titles[tabId];
+        }
+
+        // Initialize on page load
+        renderTasks();
+    </script>
+</body>
+</html>
