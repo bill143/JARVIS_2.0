@@ -1,0 +1,11 @@
+# Optional capability dependencies - everything degrades gracefully without them.
+chromadb>=0.5          # long-term vector memory backend (default when installed)
+opencv-python>=4.9     # real webcam capture (synthetic frames otherwise)
+pillow>=10.3           # image decoding for analysis/OCR
+pytesseract>=0.3.10    # OCR (also needs the Tesseract-OCR Windows binary)
+pyttsx3>=2.90          # local offline TTS fallback
+sounddevice>=0.4       # desktop microphone bridge
+redis>=5.0             # durable queue backend (SQLite fallback otherwise)
+prometheus-client>=0.20 # richer metrics registry (built-in registry otherwise)
+opentelemetry-sdk>=1.25 # tracing (console/otlp); no-op fallback otherwise
+opentelemetry-exporter-otlp-proto-http>=1.25  # OTLP span exporter (optional)

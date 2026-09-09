@@ -1,0 +1,36 @@
+{
+  "exported_at": "2026-08-19T05:13:53.615679+00:00",
+  "requested_by": "admin",
+  "tenant": null,
+  "verification": {
+    "ok": true,
+    "entries": 2,
+    "head": "5a2d58ff2864d09a81757d788b66e5a9f050f669c5916046a617fc716b0a9ef0"
+  },
+  "entries": [
+    {
+      "id": 2,
+      "ts": "2026-08-19T05:13:53.614079+00:00",
+      "category": "policy",
+      "actor": "alice",
+      "tenant": "default",
+      "action": "tool:web_search",
+      "detail": {
+        "decision": "allow"
+      },
+      "prev_hash": "7ca2078223c5f9b4b8a8e64a7e76a3ad1099bfa21953b6210f9ed88bc15c4880",
+      "hash": "5a2d58ff2864d09a81757d788b66e5a9f050f669c5916046a617fc716b0a9ef0"
+    },
+    {
+      "id": 1,
+      "ts": "2026-08-19T05:13:53.613685+00:00",
+      "category": "auth",
+      "actor": "alice",
+      "tenant": "default",
+      "action": "login",
+      "detail": {},
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "7ca2078223c5f9b4b8a8e64a7e76a3ad1099bfa21953b6210f9ed88bc15c4880"
+    }
+  ]
+}

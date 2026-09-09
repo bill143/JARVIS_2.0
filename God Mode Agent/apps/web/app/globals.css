@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ECHO voice route tokens — JARVIS_UI_LOCKED_SPEC.md §6 (scoped, exact values) */
+.voice-root {
+  --bg: #000308;
+  --ink: #E8FBFF;
+  --ink-2: #7FA8B4;
+  --ink-3: #3C5B66;
+  --cyan: #22D3EE;
+  --cyan-hot: #8FF3FF;
+  --amber: #F5A524;
+  --red: #FF4D4D;
+  --hair: rgba(34, 211, 238, .16);
+  --hair-2: rgba(34, 211, 238, .08);
+}
+
+:root {
+  --jarvis-bg: #07121d;
+  --jarvis-surface: #0d1b2a;
+  --jarvis-surface-strong: #112438;
+  --jarvis-primary: #7dd3fc;
+  --jarvis-accent: #34d399;
+  --jarvis-text: #e2e8f0;
+  --jarvis-muted: #94a3b8;
+  --jarvis-border: rgba(148, 163, 184, 0.2);
+  --jarvis-radius: 18px;
+  --jarvis-spacing: 12px;
+  --jarvis-success: #22c55e;
+  --jarvis-warn: #f59e0b;
+  --jarvis-error: #ef4444;
+  --jarvis-ring: #7dd3fc;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-zinc-950 text-zinc-100 antialiased;
+  background: var(--jarvis-bg);
+  color: var(--jarvis-text);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
