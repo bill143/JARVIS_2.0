@@ -489,8 +489,20 @@ class IntelligenceConfig:
 class RoutingLearningConfig:
     """Routing sub-policy config within Learning."""
 
-    policy: str = "heuristic"  # heuristic | learned
+    policy: str = "heuristic"  # heuristic | learned | classifier | similarity
     min_samples: int = 5  # Min traces before trusting learned routing
+
+    # --- Classifier router (RouteLLM-style) -------------------------------
+    # Cost/quality dial: route to the strong model iff the classifier's
+    # P(strong model wins) >= cost_threshold. 0.0 always picks the strong
+    # model (max quality, max cost); 1.0 always picks the weak model (max
+    # savings, min quality). Adjustable live via PUT /v1/learning/routing/config.
+    cost_threshold: float = 0.5
+    classifier_model_path: str = ""  # Where the trained RouteClassifier JSON lives
+    classifier_hash_dim: int = 64  # Feature hashing dim; must match a loaded model
+
+    # --- Similarity router --------------------------------------------------
+    similarity_k: int = 3  # Nearest-neighbor exemplars to vote among
 
 
 @dataclass(slots=True)
@@ -744,6 +756,8 @@ class AgentConfig:
     system_prompt: str = ""  # inline system prompt (takes precedence if set)
     system_prompt_path: str = ""  # path to system prompt file (.txt, .md)
     context_from_memory: bool = True  # inject relevant memory context into prompts
+    session_memory_enabled: bool = False  # rolling short-term conversation memory
+    episodic_memory_enabled: bool = False  # long-term fact recall (Jarvis SDK)
 
     # Backward-compat property for old field name
     @property
@@ -1011,6 +1025,29 @@ class SchedulerConfig:
 
 
 @dataclass(slots=True)
+class VaultConfig:
+    """Obsidian/Markdown vault synchronization.
+
+    The vault path is server-side configurable (config.toml ``[vault]`` or the
+    ``jarvis config set`` command / runtime API) so it can be changed without a
+    rebuild. When ``enabled`` and the path is a git repository, a background
+    watcher auto-commits local edits and pulls remote changes on an interval,
+    then re-indexes the vault into the knowledge store. Off by default.
+    """
+
+    enabled: bool = False
+    path: str = ""  # Absolute path to the Obsidian/Markdown vault directory.
+    poll_interval: int = 30  # Seconds between vault change checks.
+    git_sync: bool = True  # Auto-commit local edits and pull remote changes.
+    auto_commit: bool = True
+    auto_pull: bool = True
+    remote: str = "origin"
+    branch: str = ""  # Empty -> current branch.
+    commit_message: str = "chore(vault): auto-sync from JARVIS"
+    reindex_on_change: bool = True
+
+
+@dataclass(slots=True)
 class WorkflowConfig:
     """Workflow engine settings."""
 
@@ -1117,6 +1154,23 @@ class SkillsConfig:
     auto_discover: bool = True
 
 
+@dataclass(slots=True)
+class AuthConfig:
+    """Dashboard/API authentication gateway.
+
+    Off by default (local-first). When ``enabled`` (or ``OPENJARVIS_AUTH_ENABLED``
+    is truthy) every HTML page and API route requires a valid session cookie;
+    unauthenticated requests are redirected to ``/login`` (browsers) or get a 401
+    (API clients). Sessions are server-side (SQLite) with a short TTL.
+    """
+
+    enabled: bool = False
+    db_path: str = str(DEFAULT_CONFIG_DIR / "auth.db")
+    session_ttl_hours: int = 12
+    cookie_name: str = "oj_session"
+    cookie_secure: bool = True  # only send the cookie over HTTPS in production
+
+
 @dataclass
 class JarvisConfig:
     """Top-level configuration for OpenJarvis."""
@@ -1132,8 +1186,10 @@ class JarvisConfig:
     traces: TracesConfig = field(default_factory=TracesConfig)
     channel: ChannelConfig = field(default_factory=ChannelConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    vault: VaultConfig = field(default_factory=VaultConfig)
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
     sessions: SessionConfig = field(default_factory=SessionConfig)
     a2a: A2AConfig = field(default_factory=A2AConfig)
@@ -1346,6 +1402,7 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
             "tools",
             "sandbox",
             "scheduler",
+            "vault",
             "workflow",
             "sessions",
             "a2a",
@@ -1489,6 +1546,8 @@ max_turns = 10
 # system_prompt = ""           # Inline system prompt
 # system_prompt_path = ""      # Path to system prompt file
 context_from_memory = true
+# session_memory_enabled = false   # Rolling short-term conversation memory (Jarvis SDK)
+# episodic_memory_enabled = false  # Long-term fact recall (Jarvis SDK)
 
 [tools.storage]
 default_backend = "sqlite"
@@ -1515,6 +1574,10 @@ update_interval = 100
 [learning.routing]
 policy = "heuristic"
 # min_samples = 5
+# cost_threshold = 0.5         # classifier: strong model iff P(strong wins) >= t
+# classifier_model_path = ""   # trained RouteClassifier JSON (see routing.training)
+# classifier_hash_dim = 64
+# similarity_k = 3
 
 # [learning.intelligence]
 # policy = "none"              # "sft" to learn from traces

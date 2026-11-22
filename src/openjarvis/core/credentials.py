@@ -51,6 +51,32 @@ TOOL_CREDENTIALS: dict[str, list[str]] = {
 }
 
 
+# Section under which ad-hoc secrets (e.g. channel-binding credentials that are
+# not part of TOOL_CREDENTIALS) are persisted.
+_SECRETS_SECTION = "_secrets"
+
+
+def _toml_escape(value: str) -> str:
+    """Escape a string for a TOML basic (double-quoted) string literal."""
+    out = value.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        out.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    )
+
+
+def _write_credentials(p: Path, creds: dict[str, dict[str, str]]) -> None:
+    """Serialize ``creds`` to a 0600 TOML file at ``p`` (escaping values)."""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for section, kvs in creds.items():
+        lines.append(f"[{section}]")
+        for k, v in kvs.items():
+            lines.append(f'{k} = "{_toml_escape(str(v))}"')
+        lines.append("")
+    p.write_text("\n".join(lines))
+    os.chmod(p, 0o600)
+
+
 def load_credentials(path: Path | None = None) -> dict[str, dict[str, str]]:
     """Load credentials from TOML file."""
     p = Path(path) if path else _DEFAULT_PATH
@@ -81,18 +107,30 @@ def save_credential(
         if tool_name not in creds:
             creds[tool_name] = {}
         creds[tool_name][key] = stripped
-
-        p.parent.mkdir(parents=True, exist_ok=True)
-        lines: list[str] = []
-        for section, kvs in creds.items():
-            lines.append(f"[{section}]")
-            for k, v in kvs.items():
-                lines.append(f'{k} = "{v}"')
-            lines.append("")
-        p.write_text("\n".join(lines))
-        os.chmod(p, 0o600)
+        _write_credentials(p, creds)
 
     os.environ[key] = stripped
+
+
+def set_secret(
+    var_name: str,
+    value: str,
+    *,
+    section: str = _SECRETS_SECTION,
+    path: Path | None = None,
+) -> None:
+    """Persist an arbitrary secret env var to credentials.toml (0600) + os.environ.
+
+    Unlike :func:`save_credential` this does not validate against
+    ``TOOL_CREDENTIALS`` — it backs dynamically-named secrets such as
+    per-binding channel credentials that are stored out of the database.
+    """
+    p = Path(path) if path else _DEFAULT_PATH
+    with _LOCK:
+        creds = load_credentials(path=p)
+        creds.setdefault(section, {})[var_name] = value
+        _write_credentials(p, creds)
+    os.environ[var_name] = value
 
 
 def get_credential_status(tool_name: str) -> dict[str, bool]:
@@ -108,3 +146,47 @@ def inject_credentials(path: Path | None = None) -> None:
         for k, v in kvs.items():
             if k not in os.environ:
                 os.environ[k] = v
+
+
+def load_dotenv(path: Path | None = None) -> int:
+    """Load ``KEY=VALUE`` lines from a ``.env`` file into os.environ.
+
+    Existing environment variables win (a real env var always overrides the
+    file), so ``.env`` is a fallback for local/self-hosted deployments. Blank
+    lines, ``#`` comments, and an optional ``export`` prefix are tolerated;
+    surrounding single/double quotes on the value are stripped. Returns the
+    number of variables set.
+    """
+    p = Path(path) if path else Path.cwd() / ".env"
+    if not p.exists():
+        return 0
+    count = 0
+    for raw_line in p.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :]
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+            val = val[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = val
+            count += 1
+    return count
+
+
+def bootstrap_secrets(
+    *,
+    dotenv_path: Path | None = None,
+    creds_path: Path | None = None,
+) -> None:
+    """Load secrets from ``.env`` then ``credentials.toml`` into os.environ.
+
+    Idempotent and safe to call on every server startup: real environment
+    variables are never overwritten, and missing files are a no-op.
+    """
+    load_dotenv(dotenv_path)
+    inject_credentials(creds_path)

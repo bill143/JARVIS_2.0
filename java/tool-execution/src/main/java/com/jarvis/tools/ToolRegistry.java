@@ -39,6 +39,17 @@ public final class ToolRegistry {
         return Optional.ofNullable(byName.get(name));
     }
 
+    /**
+     * Removes the tool registered under {@code name}, if any. Supports dynamically-scoped tools
+     * (e.g. MCP server tools that disappear when their server is removed).
+     *
+     * @return whether a tool was registered under that name
+     */
+    public boolean deregister(String name) {
+        Objects.requireNonNull(name, "name");
+        return byName.remove(name) != null;
+    }
+
     /** Returns a point-in-time snapshot of all registered tools. */
     public List<Tool> list() {
         return new ArrayList<>(byName.values());

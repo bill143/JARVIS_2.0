@@ -1,0 +1,52 @@
+# Fly.io deployment for JARVIS.
+#
+# Fly terminates TLS at its edge (force_https), so no Caddy is needed here —
+# the app image is deployed directly. Copy this to the repo root as `fly.toml`
+# (or pass `--config deploy/fly.toml`) and run:
+#
+#   fly launch --no-deploy --copy-config --config deploy/fly.toml
+#   fly volumes create jarvis_data --size 1
+#   fly secrets set OPENJARVIS_ADMIN_USER=admin OPENJARVIS_ADMIN_PASSWORD=... \
+#                   OPENAI_API_KEY=...
+#   fly deploy
+#
+# Set `app` to your unique Fly app name and `primary_region` to your region.
+
+app = "jarvis"
+primary_region = "iad"
+
+[build]
+  dockerfile = "../Dockerfile"
+
+[env]
+  PORT = "8000"
+  OPENJARVIS_AUTH_ENABLED = "true"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 200
+
+[[http_service.checks]]
+  method = "GET"
+  path = "/health"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "40s"
+
+# Persistent app state (config, credentials.toml, sqlite stores).
+[[mounts]]
+  source = "jarvis_data"
+  destination = "/home/jarvis/.openjarvis"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  cpus = 1

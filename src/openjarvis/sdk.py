@@ -12,6 +12,8 @@ from openjarvis.core.config import JarvisConfig, load_config
 from openjarvis.core.events import EventBus
 from openjarvis.core.types import Message, Role
 from openjarvis.engine._discovery import get_engine
+from openjarvis.memory.episodic import EpisodicMemory
+from openjarvis.memory.session import SessionMemory
 from openjarvis.system import JarvisSystem, SystemBuilder
 from openjarvis.telemetry.instrumented_engine import InstrumentedEngine
 from openjarvis.telemetry.store import TelemetryStore
@@ -174,6 +176,12 @@ class Jarvis:
         self._audit_logger: Any = None
         self._capability_policy: Any = None
         self.memory = MemoryHandle(self._config)
+        self.session_memory: Optional[SessionMemory] = (
+            SessionMemory() if self._config.agent.session_memory_enabled else None
+        )
+        self.episodic_memory: Optional[EpisodicMemory] = (
+            EpisodicMemory() if self._config.agent.episodic_memory_enabled else None
+        )
 
         # Set up telemetry
         if self._config.telemetry.enabled:
@@ -192,6 +200,20 @@ class Jarvis:
     def version(self) -> str:
         """Return the OpenJarvis version string."""
         return openjarvis.__version__
+
+    @property
+    def _memory_context_configured(self) -> bool:
+        """Whether any context source (knowledge base, session, episodic) is active.
+
+        ``context_from_memory`` alone used to gate all context injection, which
+        meant session/episodic memory did nothing unless a knowledge backend
+        also resolved. Session and episodic memory are independent toggles.
+        """
+        return (
+            self._config.agent.context_from_memory
+            or self.session_memory is not None
+            or self.episodic_memory is not None
+        )
 
     def _ensure_engine(self) -> None:
         """Lazily initialize the inference engine."""
@@ -310,7 +332,7 @@ class Jarvis:
         messages = [Message(role=Role.USER, content=query)]
 
         # Memory context injection
-        if context and self._config.agent.context_from_memory:
+        if context and self._memory_context_configured:
             messages = self._inject_context(query, messages)
 
         # InstrumentedEngine handles telemetry + energy recording
@@ -321,8 +343,12 @@ class Jarvis:
             max_tokens=max_tokens,
         )
 
+        content = result.get("content", "")
+        if self.session_memory is not None:
+            self.session_memory.store(query, content)
+
         return {
-            "content": result.get("content", ""),
+            "content": content,
             "usage": result.get("usage", {}),
             "model": model_name,
             "engine": self._resolved_engine_key,
@@ -355,16 +381,21 @@ class Jarvis:
 
         messages = [Message(role=Role.USER, content=query)]
 
-        if context and self._config.agent.context_from_memory:
+        if context and self._memory_context_configured:
             messages = self._inject_context(query, messages)
 
+        parts: List[str] = []
         async for token in self._engine.stream(
             messages,
             model=model_name,
             temperature=temperature,
             max_tokens=max_tokens,
         ):
+            parts.append(token)
             yield token
+
+        if self.session_memory is not None:
+            self.session_memory.store(query, "".join(parts))
 
     async def ask_full_stream(
         self,
@@ -398,7 +429,7 @@ class Jarvis:
 
         messages = [Message(role=Role.USER, content=query)]
 
-        if context and self._config.agent.context_from_memory:
+        if context and self._memory_context_configured:
             messages = self._inject_context(query, messages)
 
         parts: List[str] = []
@@ -413,9 +444,13 @@ class Jarvis:
             yield {"token": token, "index": i}
             i += 1
 
+        full_content = "".join(parts)
+        if self.session_memory is not None:
+            self.session_memory.store(query, full_content)
+
         yield {
             "done": True,
-            "content": "".join(parts),
+            "content": full_content,
             "model": model_name,
             "engine": self._resolved_engine_key,
         }
@@ -486,16 +521,24 @@ class Jarvis:
         ctx = AgentContext()
 
         # Context injection
-        if context and self._config.agent.context_from_memory:
+        if context and self._memory_context_configured:
             try:
-                from openjarvis.cli.ask import _get_memory_backend
                 from openjarvis.tools.storage.context import (
                     ContextConfig,
                     inject_context,
                 )
 
-                backend = _get_memory_backend(self._config)
-                if backend is not None:
+                backend = None
+                if self._config.agent.context_from_memory:
+                    from openjarvis.cli.ask import _get_memory_backend
+
+                    backend = _get_memory_backend(self._config)
+
+                if (
+                    backend is not None
+                    or self.session_memory is not None
+                    or self.episodic_memory is not None
+                ):
                     ctx_cfg = ContextConfig(
                         top_k=self._config.memory.context_top_k,
                         min_score=self._config.memory.context_min_score,
@@ -506,6 +549,8 @@ class Jarvis:
                         [],
                         backend,
                         config=ctx_cfg,
+                        session_memory=self.session_memory,
+                        episodic_memory=self.episodic_memory,
                     )
                     for msg in context_messages:
                         ctx.conversation.add(msg)
@@ -513,6 +558,8 @@ class Jarvis:
                 logger.warning("Failed to inject memory context for agent: %s", exc)
 
         result = agent_obj.run(query, context=ctx)
+        if self.session_memory is not None:
+            self.session_memory.store(query, result.content)
         return {
             "content": result.content,
             "usage": {},
@@ -534,19 +581,42 @@ class Jarvis:
         query: str,
         messages: List[Message],
     ) -> List[Message]:
-        """Inject memory context into messages."""
+        """Inject memory context into messages.
+
+        Combines knowledge-base retrieval (gated by ``context_from_memory``,
+        and only if a backend actually resolves) with session/episodic
+        memory (gated independently — they work even with no knowledge
+        backend indexed).
+        """
         try:
-            from openjarvis.cli.ask import _get_memory_backend
             from openjarvis.tools.storage.context import ContextConfig, inject_context
 
-            backend = _get_memory_backend(self._config)
-            if backend is not None:
-                ctx_cfg = ContextConfig(
-                    top_k=self._config.memory.context_top_k,
-                    min_score=self._config.memory.context_min_score,
-                    max_context_tokens=self._config.memory.context_max_tokens,
-                )
-                return inject_context(query, messages, backend, config=ctx_cfg)
+            backend = None
+            if self._config.agent.context_from_memory:
+                from openjarvis.cli.ask import _get_memory_backend
+
+                backend = _get_memory_backend(self._config)
+
+            if (
+                backend is None
+                and self.session_memory is None
+                and self.episodic_memory is None
+            ):
+                return messages
+
+            ctx_cfg = ContextConfig(
+                top_k=self._config.memory.context_top_k,
+                min_score=self._config.memory.context_min_score,
+                max_context_tokens=self._config.memory.context_max_tokens,
+            )
+            return inject_context(
+                query,
+                messages,
+                backend,
+                config=ctx_cfg,
+                session_memory=self.session_memory,
+                episodic_memory=self.episodic_memory,
+            )
         except Exception as exc:
             logger.warning("Failed to inject memory context: %s", exc)
         return messages

@@ -34,11 +34,25 @@ final class MultiAgentService {
                     "You are the " + role + " in a small agent team. " + prompt)).response();
             if (audit != null) {
                 audit.record(new AuditEvent(AuditCategory.SYSTEM, "agent:" + role,
-                        AuditTrigger.AUTONOMOUS, RiskTier.UNKNOWN, AuditOutcome.SUCCESS,
+                        AuditTrigger.AUTONOMOUS, riskFor(role), AuditOutcome.SUCCESS,
                         "multi-agent turn for goal: " + goal));
             }
             return out;
         });
+    }
+
+    /**
+     * Classifies a sub-role turn into the governance risk taxonomy instead of leaving it
+     * {@code UNKNOWN}. The PLANNER and CRITIC only read and reason (they produce a plan or a
+     * critique with no side effects), so their turns are {@link RiskTier#READ_ONLY}. The EXECUTOR
+     * carries out the plan and may invoke mutating tools, so it is classified {@link
+     * RiskTier#MUTATING} — the conservative choice for an actor that can change state.
+     */
+    static RiskTier riskFor(Role role) {
+        return switch (role) {
+            case PLANNER, CRITIC -> RiskTier.READ_ONLY;
+            case EXECUTOR -> RiskTier.MUTATING;
+        };
     }
 
     static String roleName(Role role) {

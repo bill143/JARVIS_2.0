@@ -65,6 +65,14 @@ class WebServerTest {
         assertTrue(response.body().contains("data-nav=\"intel\""));     // and its nav entry
         assertTrue(response.body().contains("PROJECT DISCUSSION"));      // discussion page
         assertTrue(response.body().contains("data-nav=\"discussion\"")); // and its nav entry
+        assertTrue(response.body().contains("data-nav=\"brain\""));      // BRAIN (Obsidian) tab
+        assertTrue(response.body().contains("OBSIDIAN VAULT"));          // and its page
+        assertTrue(response.body().contains("data-nav=\"galaxy\""));     // Knowledge Galaxy tab
+        assertTrue(response.body().contains("KNOWLEDGE GALAXY"));        // and its page
+        assertTrue(response.body().contains("galaxyCanvas"));            // the 3D canvas
+        assertTrue(response.body().contains("jarvis:flyto"));            // fly-to wiring
+        assertTrue(response.body().contains("data-nav=\"solicitations\""));   // Solicitations tab
+        assertTrue(response.body().contains("SOLICITATIONS COMMAND CENTER"));  // and its page
     }
 
     @Test
@@ -80,7 +88,9 @@ class WebServerTest {
     void chatAnswersThroughTheApi() throws Exception {
         HttpResponse<String> response = post("/chat", "{\"prompt\":\"hello dashboard\"}");
         assertEquals(200, response.statusCode());
-        assertTrue(response.body().contains("\"completed\":true"));
+        // Schema is {answer, sources:[...]} — the echoed prompt comes back as the answer.
+        assertTrue(response.body().contains("\"answer\":"), response.body());
+        assertTrue(response.body().contains("\"sources\":"), response.body());
         assertTrue(response.body().contains("hello dashboard"));
     }
 
@@ -89,7 +99,7 @@ class WebServerTest {
         HttpResponse<String> response = post("/chat",
                 "{\"prompt\":\"outline a plan\",\"mode\":\"research\"}");
         assertEquals(200, response.statusCode());
-        assertTrue(response.body().contains("\"completed\":true"));
+        assertTrue(response.body().contains("\"answer\":"), response.body());
         // Offline echo returns the effective prompt, so the mode preamble is applied.
         assertTrue(response.body().contains("Mode: Research"));
         assertTrue(response.body().contains("outline a plan"));
@@ -214,7 +224,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, broker, policy, null, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, broker, policy, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             // A tool thread asks for approval; it will block until we answer via the endpoint.
@@ -263,7 +273,7 @@ class WebServerTest {
         MultiAgentService svc = new MultiAgentService(api, null);
         WebServer wired = WebServer.start(api, false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, svc, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(HttpRequest.newBuilder(
                             URI.create("http://localhost:" + wired.port() + "/agents/run"))
@@ -285,7 +295,7 @@ class WebServerTest {
         AutonomousService svc = new AutonomousService(api, null);
         WebServer wired = WebServer.start(api, false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, svc, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(HttpRequest.newBuilder(
                             URI.create("http://localhost:" + wired.port() + "/autonomous/run"))
@@ -324,7 +334,7 @@ class WebServerTest {
                 new com.jarvis.memory.InMemoryRecordStore());
         WebServer wired = WebServer.start(api, false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, svc));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(HttpRequest.newBuilder(
                             URI.create("http://localhost:" + wired.port() + "/discussion/run"))
@@ -347,6 +357,99 @@ class WebServerTest {
         assertEquals(503, post("/discussion/run", "{\"topic\":\"x\"}").statusCode());
     }
 
+    // ---- /discussion/run: consensus fields (additive, backward compatible) -------------------
+
+    /** A chair-side JarvisApi that scripts replies by inspecting the prompt shape. */
+    private static JarvisApi scriptedConsensusChairApi(String voteDecision) {
+        return new JarvisApi() {
+            @Override
+            public com.jarvis.api.ChatResponse chat(com.jarvis.api.ChatRequest request) {
+                String p = request.prompt();
+                String text = p.contains("Vote on whether") ? "DECISION: " + voteDecision + "\nRATIONALE: ok"
+                        : p.contains("Decide the SINGLE next question") ? "What is the budget?"
+                        : "outcome synthesized";
+                return new com.jarvis.api.ChatResponse(request.sessionId(), true, text, 0);
+            }
+
+            @Override
+            public com.jarvis.api.PlanResponse plan(com.jarvis.api.PlanRequest request) {
+                throw new UnsupportedOperationException("not used by discussions");
+            }
+        };
+    }
+
+    private static OrchestrationService votingOrchestrationFor(ProviderSettingsService p, String voteDecision) {
+        return new OrchestrationService(p, null, "m", a -> req -> {
+            String content = req.messages().get(0).content();
+            String text = content.contains("Vote on whether")
+                    ? "DECISION: " + voteDecision + "\nRATIONALE: ok" : "advice from " + a.name();
+            return new com.jarvis.integrations.llm.LlmProvider.Result(text, 1, 1);
+        });
+    }
+
+    @Test
+    void discussionRunEndpointReturnsFinalizedConsensusWhenGloballyEnabledAndBothApprove() throws Exception {
+        ProviderSettingsService providers = new ProviderSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), (b, k) -> java.util.List.of());
+        providers.save("Chair", "openai", "https://x/v1", "k1", "m-chair", true);
+        providers.save("SecondOpinion", "openai", "https://x/v1", "k2", "m-second", false);
+        ConsensusSettings enabled = new ConsensusSettings(new ConnectorSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), java.util.Map.of(
+                        "JARVIS_CONSENSUS_ENABLED", "true", "JARVIS_CONSENSUS_MODE", "UNANIMOUS",
+                        "JARVIS_CONSENSUS_MAX_ROUNDS", "2")::get));
+        DiscussionService svc = new DiscussionService(scriptedConsensusChairApi("APPROVE"), null, null,
+                new com.jarvis.memory.InMemoryRecordStore(), providers,
+                votingOrchestrationFor(providers, "APPROVE"), enabled);
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, svc, null, null, null, null, null, null, null, null, null));
+        try {
+            HttpResponse<String> r = post2r("http://localhost:" + wired.port() + "/discussion/run",
+                    "{\"topic\":\"go-kart budget\"}");
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("\"finalized\":true"), r.body());
+            assertTrue(r.body().contains("\"achieved\":true"), r.body());
+            assertTrue(r.body().contains("\"blockingAgents\":[]"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void discussionRunEndpointIgnoresRequestOverrideWhenGloballyDisabled() throws Exception {
+        ProviderSettingsService providers = new ProviderSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), (b, k) -> java.util.List.of());
+        providers.save("Chair", "openai", "https://x/v1", "k1", "m-chair", true);
+        providers.save("SecondOpinion", "openai", "https://x/v1", "k2", "m-second", false);
+        // No ConsensusSettings wired at all -> globally disabled, matching production's safe default.
+        DiscussionService svc = new DiscussionService(scriptedConsensusChairApi("REJECT"), null, null,
+                new com.jarvis.memory.InMemoryRecordStore(), providers,
+                votingOrchestrationFor(providers, "REJECT"));
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, svc, null, null, null, null, null, null, null, null, null));
+        try {
+            // The request explicitly asks for UNANIMOUS consensus, but the global switch is off, so
+            // this must be ignored entirely (default-deny) — the response looks like plain legacy.
+            HttpResponse<String> r = post2r("http://localhost:" + wired.port() + "/discussion/run",
+                    "{\"topic\":\"go-kart budget\",\"consensusEnabled\":true,"
+                            + "\"consensusMode\":\"UNANIMOUS\",\"consensusMaxRounds\":1}");
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("\"finalized\":true"), r.body());
+            assertTrue(r.body().contains("consensus disabled"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
     @Test
     void semanticEndpointsRememberRecallAndReportKeywordFallback() throws Exception {
         // Dormant embeddings (no key) → keyword fallback; recall still works and mode is reported.
@@ -357,7 +460,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, svc, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null, null, null, null));
         try {
             String b = "http://localhost:" + wired.port();
             post2(b + "/semantic",
@@ -379,14 +482,190 @@ class WebServerTest {
     }
 
     @Test
-    void knowledgeBaseEndpointsAddSearchAndList() throws Exception {
-        com.jarvis.kb.KnowledgeBase kb =
-                new com.jarvis.kb.KnowledgeBase(new com.jarvis.memory.InMemoryRecordStore());
+    void agentTeamEndpointsRunAndSupportHumanInTheLoop() throws Exception {
+        // Issue #2: the team endpoint composes a team, runs it, and exposes budget usage; the
+        // start/status/redirect endpoints back the human-in-the-loop flow.
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()), false, "m", 0);
+        try {
+            String b = "http://localhost:" + wired.port();
+            HttpResponse<String> run = post2r(b + "/agents/team/run",
+                    "{\"task\":\"what is 2+2?\",\"maxTokens\":100000}");
+            assertEquals(200, run.statusCode());
+            assertTrue(run.body().contains("\"team\""));
+            assertTrue(run.body().contains("\"steps\""));
+            assertTrue(run.body().contains("\"usage\""));
+            assertTrue(run.body().contains("executor"));   // simple task → executor selected
+
+            assertEquals(400, post2r(b + "/agents/team/run", "{\"task\":\"\"}").statusCode());
+
+            // Background start → a run id we can poll and redirect.
+            String id = post2r(b + "/agents/team/start", "{\"task\":\"say hi\"}").body()
+                    .replaceAll(".*\"runId\":\"([^\"]+)\".*", "$1");
+            assertTrue(id.startsWith("team-"));
+            assertTrue(post2r(b + "/agents/team/redirect",
+                    "{\"id\":\"" + id + "\",\"feedback\":\"be brief\"}").body().contains("\"ok\":true"));
+            assertEquals(404, get2(b + "/agents/team/status?id=ghost").statusCode());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void brainConnectIndexesUnifiesAndGatesWrites() throws Exception {
+        // Issue #1: connect a vault live, mirror it into the unified store, and gate writes on approval.
+        java.nio.file.Path vault = java.nio.file.Files.createTempDirectory("vault");
+        java.nio.file.Files.writeString(vault.resolve("Motor.md"), "# Motor\nbrushless torque curve");
+        BrainVault brain = BrainVault.fromConfig(null, false, null);
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                true, "m", 0, new HardwareMonitor(), null, true, null,
+                memory, null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, brain, null, null, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            // Connect live with writes enabled.
+            HttpResponse<String> con = post2r(b + "/brain/connect",
+                    "{\"path\":\"" + vault.toString().replace("\\", "\\\\") + "\",\"allowWrites\":true}");
+            assertTrue(con.body().contains("\"configured\":true"), con.body());
+            assertTrue(con.body().contains("\"count\":1"));
+            // The vault note is unified into the semantic store.
+            assertTrue(get2(b + "/semantic").body().contains("Motor"));
+
+            // Propose a write — nothing on disk yet.
+            String pid = post2r(b + "/brain/writes",
+                    "{\"action\":\"propose\",\"path\":\"Ideas.md\",\"content\":\"# Ideas\\nspin it faster\",\"kind\":\"note\"}")
+                    .body().replaceAll(".*\"id\":\"([^\"]+)\".*", "$1");
+            assertTrue(get2(b + "/brain/writes").body().contains("Ideas.md"));
+            assertFalse(java.nio.file.Files.exists(vault.resolve("Ideas.md")));
+
+            // Approve → the file is written to disk.
+            assertTrue(post2r(b + "/brain/writes",
+                    "{\"action\":\"approve\",\"id\":\"" + pid + "\"}").body().contains("\"ok\":true"));
+            assertTrue(java.nio.file.Files.exists(vault.resolve("Ideas.md")));
+
+            // A path that escapes the vault is refused (400).
+            assertEquals(400, post2r(b + "/brain/writes",
+                    "{\"action\":\"propose\",\"path\":\"../evil.md\",\"content\":\"x\",\"kind\":\"note\"}").statusCode());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void connectorsConfigEndpointSavesFieldsAndMasksSecrets() throws Exception {
+        // Issue #1: connector settings can be saved in-app (POST) and are read back (GET) with secrets
+        // masked. The GET catalog exposes all seven connectors.
+        com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                true, "m", 0, new HardwareMonitor(), null, true, null, memory);
+        try {
+            String b = "http://localhost:" + wired.port() + "/connectors/config";
+            String initial = get2(b).body();
+            for (String c : new String[]{"obsidian", "samgov", "github", "openhuman",
+                    "embeddings", "gdrive", "onedrive"}) {
+                assertTrue(initial.contains("\"" + c + "\""), "missing connector " + c);
+            }
+            // Save a secret (SAM.gov key) and a plain field (base URL).
+            post2r(b, "{\"key\":\"samgov.apiKey\",\"value\":\"nvapi-secret\"}");
+            post2r(b, "{\"key\":\"samgov.baseUrl\",\"value\":\"https://api.sam.gov/x\"}");
+            String after = get2(b).body();
+            assertFalse(after.contains("nvapi-secret"));           // secret never echoed
+            assertTrue(after.contains("https://api.sam.gov/x"));   // plain field prefilled
+            assertTrue(after.contains("\"set\":true"));            // secret reported as set
+            // It landed in the same store scope AppWiring's suppliers read.
+            assertEquals("nvapi-secret",
+                    new ConnectorSettingsService(memory).resolve("samgov.apiKey", "SAMGOV_API_KEY"));
+            // Unknown keys are rejected (no arbitrary store writes).
+            assertEquals(400, post2r(b, "{\"key\":\"evil.key\",\"value\":\"x\"}").statusCode());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void memoryTabAndIntelligenceTabShareOneUnifiedFactStore() throws Exception {
+        // Issue #2: the Memory tab (/memory) and Personal Intelligence tab (/semantic) must be one
+        // source of truth. A fact added in either surfaces in the other.
+        SemanticMemoryService svc = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        com.jarvis.memory.MemoryStore<String> memory = new com.jarvis.memory.InMemoryStore<>();
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                memory, null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            // Added via the Memory tab → visible in the Personal Intelligence tab.
+            post2r(b + "/memory", "{\"action\":\"add\",\"value\":\"prefers metric units\"}");
+            assertTrue(get2(b + "/semantic").body().contains("prefers metric units"));
+            // Added via the Personal Intelligence tab → visible in the Memory tab.
+            post2r(b + "/semantic", "{\"action\":\"add\",\"title\":\"Coffee\",\"content\":\"black no sugar\"}");
+            String mem = get2(b + "/memory").body();
+            assertTrue(mem.contains("prefers metric units"));
+            assertTrue(mem.contains("Coffee") && mem.contains("black no sugar"));
+            // The Memory tab lists facts by their semantic id, so deleting there flows to the one store.
+            String id = mem.replaceAll(".*\"key\":\"(sm-[^\"]+)\".*", "$1");
+            post2r(b + "/memory", "{\"action\":\"delete\",\"key\":\"" + id + "\"}");
+            assertFalse(get2(b + "/semantic").body().contains(id));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void semanticEndpointEditsAndDeletesEntries() throws Exception {
+        // Issue #3: the Personal Intelligence panel can edit and delete individual entries.
+        SemanticMemoryService svc = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
         WebServer wired = WebServer.start(
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, kb, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            post2r(b + "/semantic", "{\"action\":\"add\",\"title\":\"Draft\",\"content\":\"typo hlelo\"}");
+            String listed = get2(b + "/semantic").body();
+            assertTrue(listed.contains("typo hlelo"));
+            String id = listed.replaceAll(".*\"id\":\"(sm-[^\"]+)\".*", "$1");
+
+            // Edit the entry in place (same id, corrected content).
+            post2r(b + "/semantic",
+                    "{\"action\":\"update\",\"id\":\"" + id + "\",\"title\":\"Draft\",\"content\":\"fixed hello\"}");
+            String afterEdit = get2(b + "/semantic").body();
+            assertTrue(afterEdit.contains("fixed hello"));
+            assertFalse(afterEdit.contains("typo hlelo"));
+            assertTrue(afterEdit.contains(id));   // id preserved across edit
+
+            // Delete it → gone.
+            post2r(b + "/semantic", "{\"action\":\"delete\",\"id\":\"" + id + "\"}");
+            assertFalse(get2(b + "/semantic").body().contains(id));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void knowledgeBaseEndpointsAddSearchAndList() throws Exception {
+        // The Knowledge tab is now backed by the unified semantic store (one index, no second store),
+        // so wire a SemanticMemoryService (Governance field #13) rather than a standalone KnowledgeBase.
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             post2(base + "/kb",
@@ -404,13 +683,649 @@ class WebServerTest {
     }
 
     @Test
+    void chatRemembersAFactIntoTheStoreAndReturnsTheNewNode() throws Exception {
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null, null));
+        try {
+            String base = "http://localhost:" + wired.port();
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(URI.create(base + "/chat"))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"prompt\":\"remember that the gate code is 4417\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("\"remembered\":"), r.body());   // live-node marker
+            assertTrue(r.body().contains("Noted, sir"), r.body());
+            // The fact is now a knowledge node in the unified store — grounds chat + appears in galaxy.
+            assertTrue(semantic.all().stream().anyMatch(d -> d.content().contains("gate code is 4417")
+                    && "knowledge".equals(SemanticMemoryService.sourceOf(d))));
+            // And it is retrievable by the next question (Stage A grounding).
+            assertTrue(KnowledgeGrounding.retrieve(semantic.all(), "what is the gate code", 6)
+                    .stream().anyMatch(h -> h.content().contains("4417")));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void statusReportsLiveNoteCountForTheGreeting() throws Exception {
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        semantic.remember("A", "one", 1L);
+        semantic.remember("B", "two", 2L);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null, null));
+        try {
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + wired.port() + "/status")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(r.body().contains("\"notes\":2"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void statusReportsBrainConnectedWithNoteCountAndPath(@org.junit.jupiter.api.io.TempDir java.nio.file.Path vault)
+            throws Exception {
+        java.nio.file.Files.writeString(vault.resolve("note.md"), "# Hi\ncontent");
+        BrainVault brain = BrainVault.fromConfig(vault.toString(), true, null);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, null, brain, null, null, null, null, null, null, null));
+        try {
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + wired.port() + "/status")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(r.body().contains("\"brainConfigured\":true"), r.body());
+            assertTrue(r.body().contains("\"brainNotes\":1"), r.body());
+            assertTrue(r.body().contains(vault.toString().replace("\\", "\\\\")), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void statusReportsBrainNotConnectedWhenUnconfigured() throws Exception {
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null, null);
+        try {
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + wired.port() + "/status")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(r.body().contains("\"brainConfigured\":false"), r.body());
+            assertTrue(r.body().contains("\"brainNotes\":0"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void knowledgeGraphEndpointReturnsNodesAndLinksAlignedWithSourceIds() throws Exception {
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        semantic.rememberSource("Marina permits", "coastal review for the marina", "knowledge", 1L);
+        semantic.rememberSource("Marina schedule", "the marina opens in June", "knowledge", 2L);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null, null));
+        try {
+            String base = "http://localhost:" + wired.port();
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(
+                            URI.create(base + "/knowledge/graph")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("\"nodes\":"), r.body());
+            assertTrue(r.body().contains("\"links\":"), r.body());
+            assertTrue(r.body().contains("Marina permits"), r.body());
+            assertTrue(r.body().contains("\"source\":\"knowledge\""), r.body());
+            assertTrue(r.body().contains("\"count\":2"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void chatGroundsOnTheUnifiedStoreAndCitesSources() throws Exception {
+        SemanticMemoryService semantic = new SemanticMemoryService(
+                new com.jarvis.memory.InMemoryRecordStore(),
+                com.jarvis.rag.EmbeddingProvider.DORMANT, null);
+        semantic.rememberSource("Riverfront bid", "the riverfront marina bid is due Friday",
+                "knowledge", 1L);
+        semantic.rememberSource("Coffee", "black, no sugar", "memory", 2L);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, semantic, null, null, null, null, null, null, null, null, null, null));
+        try {
+            String base = "http://localhost:" + wired.port();
+            HttpResponse<String> r = client.send(HttpRequest.newBuilder(URI.create(base + "/chat"))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    "{\"prompt\":\"when is the riverfront marina bid due\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, r.statusCode());
+            // Schema: {answer, sources:[{id,title,score}]}.
+            assertTrue(r.body().contains("\"answer\":"), r.body());
+            assertTrue(r.body().contains("\"sources\":"), r.body());
+            assertTrue(r.body().contains("Riverfront bid"), r.body());       // cited source title
+            assertTrue(r.body().contains("\"id\":"), r.body());              // node id present
+            // Grounding is injected into the prompt (offline echo returns the effective prompt).
+            assertTrue(r.body().contains("Relevant notes from your knowledge"), r.body());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void providersEndpointsListPresetsSaveActivateAndFetchModels() throws Exception {
+        // Fake fetcher stands in for the network /models call so the test stays offline.
+        ProviderSettingsService providers = new ProviderSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(),
+                (baseUrl, apiKey) -> java.util.List.of("meta/llama-3.3-70b-instruct",
+                        "nvidia/nemotron-nano-9b-v2"));
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, null, providers, null, null, null, null, null, null, null, null));
+        try {
+            String base = "http://localhost:" + wired.port();
+            // Presets are always offered; nothing configured yet.
+            HttpResponse<String> initial = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/providers")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(initial.body().contains("\"presets\""));
+            assertTrue(initial.body().contains("NVIDIA"));
+            assertTrue(initial.body().contains("integrate.api.nvidia.com"));
+
+            // Save an NVIDIA provider with a key and make it active.
+            post2(base + "/providers", "{\"name\":\"NVIDIA\",\"kind\":\"openai\","
+                    + "\"baseUrl\":\"https://integrate.api.nvidia.com/v1\","
+                    + "\"apiKey\":\"nvapi-secret\",\"model\":\"meta/llama-3.3-70b-instruct\","
+                    + "\"active\":true}");
+            HttpResponse<String> after = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/providers")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(after.body().contains("\"configured\""));
+            assertTrue(after.body().contains("\"hasKey\":true"));
+            assertTrue(after.body().contains("\"active\":true"));
+            assertFalse(after.body().contains("nvapi-secret"));   // key is never returned
+
+            // Model list comes from the fetcher seam.
+            HttpResponse<String> models = client.send(HttpRequest.newBuilder(
+                            URI.create(base + "/providers/models?name=NVIDIA")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(models.body().contains("nvidia/nemotron-nano-9b-v2"));
+            assertTrue(models.body().contains("meta/llama-3.3-70b-instruct"));
+
+            // Multi-provider: add a second provider, each with its own key.
+            post2(base + "/providers", "{\"name\":\"OpenRouter\",\"kind\":\"openai\","
+                    + "\"baseUrl\":\"https://openrouter.ai/api/v1\",\"apiKey\":\"or-secret\","
+                    + "\"model\":\"x/y\",\"active\":false}");
+            HttpResponse<String> two = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/providers")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(two.body().contains("OpenRouter") && two.body().contains("NVIDIA"));
+            assertFalse(two.body().contains("or-secret"));   // second key also never returned
+
+            // Switch the active brain to the second provider.
+            HttpResponse<String> act = post2r(base + "/providers/activate", "{\"name\":\"OpenRouter\"}");
+            assertTrue(act.body().contains("\"activated\":true"));
+            assertEquals(404, post2r(base + "/providers/activate", "{\"name\":\"nope\"}").statusCode());
+
+            // Test connection succeeds via the fake fetcher (a real 401 would report ok:false).
+            HttpResponse<String> test = post2r(base + "/providers/test", "{\"name\":\"NVIDIA\"}");
+            assertTrue(test.body().contains("\"ok\":true"));
+
+            // Remove a provider.
+            HttpResponse<String> del = client.send(HttpRequest.newBuilder(
+                    URI.create(base + "/providers?name=OpenRouter")).DELETE().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(del.body().contains("\"removed\":true"));
+            HttpResponse<String> afterDel = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/providers")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            // "OpenRouter" is also a preset name, so key on its unique configured model instead.
+            assertFalse(afterDel.body().contains("x/y"));
+
+            // Assign an orchestration tier (role) and confirm it round-trips in the list.
+            assertTrue(post2r(base + "/providers/role",
+                    "{\"name\":\"NVIDIA\",\"role\":\"conductor\"}").body().contains("\"ok\":true"));
+            HttpResponse<String> withRole = client.send(
+                    HttpRequest.newBuilder(URI.create(base + "/providers")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(withRole.body().contains("\"role\":\"conductor\""));
+
+            // Empty name is rejected.
+            HttpResponse<String> bad = client.send(HttpRequest.newBuilder(URI.create(base + "/providers"))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString("{\"name\":\"\"}")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(400, bad.statusCode());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void brainEndpointsListSearchOpenAndBlockTraversal() throws Exception {
+        java.nio.file.Files.writeString(tmp.resolve("Go-kart.md"),
+                "# Go-kart\nbrushless motor and battery pack");
+        java.nio.file.Files.createDirectories(tmp.resolve("sub"));
+        java.nio.file.Files.writeString(tmp.resolve("sub/Recipe.md"), "# Recipe\ntomato sauce");
+        BrainVault brain = BrainVault.fromConfig(tmp.toString(), true, null);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, brain, null, null, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            HttpResponse<String> status = client.send(
+                    HttpRequest.newBuilder(URI.create(b + "/brain")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(status.body().contains("\"configured\":true"));
+            assertTrue(status.body().contains("\"readOnly\":true"));
+            assertTrue(status.body().contains("Go-kart.md"));
+
+            HttpResponse<String> found = client.send(HttpRequest.newBuilder(
+                            URI.create(b + "/brain/search?q=brushless+battery&k=5")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(found.body().contains("Go-kart"));
+
+            HttpResponse<String> note = client.send(HttpRequest.newBuilder(
+                            URI.create(b + "/brain/note?path=" + java.net.URLEncoder.encode(
+                                    "sub/Recipe.md", java.nio.charset.StandardCharsets.UTF_8)))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, note.statusCode());
+            assertTrue(note.body().contains("tomato sauce"));
+
+            // Path traversal is refused (403), not served.
+            HttpResponse<String> escape = client.send(HttpRequest.newBuilder(
+                            URI.create(b + "/brain/note?path=" + java.net.URLEncoder.encode(
+                                    "../secret.md", java.nio.charset.StandardCharsets.UTF_8)))
+                            .GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(403, escape.statusCode());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void brainEndpointReportsUnconfiguredEmptyStateGracefully() throws Exception {
+        BrainVault brain = BrainVault.fromConfig(null, true, null);   // no vault
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, brain, null, null, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            assertTrue(client.send(HttpRequest.newBuilder(URI.create(b + "/brain")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body().contains("\"configured\":false"));
+            // Note endpoint is 503 when no vault is connected.
+            assertEquals(503, client.send(HttpRequest.newBuilder(
+                            URI.create(b + "/brain/note?path=x.md")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).statusCode());
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void solicitationsEndpointsRefreshListDetailAndMap() throws Exception {
+        com.jarvis.solicitations.Solicitation s = new com.jarvis.solicitations.Solicitation(
+                null, "sam.gov", "n1", "Roof Replacement", "36C25526R0081", "VA", "VAMC", "SDVOSB",
+                java.util.List.of("236220"),
+                new com.jarvis.solicitations.PlaceOfPerformance("Richmond", "VA", 37.5, -77.4),
+                "2026-06-01", "2026-08-01", 2_000_000L, 8_000_000L, "Solicitation", "desc",
+                java.util.List.of(new com.jarvis.solicitations.SolicitationDocument(
+                        "spec.pdf", "https://sam.gov/x/spec.pdf", "pdf", null, "2026-06-01", "sam.gov")),
+                java.util.List.of(), "https://sam.gov/opp/n1", "2026-07-14T00:00:00Z");
+        com.jarvis.solicitations.SolicitationSourceAdapter src =
+                new com.jarvis.solicitations.SolicitationSourceAdapter() {
+                    public String source() {
+                        return "sam.gov";
+                    }
+
+                    public boolean available() {
+                        return true;
+                    }
+
+                    public java.util.List<com.jarvis.solicitations.Solicitation> searchOpportunities(
+                            com.jarvis.solicitations.SolicitationFilters f) {
+                        return java.util.List.of(s);
+                    }
+
+                    public com.jarvis.solicitations.Solicitation getOpportunityById(String id) {
+                        return s;
+                    }
+
+                    public java.util.List<com.jarvis.solicitations.SolicitationDocument>
+                            getOpportunityDocuments(String id) {
+                        return s.documents();
+                    }
+                };
+        SolicitationsService svc = new SolicitationsService(java.util.List.of(src),
+                java.util.List.of(), null);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            HttpResponse<String> refresh = post2r(b + "/solicitations/refresh", "{}");
+            assertTrue(refresh.body().contains("\"total\":1"));
+
+            HttpResponse<String> list = client.send(
+                    HttpRequest.newBuilder(URI.create(b + "/solicitations")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(list.body().contains("Roof Replacement"));
+            assertTrue(list.body().contains("https://sam.gov/opp/n1"));
+
+            HttpResponse<String> filtered = client.send(HttpRequest.newBuilder(
+                            URI.create(b + "/solicitations?setAside=8(a)")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(filtered.body().contains("\"count\":0"));
+
+            HttpResponse<String> detail = client.send(HttpRequest.newBuilder(
+                            URI.create(b + "/solicitations/detail?id=sam.gov:n1")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(detail.body().contains("spec.pdf"));
+            assertTrue(detail.body().contains("\"amendments\""));
+            assertTrue(detail.body().contains("\"sourceUrl\":\"https://sam.gov/opp/n1\""));
+
+            HttpResponse<String> map = client.send(HttpRequest.newBuilder(
+                            URI.create(b + "/solicitations/map")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(map.body().contains("\"plotted\":1"));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    private HttpResponse<String> post2r(String url, String json) throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(json)).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
+    void orchestrateAndGatedLaneEndpointsRunEndToEnd() throws Exception {
+        // A tiered roster (one conductor, two workers), all self-hosted, with offline fake models.
+        ProviderSettingsService providers = new ProviderSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), (b, k) -> java.util.List.of());
+        providers.save("Boss", "openai", "http://localhost:11434/v1", "k", "m", false);
+        providers.setRole("Boss", "conductor");
+        providers.save("W1", "openai", "http://localhost:11434/v1", "k", "m", false);
+        providers.setRole("W1", "worker");
+        providers.save("W2", "openai", "http://localhost:11434/v1", "k", "m", false);
+        providers.setRole("W2", "worker");
+
+        java.util.function.Function<ProviderSettingsService.Active,
+                com.jarvis.integrations.llm.LlmProvider> factory = a -> req -> {
+            String sys = req.system();
+            String user = req.messages().get(0).content();
+            String text;
+            if (sys.contains("Break the user's request")) {
+                text = "research the topic\nwrite the summary";
+            } else if (sys.contains("Worker")) {
+                text = a.name() + " did: " + user;
+            } else if (sys.contains("arbiter") || sys.contains("Compose")) {
+                text = "FINAL from " + a.name();
+            } else {
+                text = a.name() + " answers: 42";
+            }
+            return new com.jarvis.integrations.llm.LlmProvider.Result(text, 1, 1);
+        };
+        OrchestrationService orchestration = new OrchestrationService(providers, null, "m", factory);
+        GatedLaneService gatedLane = new GatedLaneService(new com.jarvis.memory.InMemoryStore<>(),
+                providers, null, "m", a -> req -> new com.jarvis.integrations.llm.LlmProvider.Result(
+                        "local answer: " + req.messages().get(0).content(), 1, 1));
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, providers, null, null, null, null, null,
+                        orchestration, gatedLane, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+
+            // --- Ensemble fans out across the roster and fuses one answer with a full trace. ---
+            HttpResponse<String> ens = post2r(b + "/orchestrate",
+                    "{\"mode\":\"ensemble\",\"prompt\":\"what is 6*7?\",\"fusion\":\"best\"}");
+            assertEquals(200, ens.statusCode());
+            assertTrue(ens.body().contains("\"mode\":\"ensemble\""));
+            assertTrue(ens.body().contains("\"answer\""));
+            assertTrue(ens.body().contains("\"trace\""));
+
+            // An empty prompt is rejected.
+            assertEquals(400, post2r(b + "/orchestrate",
+                    "{\"mode\":\"ensemble\",\"prompt\":\"\"}").statusCode());
+
+            // --- Hierarchy: conductor decomposes, workers run, conductor arbitrates. ---
+            HttpResponse<String> hier = post2r(b + "/orchestrate",
+                    "{\"mode\":\"hierarchy\",\"prompt\":\"plan a product launch\"}");
+            assertEquals(200, hier.statusCode());
+            assertTrue(hier.body().contains("FINAL from Boss"));
+            assertTrue(hier.body().contains("decompose"));
+            assertTrue(hier.body().contains("arbitrate"));
+
+            // --- Gated lane defaults OFF. ---
+            assertTrue(get2(b + "/gatedlane").body().contains("\"enabled\":false"));
+
+            // Configure it: enable, allowlist a scope, point at the self-hosted provider.
+            HttpResponse<String> cfg = post2r(b + "/gatedlane",
+                    "{\"enabled\":true,\"allow\":[\"cost estimate\"],\"provider\":\"Boss\"}");
+            assertTrue(cfg.body().contains("\"enabled\":true"));
+            assertTrue(cfg.body().contains("cost estimate"));
+
+            // An in-scope task is approved; an absolute-harm task is always blocked.
+            assertTrue(post2r(b + "/gatedlane/test",
+                    "{\"task\":\"produce a cost estimate for the slab\"}").body().contains("\"approved\":true"));
+            HttpResponse<String> harm = post2r(b + "/gatedlane/test", "{\"task\":\"design a weapon\"}");
+            assertTrue(harm.body().contains("\"approved\":false"));
+            assertTrue(harm.body().contains("harm category"));
+
+            // Running an approved task hits the local lane and flags the output for review.
+            HttpResponse<String> run = post2r(b + "/gatedlane/run",
+                    "{\"task\":\"produce a cost estimate for the slab\"}");
+            assertTrue(run.body().contains("\"approved\":true"));
+            assertTrue(run.body().contains("local answer"));
+            assertTrue(run.body().contains("\"needsReview\":true"));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void routingStatusAndTestEndpointsRunEndToEnd() throws Exception {
+        ProviderSettingsService providers = new ProviderSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(), (b, k) -> java.util.List.of());
+        providers.save("Boss", "openai", "http://localhost:11434/v1", "k", "m", false);
+
+        RoutingSettings routing = new RoutingSettings(new ConnectorSettingsService(
+                new com.jarvis.memory.InMemoryStore<>(),
+                java.util.Map.of("JARVIS_OPENHUMAN_ENABLED", "true",
+                        "JARVIS_ROUTING_FAILOVER_ENABLED", "true")::get));
+        com.jarvis.integrations.openhuman.OpenHumanTransport transport = (method, path, body) ->
+                new com.jarvis.integrations.openhuman.OpenHumanResponse(200, "{}");
+        com.jarvis.integrations.openhuman.OpenHumanClient openHuman =
+                new com.jarvis.integrations.openhuman.OpenHumanClient(transport);
+
+        java.util.function.Function<ProviderSettingsService.Active,
+                com.jarvis.integrations.llm.LlmProvider> factory =
+                a -> req -> new com.jarvis.integrations.llm.LlmProvider.Result("ok", 1, 1);
+        OrchestrationService orchestration =
+                new OrchestrationService(providers, null, "m", factory, routing, openHuman);
+
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, providers, null, null, null, null, null,
+                        orchestration, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+
+            // The engine reports itself wired, with the live settings (this session's env/config).
+            HttpResponse<String> status0 = get2(b + "/routing/status");
+            assertEquals(200, status0.statusCode());
+            assertTrue(status0.body().contains("\"wired\":true"));
+            assertTrue(status0.body().contains("\"openHumanEnabled\":true"));
+            assertTrue(status0.body().contains("\"openhuman\""));      // breaker entry always present
+            assertTrue(status0.body().contains("\"phase\":\"CLOSED\""));
+
+            // Test Route probes OpenHuman's real /health endpoint — no orchestration call involved.
+            HttpResponse<String> test = post2r(b + "/routing/test", "{}");
+            assertEquals(200, test.statusCode());
+            assertTrue(test.body().contains("\"configured\":true"));
+            assertTrue(test.body().contains("\"reachable\":true"));
+
+            // GET-only status; a GET on /routing/test is rejected (POST-only, matches /gatedlane/test).
+            assertEquals(405, client.send(HttpRequest.newBuilder(URI.create(b + "/routing/test")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).statusCode());
+
+            // A routed ensemble call succeeds via the Tier-1 primary and shows up in breaker health.
+            HttpResponse<String> ens = post2r(b + "/orchestrate",
+                    "{\"mode\":\"ensemble\",\"prompt\":\"hi\",\"fusion\":\"best\"}");
+            assertEquals(200, ens.statusCode());
+            HttpResponse<String> status1 = get2(b + "/routing/status");
+            assertTrue(status1.body().contains("\"Boss\""));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    private HttpResponse<String> get2(String url) throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create(url)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
+    void uploadEndpointsStoreExtractAndFeedChat() throws Exception {
+        UploadedDocsService uploads = new UploadedDocsService(null);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, null, null, null, uploads, null, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            String content = java.util.Base64.getEncoder().encodeToString(
+                    "The launch code is Pluto-7.".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            HttpResponse<String> up = post2r(b + "/upload",
+                    "{\"filename\":\"secret.txt\",\"content\":\"" + content + "\"}");
+            assertTrue(up.body().contains("\"kind\":\"text\""));
+            assertTrue(up.body().contains("\"readable\":true"));
+            String id = up.body().replaceAll(".*\"id\":\"([^\"]+)\".*", "$1");
+
+            HttpResponse<String> list = client.send(
+                    HttpRequest.newBuilder(URI.create(b + "/uploads")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(list.body().contains("secret.txt"));
+            assertTrue(list.body().contains("\"count\":1"));
+
+            // Offline echo returns the effective prompt, so attaching the doc must inject its text.
+            HttpResponse<String> chat = post2r(b + "/chat",
+                    "{\"prompt\":\"What is the launch code?\",\"docs\":[\"" + id + "\"]}");
+            assertTrue(chat.body().contains("Pluto-7"),
+                    () -> "chat did not receive the attached file: " + chat.body());
+
+            HttpResponse<String> del = client.send(
+                    HttpRequest.newBuilder(URI.create(b + "/uploads?id=" + id)).DELETE().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(del.body().contains("\"removed\":true"));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void mcpEndpointsAddConnectListCallAndRemove() throws Exception {
+        // A fake MCP server: handshake, one tool, and a canned tool result.
+        com.jarvis.integrations.mcp.McpTransport fake = jsonRpcBody -> {
+            if (jsonRpcBody.contains("\"tools/list\"")) {
+                return "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":"
+                        + "[{\"name\":\"echo\",\"description\":\"Echoes input\"}]}}";
+            }
+            if (jsonRpcBody.contains("\"tools/call\"")) {
+                return "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":"
+                        + "[{\"type\":\"text\",\"text\":\"pong\"}]}}";
+            }
+            return "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"x\",\"capabilities\":{}}}";
+        };
+        McpService svc = new McpService(null, cfg -> fake);
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, null, null, null, null, svc, null, null, null, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            HttpResponse<String> add = post2r(b + "/mcp",
+                    "{\"name\":\"local\",\"url\":\"http://example/mcp\",\"token\":\"supersecret-xyz\"}");
+            assertTrue(add.body().contains("\"connected\":true"));
+            assertTrue(add.body().contains("echo"));
+            assertTrue(add.body().contains("\"hasToken\":true"));
+            assertFalse(add.body().contains("supersecret-xyz"));   // token never returned
+
+            HttpResponse<String> list = client.send(
+                    HttpRequest.newBuilder(URI.create(b + "/mcp")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(list.body().contains("\"count\":1"));
+            assertTrue(list.body().contains("local"));
+
+            HttpResponse<String> call = post2r(b + "/mcp/call",
+                    "{\"server\":\"local\",\"tool\":\"echo\",\"arguments\":{}}");
+            assertTrue(call.body().contains("pong"));
+
+            HttpResponse<String> del = client.send(
+                    HttpRequest.newBuilder(URI.create(b + "/mcp?name=local")).DELETE().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(del.body().contains("\"removed\":true"));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
     void workflowsEndpointSavesRunsAndRecordsHistory() throws Exception {
         JarvisApi api = AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>());
         WorkflowService svc = new WorkflowService(new com.jarvis.memory.InMemoryRecordStore(),
                 new com.jarvis.memory.InMemoryRecordStore(), api, null);
         WebServer wired = WebServer.start(api, false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, svc, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             post2(base + "/workflows",
@@ -440,7 +1355,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, board, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, board, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port() + "/tasks";
             post2(base, "{\"action\":\"create\",\"title\":\"first task\"}");
@@ -534,7 +1449,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, meter, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, meter, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/usage"))
@@ -565,7 +1480,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, mgr, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, mgr, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             HttpResponse<String> before = client.send(
@@ -617,7 +1532,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, checker, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, checker, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/update"))
@@ -661,7 +1576,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, plugins, null, null, null, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, plugins, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/tools"))
@@ -692,7 +1607,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/audit"))
@@ -723,7 +1638,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port() + "/audit";
             HttpResponse<String> all = client.send(
@@ -783,5 +1698,49 @@ class WebServerTest {
         } finally {
             wired.stop();
         }
+    }
+
+    // ---- standing agents (persistent multi-agent registry) ----
+
+    @Test
+    void standingAgentsCrudAndRunFlow() throws Exception {
+        // Save an agent → it appears in the list.
+        HttpResponse<String> save = post("/agents/standing",
+                "{\"action\":\"save\",\"name\":\"Watcher\",\"role\":\"analyst\","
+                        + "\"brief\":\"watch things\",\"intervalMinutes\":0}");
+        assertEquals(200, save.statusCode());
+        assertTrue(save.body().contains("\"name\":\"Watcher\""));
+        assertTrue(save.body().contains("\"status\":\"idle\""));
+
+        String id = save.body().replaceAll(".*\"id\":\"([^\"]+)\".*", "$1");
+        assertTrue(id.startsWith("ag-"));
+
+        // Run it (offline echo brain) → run state is recorded.
+        HttpResponse<String> run = post("/agents/standing",
+                "{\"action\":\"run\",\"id\":\"" + id + "\"}");
+        assertEquals(200, run.statusCode());
+        assertTrue(run.body().contains("\"totalRuns\":1"));
+        assertTrue(run.body().contains("\"lastOk\":true"));
+
+        // Toggle pauses it; delete removes it.
+        HttpResponse<String> toggled = post("/agents/standing",
+                "{\"action\":\"toggle\",\"id\":\"" + id + "\"}");
+        assertTrue(toggled.body().contains("\"enabled\":false"));
+        HttpResponse<String> deleted = post("/agents/standing",
+                "{\"action\":\"delete\",\"id\":\"" + id + "\"}");
+        assertEquals(200, deleted.statusCode());
+        assertTrue(get("/agents/standing").body().contains("\"agents\":[]"));
+    }
+
+    @Test
+    void standingAgentsRejectBadRequests() throws Exception {
+        assertEquals(400, post("/agents/standing",
+                "{\"action\":\"save\",\"name\":\"\"}").statusCode());
+        assertEquals(404, post("/agents/standing",
+                "{\"action\":\"delete\",\"id\":\"nope\"}").statusCode());
+        assertEquals(409, post("/agents/standing",
+                "{\"action\":\"run\",\"id\":\"nope\"}").statusCode());
+        assertEquals(400, post("/agents/standing",
+                "{\"action\":\"frobnicate\"}").statusCode());
     }
 }

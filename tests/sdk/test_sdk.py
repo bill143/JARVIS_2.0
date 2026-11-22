@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openjarvis.core.config import JarvisConfig
+from openjarvis.core.config import AgentConfig, JarvisConfig
+from openjarvis.core.types import Role
 from openjarvis.sdk import Jarvis, MemoryHandle
 
 
@@ -281,6 +282,147 @@ class TestJarvisStreaming:
                 tokens.append(token)
             assert tokens == ["ok"]
             assert call_log[0]["model"] == "custom-model"
+            j.close()
+
+
+class TestJarvisSessionEpisodicMemory:
+    def test_disabled_by_default(self):
+        j = Jarvis(config=JarvisConfig())
+        assert j.session_memory is None
+        assert j.episodic_memory is None
+        j.close()
+
+    def test_session_memory_enabled_creates_instance(self):
+        cfg = JarvisConfig(agent=AgentConfig(session_memory_enabled=True))
+        j = Jarvis(config=cfg)
+        assert j.session_memory is not None
+        assert j.session_memory.items == []
+        j.close()
+
+    def test_episodic_memory_enabled_creates_instance(self):
+        cfg = JarvisConfig(agent=AgentConfig(episodic_memory_enabled=True))
+        j = Jarvis(config=cfg)
+        assert j.episodic_memory is not None
+        assert j.episodic_memory.facts == {}
+        j.close()
+
+    def test_ask_full_stores_turn_in_session_memory(self):
+        engine = _make_engine("Full response")
+        cfg = JarvisConfig(agent=AgentConfig(session_memory_enabled=True))
+        with patch("openjarvis.sdk.get_engine", return_value=("mock", engine)):
+            j = Jarvis(config=cfg, model="test-model")
+            j.ask_full("Hello")
+            assert len(j.session_memory.items) == 1
+            assert j.session_memory.items[0].query == "Hello"
+            assert j.session_memory.items[0].response == "Full response"
+            j.close()
+
+    def test_ask_full_does_not_auto_populate_episodic_memory(self):
+        """Episodic facts are never auto-extracted/stored — read-only path."""
+        engine = _make_engine("Full response")
+        cfg = JarvisConfig(agent=AgentConfig(episodic_memory_enabled=True))
+        with patch("openjarvis.sdk.get_engine", return_value=("mock", engine)):
+            j = Jarvis(config=cfg, model="test-model")
+            j.ask_full("My favorite language is Python.")
+            assert j.episodic_memory.facts == {}
+            j.close()
+
+    def test_session_memory_works_without_knowledge_backend(self):
+        """Session memory injects context even with context_from_memory off
+        (i.e. no knowledge backend resolves) — the two are independent."""
+        engine = _make_engine("second response")
+        cfg = JarvisConfig(
+            agent=AgentConfig(
+                session_memory_enabled=True,
+                context_from_memory=False,
+            )
+        )
+        with patch("openjarvis.sdk.get_engine", return_value=("mock", engine)):
+            j = Jarvis(config=cfg, model="test-model")
+            j.session_memory.store("earlier question", "earlier answer")
+            j.ask_full("follow-up question")
+
+            call_args = engine.generate.call_args
+            sent_messages = call_args[0][0]
+            assert any(
+                "earlier answer" in m.content
+                for m in sent_messages
+                if m.role == Role.SYSTEM
+            )
+            j.close()
+
+    def test_no_context_injection_when_everything_disabled(self):
+        engine = _make_engine()
+        cfg = JarvisConfig(agent=AgentConfig(context_from_memory=False))
+        with patch("openjarvis.sdk.get_engine", return_value=("mock", engine)):
+            j = Jarvis(config=cfg, model="test-model")
+            j.ask_full("hello")
+            sent_messages = engine.generate.call_args[0][0]
+            assert len(sent_messages) == 1
+            assert sent_messages[0].role == Role.USER
+            j.close()
+
+    @pytest.mark.asyncio
+    async def test_ask_stream_stores_full_text_in_session_memory(self):
+        engine = _make_engine()
+
+        async def mock_stream(*args, **kwargs):
+            for token in ["Hello", " ", "world"]:
+                yield token
+
+        engine.stream = mock_stream
+        cfg = JarvisConfig(agent=AgentConfig(session_memory_enabled=True))
+
+        with patch("openjarvis.sdk.get_engine", return_value=("mock", engine)):
+            j = Jarvis(config=cfg, model="test-model")
+            async for _ in j.ask_stream("Hi"):
+                pass
+            assert len(j.session_memory.items) == 1
+            assert j.session_memory.items[0].response == "Hello world"
+            j.close()
+
+    @pytest.mark.asyncio
+    async def test_ask_full_stream_stores_full_text_in_session_memory(self):
+        engine = _make_engine()
+
+        async def mock_stream(*args, **kwargs):
+            for token in ["Hello", " ", "world"]:
+                yield token
+
+        engine.stream = mock_stream
+        cfg = JarvisConfig(agent=AgentConfig(session_memory_enabled=True))
+
+        with patch("openjarvis.sdk.get_engine", return_value=("mock", engine)):
+            j = Jarvis(config=cfg, model="test-model")
+            async for _ in j.ask_full_stream("Hi"):
+                pass
+            assert len(j.session_memory.items) == 1
+            assert j.session_memory.items[0].response == "Hello world"
+            j.close()
+
+    def test_ask_with_agent_stores_turn_in_session_memory(self):
+        from openjarvis.agents._stubs import AgentResult
+        from openjarvis.core.registry import AgentRegistry
+
+        engine = _make_engine()
+
+        class MockAgent:
+            agent_id = "mock-agent-session"
+
+            def __init__(self, eng, model, **kwargs):
+                pass
+
+            def run(self, input, context=None, **kwargs):
+                return AgentResult(content="Agent response", turns=1)
+
+        AgentRegistry.register_value("mock-agent-session", MockAgent)
+
+        cfg = JarvisConfig(agent=AgentConfig(session_memory_enabled=True))
+        with patch("openjarvis.sdk.get_engine", return_value=("mock", engine)):
+            j = Jarvis(config=cfg, model="test-model")
+            j.ask("Hello", agent="mock-agent-session")
+            assert len(j.session_memory.items) == 1
+            assert j.session_memory.items[0].response == "Agent response"
             j.close()
 
 

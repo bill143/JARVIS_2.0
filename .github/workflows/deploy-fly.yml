@@ -1,0 +1,42 @@
+# Optional manual deploy pipeline to Fly.io.
+#
+# This workflow is MANUAL ONLY (workflow_dispatch) — it never runs on push, so
+# it does not affect the existing CI checks. To use it:
+#   1. Create a Fly app and volume (see deploy/fly.toml).
+#   2. Add a repository secret FLY_API_TOKEN (from `fly tokens create deploy`).
+#   3. Run this workflow from the Actions tab.
+#
+# Application secrets (OPENAI_API_KEY, OPENJARVIS_ADMIN_PASSWORD, ...) are set
+# once with `fly secrets set` and are NOT managed here.
+
+name: deploy-fly
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "Path to the Fly config file"
+        required: false
+        default: "deploy/fly.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-fly
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only --config "${{ inputs.config }}"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

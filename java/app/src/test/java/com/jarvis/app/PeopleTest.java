@@ -97,7 +97,7 @@ class PeopleTest {
         PeopleRecognizer rec = new PeopleRecognizer(req -> "{}", "test-model");
         List<PeopleStore.Person> people = List.of(
                 new PeopleStore.Person("p1", "Jennifer", "wife", "jen@x.com", "555", "Home",
-                        "gardener", "data:image/jpeg;base64,AAAA"));
+                        "gardener", "data:image/jpeg;base64,AAAA", List.of(), "", ""));
         String request = rec.buildRequest("data:image/png;base64,LIVE", people);
 
         assertTrue(request.contains("\"model\":\"test-model\""));
@@ -115,7 +115,7 @@ class PeopleTest {
                 "m");
         String out = rec.recognize("data:image/png;base64,LIVE",
                 List.of(new PeopleStore.Person("p1", "Jennifer", "wife", "", "", "", "",
-                        "data:image/png;base64,AAAA")));
+                        "data:image/png;base64,AAAA", List.of(), "", "")));
         assertEquals("That's Jennifer, your wife, sir.", out);
     }
 }

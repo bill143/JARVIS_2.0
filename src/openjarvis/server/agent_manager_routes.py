@@ -7,6 +7,7 @@ import re as _re
 from typing import Any, Dict, List, Optional, Tuple
 
 from openjarvis.agents.manager import AgentManager
+from openjarvis.core.secrets import redact_mapping
 
 try:
     from fastapi import APIRouter, HTTPException, Request
@@ -16,6 +17,26 @@ except ImportError:
     raise ImportError("fastapi and pydantic are required for server routes")
 
 logger = logging.getLogger("openjarvis.server.agent_manager")
+
+
+def _redact_agent(agent: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Mask secret-valued fields in an agent record before it leaves the API."""
+    if not agent:
+        return agent
+    if isinstance(agent.get("config"), dict):
+        return {**agent, "config": redact_mapping(agent["config"])}
+    return agent
+
+
+def _redact_binding(binding: Dict[str, Any]) -> Dict[str, Any]:
+    """Mask secret-valued fields in a channel binding before it leaves the API."""
+    if isinstance(binding.get("config"), dict):
+        return {**binding, "config": redact_mapping(binding["config"])}
+    return binding
+
+
+def _redact_bindings(bindings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [_redact_binding(b) for b in bindings]
 
 
 class CreateAgentRequest(BaseModel):
@@ -1057,7 +1078,7 @@ def create_agent_manager_router(
 
     @agents_router.get("")
     async def list_agents():
-        return {"agents": manager.list_agents()}
+        return {"agents": [_redact_agent(a) for a in manager.list_agents()]}
 
     @agents_router.post("")
     async def create_agent(req: CreateAgentRequest, request: Request):
@@ -1083,7 +1104,7 @@ def create_agent_manager_router(
         agent = manager.get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        return agent
+        return _redact_agent(agent)
 
     @agents_router.patch("/{agent_id}")
     async def update_agent(agent_id: str, req: UpdateAgentRequest):
@@ -1231,7 +1252,7 @@ def create_agent_manager_router(
 
     @agents_router.get("/{agent_id}/channels")
     async def list_channels(agent_id: str):
-        return {"bindings": manager.list_channel_bindings(agent_id)}
+        return {"bindings": _redact_bindings(manager.list_channel_bindings(agent_id))}
 
     @agents_router.post("/{agent_id}/channels")
     async def bind_channel(
@@ -1612,9 +1633,9 @@ def create_agent_manager_router(
         if agent is None:
             raise HTTPException(status_code=404, detail="Agent not found")
         return {
-            "agent": agent,
+            "agent": _redact_agent(agent),
             "tasks": manager.list_tasks(agent_id),
-            "channels": manager.list_channel_bindings(agent_id),
+            "channels": _redact_bindings(manager.list_channel_bindings(agent_id)),
             "messages": manager.list_messages(agent_id),
             "checkpoint": manager.get_latest_checkpoint(agent_id),
         }

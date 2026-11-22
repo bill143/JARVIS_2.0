@@ -1,0 +1,13 @@
+[
+  {"name":"solicitations_search","description":"Search federal solicitations (SAM.gov / GovTribe) with filters; returns source-cited results","riskTier":"READ_ONLY",
+   "parameters":[{"name":"query","type":"string","required":false,"description":"Free-text search"},
+                 {"name":"setAside","type":"string","required":false,"description":"e.g. SDVOSB, 8(a), WOSB"},
+                 {"name":"state","type":"string","required":false,"description":"Place-of-performance state code, e.g. VA"},
+                 {"name":"naics","type":"string","required":false,"description":"Comma-separated NAICS prefixes, e.g. 236,237,238"},
+                 {"name":"valueMin","type":"number","required":false,"description":"Minimum estimated value (USD)"},
+                 {"name":"valueMax","type":"number","required":false,"description":"Maximum estimated value (USD)"},
+                 {"name":"due","type":"string","required":false,"description":"Due window: <28d, 28-45d, or 45+d"},
+                 {"name":"max","type":"number","required":false,"description":"Max results (default 10)"}]},
+  {"name":"solicitations_documents","description":"List documents/attachments for a solicitation id; returns source-cited links","riskTier":"READ_ONLY",
+   "parameters":[{"name":"id","type":"string","required":true,"description":"Solicitation id (source:sourceId) or solicitation number"}]}
+]

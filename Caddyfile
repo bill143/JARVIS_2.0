@@ -1,0 +1,30 @@
+# Caddy reverse proxy for JARVIS with automatic HTTPS.
+#
+# When JARVIS_DOMAIN is a real, publicly-resolvable domain and ACME_EMAIL is
+# set, Caddy obtains and renews Let's Encrypt certificates automatically. When
+# JARVIS_DOMAIN is "localhost" (the default), Caddy serves HTTPS with its own
+# locally-trusted internal CA — so the same config works for local testing and
+# production without edits.
+
+{
+	# ACME account email (used for Let's Encrypt). Optional but recommended.
+	email {$ACME_EMAIL}
+}
+
+{$JARVIS_DOMAIN:localhost} {
+	# All traffic is proxied to the app over the isolated container network.
+	# "app" resolves via Docker DNS; the app publishes no host port itself.
+	reverse_proxy app:8000
+
+	encode gzip zstd
+
+	header {
+		# HSTS: force HTTPS for a year (only meaningful once on a real domain).
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Do not advertise the server software.
+		-Server
+	}
+}

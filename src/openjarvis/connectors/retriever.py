@@ -198,6 +198,112 @@ class ColBERTReranker(Reranker):
 
 
 # ---------------------------------------------------------------------------
+# BGE cross-encoder reranker
+# ---------------------------------------------------------------------------
+
+try:
+    from FlagEmbedding import FlagReranker  # type: ignore[import]
+
+    _FLAG_EMBEDDING_AVAILABLE = True
+except ImportError:
+    _FLAG_EMBEDDING_AVAILABLE = False
+
+
+class BGEReranker(Reranker):
+    """Semantic reranker backed by a BAAI/bge cross-encoder via FlagEmbedding.
+
+    Lazy-loads the model on first use. If the ``FlagEmbedding`` package is
+    not installed the reranker falls back to returning the BM25-ordered
+    candidates unchanged (with a warning logged once), matching
+    ``ColBERTReranker``'s degradation behavior.
+
+    Parameters
+    ----------
+    model_name:
+        HuggingFace model ID for the cross-encoder checkpoint. Defaults to
+        ``"BAAI/bge-reranker-base"``.
+    use_fp16:
+        Run the model in fp16 for faster inference on supported hardware.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "BAAI/bge-reranker-base",
+        use_fp16: bool = False,
+    ) -> None:
+        self._model_name = model_name
+        self._use_fp16 = use_fp16
+        self._model = None
+        self._warned = False
+
+    def _load_model(self) -> bool:
+        """Attempt to load the BGE cross-encoder. Returns True on success."""
+        if self._model is not None:
+            return True
+        if not _FLAG_EMBEDDING_AVAILABLE:
+            if not self._warned:
+                logger.warning(
+                    "BGEReranker: FlagEmbedding is not installed. Falling "
+                    "back to BM25 order. Install with: pip install FlagEmbedding",
+                )
+                self._warned = True
+            return False
+        try:
+            self._model = FlagReranker(self._model_name, use_fp16=self._use_fp16)
+            return True
+        except Exception as exc:
+            if not self._warned:
+                logger.warning(
+                    "BGEReranker: failed to load %s (%s). Falling back to "
+                    "BM25 order.",
+                    self._model_name,
+                    exc,
+                )
+                self._warned = True
+            return False
+
+    def rerank(
+        self,
+        query: str,
+        candidates: List[RetrievalResult],
+        *,
+        top_k: int = 10,
+    ) -> List[RetrievalResult]:
+        """Rerank *candidates* using BGE cross-encoder scores.
+
+        Falls back to BM25 order if ``FlagEmbedding`` is unavailable.
+        """
+        if not candidates:
+            return []
+
+        if not self._load_model():
+            return candidates[:top_k]
+
+        try:
+            pairs = [[query, c.content] for c in candidates]
+            scores = self._model.compute_score(pairs, normalize=True)
+            if isinstance(scores, float):
+                scores = [scores]
+
+            ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
+            reranked = []
+            for score, result in ranked[:top_k]:
+                reranked.append(
+                    RetrievalResult(
+                        content=result.content,
+                        score=float(score),
+                        source=result.source,
+                        metadata=result.metadata,
+                    )
+                )
+            return reranked
+
+        except Exception as exc:
+            logger.warning("BGEReranker.rerank failed (%s); using BM25 order.", exc)
+            return candidates[:top_k]
+
+
+# ---------------------------------------------------------------------------
 # TwoStageRetriever
 # ---------------------------------------------------------------------------
 
@@ -298,4 +404,4 @@ class TwoStageRetriever:
         return candidates[:top_k]
 
 
-__all__ = ["ColBERTReranker", "Reranker", "TwoStageRetriever"]
+__all__ = ["BGEReranker", "ColBERTReranker", "Reranker", "TwoStageRetriever"]

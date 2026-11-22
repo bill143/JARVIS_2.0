@@ -232,6 +232,9 @@ def create_webhook_router(
             return Response("OK", status_code=200)
 
         def _handle_and_reply() -> None:
+            import time as _time
+
+            start = _time.monotonic()
             # Immediate acknowledgment
             if reply_channel:
                 reply_channel.send(
@@ -268,6 +271,11 @@ def create_webhook_router(
             # Send the agent's response back via SendBlue
             if response and reply_channel:
                 reply_channel.send(from_number, response)
+
+            logger.info(
+                "SendBlue message handled in %.2fs",
+                _time.monotonic() - start,
+            )
 
         task = asyncio.create_task(asyncio.to_thread(_handle_and_reply))
         task.add_done_callback(_log_task_exception)

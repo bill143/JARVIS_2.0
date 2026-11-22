@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import List
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openjarvis.connectors.retriever import ColBERTReranker, Reranker, TwoStageRetriever
+from openjarvis.connectors.retriever import (
+    BGEReranker,
+    ColBERTReranker,
+    Reranker,
+    TwoStageRetriever,
+)
 from openjarvis.connectors.store import KnowledgeStore
 from openjarvis.tools.storage._stubs import RetrievalResult
 
@@ -16,6 +21,14 @@ from openjarvis.tools.storage._stubs import RetrievalResult
 def _has_torch() -> bool:
     try:
         import torch  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _has_flag_embedding() -> bool:
+    try:
+        import FlagEmbedding  # noqa: F401
         return True
     except ImportError:
         return False
@@ -318,3 +331,75 @@ def test_reranker_caches_new_embeddings() -> None:
     assert call_args[0][1].shape == (20, 128)  # squeezed tensor
 
     assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# Test 11: BGEReranker — graceful fallback when FlagEmbedding is unavailable
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    _has_flag_embedding(), reason="test targets the no-FlagEmbedding fallback path",
+)
+def test_bge_reranker_fallback_when_unavailable() -> None:
+    """BGEReranker degrades to BM25 order when FlagEmbedding is not installed."""
+    reranker = BGEReranker()
+    candidates = [
+        RetrievalResult(content="doc A", score=1.0, source="gmail"),
+        RetrievalResult(content="doc B", score=0.9, source="slack"),
+    ]
+    results = reranker.rerank("query", candidates, top_k=2)
+    assert results == candidates[:2]
+    assert reranker._load_model() is False
+
+
+def test_bge_reranker_isinstance_of_reranker() -> None:
+    """BGEReranker satisfies the Reranker ABC, like ColBERTReranker."""
+    assert isinstance(BGEReranker(), Reranker)
+
+
+def test_bge_reranker_empty_candidates_returns_empty() -> None:
+    reranker = BGEReranker()
+    assert reranker.rerank("query", [], top_k=5) == []
+
+
+@pytest.mark.skipif(
+    not _has_flag_embedding(), reason="FlagEmbedding required for scoring test",
+)
+def test_bge_reranker_scores_and_sorts_candidates() -> None:
+    """BGEReranker sorts candidates by descending cross-encoder score."""
+    reranker = BGEReranker()
+    mock_model = MagicMock()
+    mock_model.compute_score.return_value = [0.2, 0.9]
+    reranker._model = mock_model  # bypass _load_model()
+
+    candidates = [
+        RetrievalResult(content="low relevance doc", score=1.0, source="a"),
+        RetrievalResult(content="high relevance doc", score=1.0, source="b"),
+    ]
+
+    results = reranker.rerank("query", candidates, top_k=2)
+
+    assert [r.content for r in results] == ["high relevance doc", "low relevance doc"]
+    assert results[0].score == 0.9
+    mock_model.compute_score.assert_called_once()
+
+
+@pytest.mark.skipif(
+    not _has_flag_embedding(), reason="FlagEmbedding required for scoring test",
+)
+def test_bge_reranker_load_failure_falls_back() -> None:
+    """If the model fails to load, rerank() returns BM25 order unchanged."""
+    reranker = BGEReranker()
+    candidates = [
+        RetrievalResult(content="doc A", score=1.0, source="a"),
+        RetrievalResult(content="doc B", score=0.9, source="b"),
+    ]
+
+    with patch(
+        "openjarvis.connectors.retriever.FlagReranker",
+        side_effect=RuntimeError("model load failed"),
+    ):
+        results = reranker.rerank("query", candidates, top_k=2)
+
+    assert results == candidates[:2]

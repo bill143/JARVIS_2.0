@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from openjarvis.core.events import EventBus, EventType
 from openjarvis.core.types import Message, Role
+from openjarvis.memory.episodic import EpisodicMemory
+from openjarvis.memory.session import SessionMemory
 from openjarvis.tools.storage._stubs import MemoryBackend, RetrievalResult
 from openjarvis.tools.storage.context import (
     ContextConfig,
@@ -198,3 +200,108 @@ def test_inject_context_does_not_mutate_original():
     augmented = inject_context("query", messages, backend)
     assert len(messages) == original_len
     assert len(augmented) == original_len + 1
+
+
+# -- Session/episodic memory integration -------------------------------------
+
+
+def test_inject_context_includes_session_memory():
+    backend = _FakeMemory([])
+    session = SessionMemory()
+    session.store("what's the weather", "it's sunny today")
+    messages = [Message(role=Role.USER, content="hello")]
+
+    augmented = inject_context("query", messages, backend, session_memory=session)
+
+    assert len(augmented) == 2
+    assert augmented[0].role == Role.SYSTEM
+    assert "sunny today" in augmented[0].content
+
+
+def test_inject_context_includes_episodic_memory():
+    backend = _FakeMemory([])
+    episodic = EpisodicMemory()
+    episodic.store_fact("the user prefers dark mode", confidence=0.9, source="test")
+    messages = [Message(role=Role.USER, content="hello")]
+
+    augmented = inject_context(
+        "dark mode preference", messages, backend, episodic_memory=episodic
+    )
+
+    assert len(augmented) == 2
+    assert augmented[0].role == Role.SYSTEM
+    assert "dark mode" in augmented[0].content
+
+
+def test_inject_context_combines_knowledge_session_and_episodic():
+    results = [RetrievalResult(content="doc info", score=0.9, source="s.md")]
+    backend = _FakeMemory(results)
+    session = SessionMemory()
+    session.store("q1", "r1")
+    episodic = EpisodicMemory()
+    episodic.store_fact("relevant fact about r1", confidence=1.0, source="test")
+    messages = [Message(role=Role.USER, content="hello")]
+
+    augmented = inject_context(
+        "r1",
+        messages,
+        backend,
+        session_memory=session,
+        episodic_memory=episodic,
+    )
+
+    # 3 context blocks (knowledge, session, episodic) + original user message
+    assert len(augmented) == 4
+    assert all(m.role == Role.SYSTEM for m in augmented[:3])
+
+
+def test_inject_context_skips_session_block_that_exceeds_budget():
+    backend = _FakeMemory([])
+    session = SessionMemory()
+    session.store(" ".join(f"word{i}" for i in range(100)), "response")
+    messages = [Message(role=Role.USER, content="hello")]
+    cfg = ContextConfig(max_context_tokens=10)
+
+    augmented = inject_context(
+        "query", messages, backend, config=cfg, session_memory=session
+    )
+
+    # Session block doesn't fit the tiny budget, so it's skipped entirely.
+    assert augmented is messages
+
+
+def test_inject_context_no_session_or_episodic_data_unchanged():
+    backend = _FakeMemory([])
+    session = SessionMemory()  # empty
+    episodic = EpisodicMemory()  # empty
+    messages = [Message(role=Role.USER, content="hello")]
+
+    augmented = inject_context(
+        "query",
+        messages,
+        backend,
+        session_memory=session,
+        episodic_memory=episodic,
+    )
+    assert augmented is messages
+
+
+def test_inject_context_publishes_memory_flags_in_event():
+    bus = EventBus(record_history=True)
+    backend = _FakeMemory([])
+    session = SessionMemory()
+    session.store("q", "r")
+    messages = [Message(role=Role.USER, content="hello")]
+
+    import openjarvis.tools.storage.context as mod
+
+    original = mod.get_event_bus
+    mod.get_event_bus = lambda: bus
+    try:
+        inject_context("query", messages, backend, session_memory=session)
+        events = [e for e in bus.history if e.event_type == EventType.MEMORY_RETRIEVE]
+        assert len(events) == 1
+        assert events[0].data["session_memory_included"] is True
+        assert events[0].data["episodic_memory_included"] is False
+    finally:
+        mod.get_event_bus = original

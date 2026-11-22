@@ -26,13 +26,25 @@ public final class HttpGitHubTransport implements GitHubTransport {
     private static final String API_BASE = "https://api.github.com";
     private static final String API_VERSION = "2022-11-28";
 
-    private final String token;   // nullable → dormant; never logged
+    private final java.util.function.Supplier<String> tokenSupplier;   // resolved live; null → dormant
     private final HttpClient client;
 
     /** Creates a transport authenticated with {@code token} (null/blank → dormant). */
     public HttpGitHubTransport(String token) {
-        this.token = token == null || token.isBlank() ? null : token;
+        this((java.util.function.Supplier<String>) () -> token);
+    }
+
+    private HttpGitHubTransport(java.util.function.Supplier<String> tokenSupplier) {
+        this.tokenSupplier = tokenSupplier == null ? () -> null : tokenSupplier;
         this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
+    }
+
+    /**
+     * Live-resolving transport: the token is read from the supplier on every request, so an in-app
+     * configuration change takes effect without a restart.
+     */
+    public static HttpGitHubTransport resolving(java.util.function.Supplier<String> tokenSupplier) {
+        return new HttpGitHubTransport(tokenSupplier);
     }
 
     /** Reads the PAT from {@code JARVIS_GITHUB_TOKEN} (unset → dormant). */
@@ -40,15 +52,21 @@ public final class HttpGitHubTransport implements GitHubTransport {
         return new HttpGitHubTransport(System.getenv(TOKEN_ENV));
     }
 
+    private String token() {
+        String t = tokenSupplier.get();
+        return t == null || t.isBlank() ? null : t;
+    }
+
     @Override
     public boolean available() {
-        return token != null;
+        return token() != null;
     }
 
     @Override
     public GitHubResponse send(String method, String path, String jsonBody)
             throws IOException, InterruptedException {
-        if (!available()) {
+        String token = token();
+        if (token == null) {
             throw new IOException("GitHub is not configured — set the " + TOKEN_ENV
                     + " environment variable to a fine-grained Personal Access Token");
         }
