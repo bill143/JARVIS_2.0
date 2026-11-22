@@ -141,7 +141,7 @@ impl ICLUpdaterPolicy {
             }
         }
 
-        skills.sort_by_key(|b| std::cmp::Reverse(b.occurrences));
+        skills.sort_by_key(|s| std::cmp::Reverse(s.occurrences));
         self.discovered_skills = skills;
         &self.discovered_skills
     }

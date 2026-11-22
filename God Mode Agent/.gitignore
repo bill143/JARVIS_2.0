@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Env & secrets
+.env
+*.local.txt
+ADMIN_CREDENTIALS*
+
+# Runtime data
+data/
+logs/
+workspace/
+jarvis.db
+jarvis.db-*
+exports/
+.pythonpath.txt
+
+# Node / Next.js
+node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/next-env.d.ts
+*.tsbuildinfo

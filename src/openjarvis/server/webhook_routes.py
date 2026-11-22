@@ -232,16 +232,12 @@ def create_webhook_router(
             return Response("OK", status_code=200)
 
         def _handle_and_reply() -> None:
-            import time as _time
-
             # Immediate acknowledgment
             if reply_channel:
                 reply_channel.send(
                     from_number,
                     "Message received! Researching your data now...",
                 )
-
-            start = _time.monotonic()
 
             # Start a "still working" reminder in a separate thread
             import threading
