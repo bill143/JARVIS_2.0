@@ -73,6 +73,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python (match test job; pyo3 0.23 supports <= 3.13, runner default is 3.14)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
