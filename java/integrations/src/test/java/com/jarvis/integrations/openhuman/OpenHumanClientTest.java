@@ -60,6 +60,18 @@ class OpenHumanClientTest {
     }
 
     @Test
+    void memoryWriteSendsContentToTheWriteMethod() throws Exception {
+        FakeTransport t = new FakeTransport(new OpenHumanResponse(200,
+                "{\"result\":{\"text\":\"stored\"}}"));
+        String out = new OpenHumanClient(t).memoryWrite("60V pack chosen", "go-kart,decision");
+        assertEquals("/rpc", t.path);
+        assertTrue(t.body.contains("\"method\":\"memory.add\""));
+        assertTrue(t.body.contains("\"content\":\"60V pack chosen\""));
+        assertTrue(t.body.contains("\"tags\":\"go-kart,decision\""));
+        assertEquals("stored", out);
+    }
+
+    @Test
     void aJsonRpcErrorBecomesAnException() {
         FakeTransport t = new FakeTransport(new OpenHumanResponse(200,
                 "{\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"));

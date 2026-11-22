@@ -19,13 +19,19 @@ import java.util.Objects;
 public final class OpenHumanPlugin implements Plugin {
 
     private final OpenHumanClient client;
+    private final MemoryWritePolicy writePolicy;
 
     public OpenHumanPlugin(OpenHumanTransport transport) {
-        this(new OpenHumanClient(transport));
+        this(new OpenHumanClient(transport), MemoryWritePolicy.denyAll());
     }
 
     public OpenHumanPlugin(OpenHumanClient client) {
+        this(client, MemoryWritePolicy.denyAll());
+    }
+
+    public OpenHumanPlugin(OpenHumanClient client, MemoryWritePolicy writePolicy) {
         this.client = Objects.requireNonNull(client, "client");
+        this.writePolicy = writePolicy == null ? MemoryWritePolicy.denyAll() : writePolicy;
     }
 
     @Override
@@ -37,7 +43,7 @@ public final class OpenHumanPlugin implements Plugin {
 
     @Override
     public List<Tool> tools() {
-        return List.of(status(), schema(), memorySearch(), consult());
+        return List.of(status(), schema(), memorySearch(), consult(), memoryWrite());
     }
 
     private Tool status() {
@@ -64,6 +70,22 @@ public final class OpenHumanPlugin implements Plugin {
                 "Ask the OpenHuman advisor a question (uses its memory + research). Args: question "
                         + "(required), context (optional).",
                 call -> ToolResult.ok(client.consult(str(call, "question"), str(call, "context"))));
+    }
+
+    private Tool memoryWrite() {
+        return tool("openhuman_memory_write",
+                "Write a durable memory into the OpenHuman shared brain (MUTATING, gated). Args: "
+                        + "content (required), tags (optional), role (the calling agent's role; only "
+                        + "'conductor' and authorized agents may write — deny-by-default).",
+                call -> {
+                    String role = str(call, "role");
+                    if (!writePolicy.mayWrite(role)) {
+                        // Deny-by-default: refuse WITHOUT any network call.
+                        return ToolResult.error("openhuman_memory_write refused: "
+                                + writePolicy.denialReason(role));
+                    }
+                    return ToolResult.ok(client.memoryWrite(str(call, "content"), str(call, "tags")));
+                });
     }
 
     // ---- helpers ----------------------------------------------------------------------------
