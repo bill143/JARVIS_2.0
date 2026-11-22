@@ -1,0 +1,117 @@
+[
+  {
+    "repo": "FatihMakes/Mark-L",
+    "ref": "b4d6ae9bc7c2c4a60c19361efb1c6c558d129962",
+    "rank": 1,
+    "extract_paths": [
+      {
+        "path": "dashboard/static/app.html",
+        "type": "file",
+        "reason": "Core chat surface: status pill, message feed, file cards with upload progress, PCM16 mic-streaming voice pipeline, toast system — framework-free JS that decomposes cleanly into React hooks"
+      },
+      {
+        "path": "dashboard/static/login.html",
+        "type": "file",
+        "reason": "Session-key login surface and token-handoff pattern for the remote dashboard"
+      },
+      {
+        "path": "dashboard/server.py",
+        "type": "file",
+        "reason": "WS/REST contract of the control center (msg types log/status/wake/sys/file_received; routes /api/command, /api/wake, /api/upload, /api/files, /api/device-login, /api/revoke-devices, /ws, /ws/phone-audio) — extract as protocol spec, not runtime code"
+      },
+      {
+        "path": "ui.py",
+        "type": "file",
+        "reason": "Control-center composition and all HUD widgets: C design tokens (l.62-96), apply_ui_accent/retheme_all_widgets (l.97-168), _SysMetrics (l.217-339), HudCanvas (l.340-598), MetricBar (l.599-652), LogWidget (l.653-763), FileDropZone/_DropCanvas (l.774-955), _CameraPreview (l.956-1022), SetupOverlay (l.1023-1151), HueWheel/CustomizeOverlay (l.1152-1414), ClipboardPanel (l.1415-1500), RemoteKeyOverlay (l.1501-1728), MainWindow (l.1729-3241)"
+      },
+      {
+        "path": "main.py",
+        "type": "file",
+        "reason": "UI-to-core callback contract only (on_text_command, on_interrupt, camera/clipboard signals) — reference for wiring the web UI to the God Mode API"
+      }
+    ],
+    "do_not_extract": [
+      { "path": "config/certs/jarvis.crt", "reason": "Committed TLS cert — never reuse third-party certs" },
+      { "path": "config/certs/jarvis.key", "reason": "Committed PRIVATE KEY — security hazard, generate our own" },
+      { "path": "dashboard/static/crypto-js.min.js", "reason": "Vendored minified third-party lib; use WebCrypto or npm dependency instead" },
+      { "path": "actions/", "reason": "Backend action implementations — God Mode API already covers this domain" },
+      { "path": "core/", "reason": "Gemini Live backend, STT/TTS, installer — backend, not UI" },
+      { "path": "memory/", "reason": "Backend memory manager — unrelated to UI extraction" }
+    ]
+  },
+  {
+    "repo": "FatihMakes/Mark-XXXIX-OR",
+    "ref": "eac6378a2411caaca6b382ecc5c04b3c492b5851",
+    "rank": 2,
+    "extract_paths": [
+      {
+        "path": "agent/planner.py",
+        "type": "file",
+        "reason": "Plan-generation output shape (structured task list) — source model for the Planner panel UI"
+      },
+      {
+        "path": "agent/task_queue.py",
+        "type": "file",
+        "reason": "Task state machine (queued/running/done/failed) — contract for governance-rail queue visualization"
+      },
+      {
+        "path": "agent/executor.py",
+        "type": "file",
+        "reason": "Step execution + progress reporting semantics to surface in the live activity feed"
+      },
+      {
+        "path": "agent/error_handler.py",
+        "type": "file",
+        "reason": "Retry/recovery states worth rendering in the Audit/Approvals rail"
+      },
+      {
+        "path": "ui.py",
+        "type": "file",
+        "reason": "Reference-only: leaner variants of shared HUD classes (SetupOverlay l.858-1011, MainWindow l.1012-1481) to consult when Mark-L's versions are over-featured"
+      }
+    ],
+    "do_not_extract": [
+      { "path": "actions/", "reason": "Backend action implementations, duplicate of Mark-L's" },
+      { "path": "or_client.py", "reason": "OpenRouter LLM client — backend, God Mode has its own LLM layer" },
+      { "path": "memory/", "reason": "Backend memory manager" },
+      { "path": "core/prompt.txt", "reason": "Prompt content specific to this assistant's persona" }
+    ]
+  },
+  {
+    "repo": "AnubhavChaturvedi-GitHub/jarvis-ai-assistant",
+    "ref": "28d64ec0dad252f7c5aaad468f2ee820a684ace5",
+    "rank": 3,
+    "extract_paths": [
+      {
+        "path": "ui.py",
+        "type": "file",
+        "reason": "Interaction pattern only: assistant-output activity pulses the visual (GIF scale-up on output) — encode as animation state for the web HudCanvas; no code ported"
+      },
+      {
+        "path": "Vision/Vbrain.py",
+        "type": "file",
+        "reason": "Vision interaction model (capture -> analyze -> speak) informing Vision panel affordances"
+      },
+      {
+        "path": "NetHyTechSTT/listen.py",
+        "type": "file",
+        "reason": "Wake/listen loop state vocabulary (idle/listening) for Voice panel state design"
+      },
+      {
+        "path": "Features/set_get_volume.py",
+        "type": "file",
+        "reason": "Example device-control action shape for the Integrations/Tools action catalog"
+      }
+    ],
+    "do_not_extract": [
+      { "path": "chromedriver.exe", "reason": "Committed binary" },
+      { "path": "cbe227_fb70e39e9dd94e30bbe30c48b2367dd8~mv2.gif", "reason": "Asset of unknown license" },
+      { "path": "chat_hystory.txt", "reason": "Author's personal chat history committed to the repo" },
+      { "path": "history.txt", "reason": "Runtime state file, not source" },
+      { "path": "log.txt", "reason": "Runtime log, not source" },
+      { "path": "input.txt", "reason": "Runtime IPC file, not source" },
+      { "path": "captured_image.png", "reason": "Runtime artifact / personal data" },
+      { "path": "Automation/", "reason": "Selenium-based backend automation — brittle, superseded by God Mode tool layer" }
+    ]
+  }
+]
