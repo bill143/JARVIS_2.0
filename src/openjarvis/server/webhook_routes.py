@@ -232,6 +232,9 @@ def create_webhook_router(
             return Response("OK", status_code=200)
 
         def _handle_and_reply() -> None:
+            import time as _time
+
+            start = _time.monotonic()
             # Immediate acknowledgment
             if reply_channel:
                 reply_channel.send(
