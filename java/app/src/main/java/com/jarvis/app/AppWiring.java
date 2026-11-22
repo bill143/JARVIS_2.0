@@ -79,13 +79,13 @@ final class AppWiring {
             UpdateChecker updates, LicenseManager license, UsageMeter usage, TaskBoard tasks,
             WorkflowService workflows, KnowledgeBase knowledge, MultiAgentService agents,
             AutonomousService autonomous, SemanticMemoryService semantic,
-            DiscussionService discussion) {
+            DiscussionService discussion, GreetingService greeting, ResearchService research) {
 
         /** The cross-cutting services the web layer exposes (governance, updates, licensing, usage). */
         Governance governance() {
             return new Governance(auditLog, pluginRegistry, permissions, permissionPolicy,
                     updates, license, usage, tasks, workflows, knowledge, agents, autonomous, semantic,
-                    discussion);
+                    discussion, greeting, research);
         }
     }
 
@@ -94,7 +94,8 @@ final class AppWiring {
             PermissionBroker permissions, PermissionPolicy permissionPolicy, UpdateChecker updates,
             LicenseManager license, UsageMeter usage, TaskBoard tasks, WorkflowService workflows,
             KnowledgeBase knowledge, MultiAgentService agents, AutonomousService autonomous,
-            SemanticMemoryService semantic, DiscussionService discussion) {
+            SemanticMemoryService semantic, DiscussionService discussion,
+            GreetingService greeting, ResearchService research) {
     }
 
     private AppWiring() {
@@ -197,11 +198,64 @@ final class AppWiring {
         // Project Discussion: JARVIS chairs, OpenHuman advises. Bounded + audited; read-only.
         DiscussionService discussion = new DiscussionService(api, openhuman, auditLog,
                 new FileRecordStore(Path.of(System.getProperty("user.home"), ".jarvis", "discussions")));
+        // Phase-1 proactive features — feature-flagged OFF by default (JARVIS_PRESENCE_ENABLED /
+        // JARVIS_RESEARCH_ENABLED). Both audited; greeting only personalizes on opt-in + confidence.
+        FeatureFlags flags = FeatureFlags.fromEnvironment();
+        GreetingService greeting = new GreetingService(
+                new com.jarvis.presence.GreetingOrchestrator(), auditLog, flags.presenceEnabled());
+        ResearchService research = new ResearchService(
+                researchPipeline(api), auditLog, flags.researchEnabled());
 
         return new Runtime(api, online, model, monitor, visionHook, googleConnected, googleService,
                 memory, people, recognizer, auditLog, pluginRegistry, permissions, permissionPolicy,
                 updates, license, usageMeter, tasks, workflows, knowledge, agents, autonomous, semantic,
-                discussion);
+                discussion, greeting, research);
+    }
+
+    /**
+     * Production research pipeline: the existing {@code web_search} (DuckDuckGo Lite, no key) as the
+     * source finder, and {@code api.chat} as the citation-instructed synthesizer. Whitelist-clean.
+     */
+    static com.jarvis.research.ResearchPipeline researchPipeline(JarvisApi api) {
+        com.jarvis.integrations.mark.WebSearchTool webSearch = new com.jarvis.integrations.mark.WebSearchTool();
+        com.jarvis.research.ResearchPipeline.Searcher searcher = query -> {
+            com.jarvis.tools.ToolResult r = webSearch.execute(new com.jarvis.tools.ToolCall(
+                    "web_search", java.util.Map.of("query", query, "mode", "research")));
+            return r.success() ? parseWebSearch(r.output()) : java.util.List.of();
+        };
+        com.jarvis.research.ResearchPipeline.Synthesizer synthesizer = (question, sources) -> {
+            StringBuilder p = new StringBuilder("Answer the question using ONLY the numbered sources"
+                    + " below, and cite them inline as [n]. Be concise and factual.\n\nQuestion: ");
+            p.append(question).append("\n\nSources:");
+            for (int i = 0; i < sources.size(); i++) {
+                p.append("\n[").append(i + 1).append("] ").append(sources.get(i).title())
+                        .append(" — ").append(sources.get(i).url())
+                        .append("\n    ").append(sources.get(i).snippet());
+            }
+            return api.chat(new com.jarvis.api.ChatRequest("research", p.toString())).response();
+        };
+        return new com.jarvis.research.ResearchPipeline(searcher, synthesizer);
+    }
+
+    /** Parses {@code web_search} output ({@code "N. Title\n   url"} pairs) into structured results. */
+    static java.util.List<com.jarvis.research.SearchResult> parseWebSearch(String output) {
+        java.util.List<com.jarvis.research.SearchResult> out = new java.util.ArrayList<>();
+        if (output == null) {
+            return out;
+        }
+        String[] lines = output.split("\n");
+        String title = null;
+        for (String line : lines) {
+            String t = line.strip();
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("^\\d+\\.\\s+(.*)").matcher(t);
+            if (m.matches()) {
+                title = m.group(1).strip();
+            } else if ((t.startsWith("http://") || t.startsWith("https://")) && title != null) {
+                out.add(new com.jarvis.research.SearchResult(title, t, ""));
+                title = null;
+            }
+        }
+        return out;
     }
 
     /**

@@ -214,7 +214,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, broker, policy, null, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, broker, policy, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             // A tool thread asks for approval; it will block until we answer via the endpoint.
@@ -263,7 +263,7 @@ class WebServerTest {
         MultiAgentService svc = new MultiAgentService(api, null);
         WebServer wired = WebServer.start(api, false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, svc, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(HttpRequest.newBuilder(
                             URI.create("http://localhost:" + wired.port() + "/agents/run"))
@@ -285,7 +285,7 @@ class WebServerTest {
         AutonomousService svc = new AutonomousService(api, null);
         WebServer wired = WebServer.start(api, false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, svc, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(HttpRequest.newBuilder(
                             URI.create("http://localhost:" + wired.port() + "/autonomous/run"))
@@ -324,7 +324,7 @@ class WebServerTest {
                 new com.jarvis.memory.InMemoryRecordStore());
         WebServer wired = WebServer.start(api, false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, svc));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, svc, null, null));
         try {
             HttpResponse<String> r = client.send(HttpRequest.newBuilder(
                             URI.create("http://localhost:" + wired.port() + "/discussion/run"))
@@ -348,6 +348,86 @@ class WebServerTest {
     }
 
     @Test
+    void presenceGreetPersonalizesOnOptInAndConfidenceAndIsAudited() throws Exception {
+        com.jarvis.audit.AuditLog audit =
+                new com.jarvis.audit.RecordStoreAuditLog(new com.jarvis.memory.InMemoryRecordStore());
+        GreetingService svc = new GreetingService(
+                new com.jarvis.presence.GreetingOrchestrator(), audit, true);   // enabled
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, null, svc, null));
+        try {
+            String b = "http://localhost:" + wired.port();
+            HttpResponse<String> hi = post2json(b + "/presence/greet",
+                    "{\"present\":true,\"name\":\"Bill\",\"confidence\":0.9,\"consent\":true}");
+            assertEquals(200, hi.statusCode());
+            assertTrue(hi.body().contains("\"type\":\"PERSONALIZED\""));
+            assertTrue(hi.body().contains("Bill"));
+            // low confidence → neutral (no name)
+            HttpResponse<String> low = post2json(b + "/presence/greet",
+                    "{\"present\":true,\"name\":\"Bill\",\"confidence\":0.4,\"consent\":true}");
+            assertTrue(low.body().contains("\"type\":\"NEUTRAL\""));
+            assertFalse(low.body().contains("Good to see you, Bill"));
+            // guard suppresses
+            HttpResponse<String> guarded = post2json(b + "/presence/greet",
+                    "{\"present\":true,\"name\":\"Bill\",\"confidence\":0.9,\"consent\":true,\"inMeeting\":true}");
+            assertTrue(guarded.body().contains("\"greeted\":false"));
+            // every proactive evaluation was audited
+            assertTrue(audit.recent(20).stream()
+                    .anyMatch(e -> e.event().action().equals("proactive-greeting")));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void presenceGreetIs503WhenDisabled() throws Exception {
+        assertEquals(503, post("/presence/greet", "{\"present\":true}").statusCode());
+    }
+
+    @Test
+    void researchReturnsCitationsAndIsAudited() throws Exception {
+        com.jarvis.audit.AuditLog audit =
+                new com.jarvis.audit.RecordStoreAuditLog(new com.jarvis.memory.InMemoryRecordStore());
+        com.jarvis.research.ResearchPipeline pipeline = new com.jarvis.research.ResearchPipeline(
+                q -> java.util.List.of(
+                        new com.jarvis.research.SearchResult("Batteries 101", "https://ex.example/1", "s")),
+                (question, sources) -> "Use a 60V pack [1].");
+        ResearchService svc = new ResearchService(pipeline, audit, true);   // enabled
+        WebServer wired = WebServer.start(
+                AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
+                false, "m", 0, new HardwareMonitor(), null, false, null,
+                new com.jarvis.memory.InMemoryStore<>(), null, null,
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, svc));
+        try {
+            HttpResponse<String> r = post2json("http://localhost:" + wired.port() + "/research",
+                    "{\"question\":\"what battery for a go-kart?\"}");
+            assertEquals(200, r.statusCode());
+            assertTrue(r.body().contains("60V pack"));
+            assertTrue(r.body().contains("https://ex.example/1"));   // citation preserved
+            assertTrue(r.body().contains("\"index\":1"));
+            assertTrue(audit.recent(20).stream()
+                    .anyMatch(e -> e.event().action().equals("research")));
+        } finally {
+            wired.stop();
+        }
+    }
+
+    @Test
+    void researchIs503WhenDisabled() throws Exception {
+        assertEquals(503, post("/research", "{\"question\":\"x\"}").statusCode());
+    }
+
+    private HttpResponse<String> post2json(String url, String json) throws Exception {
+        return client.send(HttpRequest.newBuilder(URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(json)).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
     void semanticEndpointsRememberRecallAndReportKeywordFallback() throws Exception {
         // Dormant embeddings (no key) → keyword fallback; recall still works and mode is reported.
         SemanticMemoryService svc = new SemanticMemoryService(
@@ -357,7 +437,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, svc, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, null, null, null, svc, null, null, null));
         try {
             String b = "http://localhost:" + wired.port();
             post2(b + "/semantic",
@@ -386,7 +466,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, kb, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, null, kb, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             post2(base + "/kb",
@@ -410,7 +490,7 @@ class WebServerTest {
                 new com.jarvis.memory.InMemoryRecordStore(), api, null);
         WebServer wired = WebServer.start(api, false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, null, svc, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, null, svc, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             post2(base + "/workflows",
@@ -440,7 +520,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, null, board, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, null, board, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port() + "/tasks";
             post2(base, "{\"action\":\"create\",\"title\":\"first task\"}");
@@ -534,7 +614,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, null, meter, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, null, meter, null, null, null, null, null, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/usage"))
@@ -565,7 +645,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, null, mgr, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, null, mgr, null, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port();
             HttpResponse<String> before = client.send(
@@ -617,7 +697,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, null, null, null, checker, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, null, null, null, checker, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/update"))
@@ -661,7 +741,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(null, plugins, null, null, null, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(null, plugins, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             HttpResponse<String> r = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/tools"))
@@ -692,7 +772,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String body = client.send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + wired.port() + "/audit"))
@@ -723,7 +803,7 @@ class WebServerTest {
                 AppWiring.buildApi(null, "m", new com.jarvis.memory.InMemoryStore<>()),
                 false, "m", 0, new HardwareMonitor(), null, false, null,
                 new com.jarvis.memory.InMemoryStore<>(), null, null,
-                new AppWiring.Governance(log, null, null, null, null, null, null, null, null, null, null, null, null, null));
+                new AppWiring.Governance(log, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null));
         try {
             String base = "http://localhost:" + wired.port() + "/audit";
             HttpResponse<String> all = client.send(

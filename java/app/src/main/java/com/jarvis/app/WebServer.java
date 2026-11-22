@@ -99,6 +99,8 @@ public final class WebServer {
         AutonomousService autonomous = governance == null ? null : governance.autonomous();
         SemanticMemoryService semantic = governance == null ? null : governance.semantic();
         DiscussionService discussion = governance == null ? null : governance.discussion();
+        GreetingService greeting = governance == null ? null : governance.greeting();
+        ResearchService research = governance == null ? null : governance.research();
         Objects.requireNonNull(api, "api");
         Objects.requireNonNull(model, "model");
         byte[] page = loadDashboard();
@@ -591,6 +593,86 @@ public final class WebServer {
                 }
             }
             respond(exchange, 200, "application/json", arr.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/presence/greet", exchange -> {
+            // Feature-flagged OFF by default: 503 unless proactive greeting is explicitly enabled.
+            if (greeting == null || !greeting.enabled()) {
+                respond(exchange, 503, "text/plain",
+                        "presence greeting disabled".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            JsonNode j;
+            try (InputStream body = exchange.getRequestBody()) {
+                j = MAPPER.readTree(body);
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            com.jarvis.presence.PresenceSignal signal = new com.jarvis.presence.PresenceSignal(
+                    j.path("present").asBoolean(false),
+                    j.hasNonNull("name") ? j.path("name").asText() : null,
+                    j.path("confidence").asDouble(0),
+                    j.path("consent").asBoolean(false),
+                    j.path("privateMode").asBoolean(false));
+            com.jarvis.presence.ContextGuards guards = new com.jarvis.presence.ContextGuards(
+                    j.path("quietHours").asBoolean(false),
+                    j.path("inMeeting").asBoolean(false),
+                    j.path("doNotDisturb").asBoolean(false));
+            com.jarvis.presence.GreetingOutcome outcome = greeting.onPresence(signal, guards);
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("greeted", outcome.greeted());
+            o.put("type", outcome.type().name());
+            o.put("text", outcome.text());
+            o.put("reason", outcome.reason());
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/research", exchange -> {
+            // Feature-flagged OFF by default: 503 unless research is explicitly enabled.
+            if (research == null || !research.enabled()) {
+                respond(exchange, 503, "text/plain",
+                        "research disabled".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                respond(exchange, 405, "text/plain", "method not allowed".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            String question;
+            try (InputStream body = exchange.getRequestBody()) {
+                question = MAPPER.readTree(body).path("question").asText("").strip();
+            } catch (IOException e) {
+                respond(exchange, 400, "text/plain", "bad json".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            if (question.isBlank()) {
+                respond(exchange, 400, "text/plain", "empty question".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            com.jarvis.research.ResearchReport report;
+            try {
+                report = research.research(question);
+            } catch (Exception e) {
+                respond(exchange, 502, "text/plain",
+                        ("research failed: " + e.getMessage()).getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            ObjectNode o = MAPPER.createObjectNode();
+            o.put("question", report.question());
+            o.put("answer", report.answer());
+            ArrayNode srcs = o.putArray("sources");
+            report.sources().forEach(s -> {
+                ObjectNode so = srcs.addObject();
+                so.put("index", s.index());
+                so.put("title", s.title());
+                so.put("url", s.url());
+            });
+            respond(exchange, 200, "application/json", o.toString().getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/discussion/run", exchange -> {
