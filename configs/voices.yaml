@@ -1,0 +1,17 @@
+# ECHO Command — per-agent Kokoro voice map (agent map v3).
+# Loaded by the backend (jarvis_voice.voices). Every TTS call resolves
+# agent_id -> voice through this file. Unknown agent ids fall back to
+# default_agent; unknown VOICES are rejected by the Kokoro service itself.
+# Workers (ESTIMATOR, BIDS) are text-only by design and have no voice entry.
+
+default_agent: JARVIS
+
+agents:
+  # ECHO is the voice-route persona (apps/web `/`). It was previously absent,
+  # so every live voice turn logged voices.unknown_agent and fell back to the
+  # default — listed explicitly here, same voice, no audible change.
+  ECHO: bm_george
+  JARVIS: bm_george
+  ASSISTANT: af_bella
+  DIRECTOR: am_onyx
+  TRADER: bm_lewis

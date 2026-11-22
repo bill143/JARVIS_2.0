@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt requirements-optional.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY packages/ packages/
+COPY apps/api/ apps/api/
+
+ENV PYTHONPATH="/app/packages/agent-core:/app/packages/model-adapters:/app/packages/vision:/app/packages/voice:/app/packages/memory:/app/packages/tools:/app/packages/shared:/app/apps/api"
+
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "jarvis_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

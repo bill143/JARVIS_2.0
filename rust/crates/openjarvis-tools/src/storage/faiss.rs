@@ -273,11 +273,10 @@ fn embedding_to_bytes(embedding: &[f64]) -> Vec<u8> {
 /// Deserialize a byte slice back into a `Vec<f64>`.
 fn bytes_to_embedding(bytes: &[u8]) -> Vec<f64> {
     bytes
-        .chunks_exact(8)
-        .map(|chunk| {
-            let arr: [u8; 8] = chunk.try_into().unwrap_or([0u8; 8]);
-            f64::from_le_bytes(arr)
-        })
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|arr| f64::from_le_bytes(*arr))
         .collect()
 }
 
