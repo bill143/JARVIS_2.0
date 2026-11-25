@@ -3,9 +3,9 @@
 Stores recent query/response turns and evicts the oldest ones once the
 running token count exceeds a configured budget. This is distinct from
 ``core.types.Conversation``, which caps by message *count*; ``SessionMemory``
-caps by an approximate *token* count and pairs each turn with metadata, which
-is what context assembly (see ``tools.storage.context``) needs to budget
-against.
+caps by *token* count (see ``openjarvis.context.tokens``) and pairs each turn
+with metadata, which is what context assembly (see ``tools.storage.context``)
+needs to budget against.
 """
 
 from __future__ import annotations
@@ -17,11 +17,10 @@ from typing import Any, Dict, List, Optional
 
 
 def _count_tokens(text: str) -> int:
-    """Approximate token count via whitespace split.
+    """Count tokens with the shared counter used by every context budget."""
+    from openjarvis.context.tokens import count_tokens
 
-    Matches the convention used by ``tools.storage.context._count_tokens``.
-    """
-    return len(text.split())
+    return count_tokens(text)
 
 
 @dataclass(slots=True)

@@ -18,7 +18,7 @@ Design notes
   tests stay hermetic; :class:`LlmSummarizer` wraps any
   :class:`~openjarvis.engine._stubs.InferenceEngine` for production use.
 * **Injectable token counter** — token accounting defaults to a cheap
-  characters/4 heuristic (:func:`default_token_counter`) but any
+  shared counter (:func:`default_token_counter`, exact with tiktoken) but any
   ``Callable[[str], int]`` (e.g. a real tokenizer) can be supplied.
 """
 
@@ -38,15 +38,12 @@ from typing import (
     runtime_checkable,
 )
 
+from openjarvis.context.tokens import count_tokens
 from openjarvis.core.types import Conversation, Message, Role
 
 # Per-message structural overhead (role tag, delimiters) — mirrors the small
 # fixed cost real chat tokenizers add per message.
 _PER_MESSAGE_TOKEN_OVERHEAD = 4
-
-# Rough bytes-per-token ratio for the heuristic counter.  Four characters per
-# token is the widely-used approximation for English BPE tokenizers.
-_CHARS_PER_TOKEN = 4
 
 
 # ---------------------------------------------------------------------------
@@ -55,15 +52,13 @@ _CHARS_PER_TOKEN = 4
 
 
 def default_token_counter(text: str) -> int:
-    """Estimate the token count of *text* with a chars/4 heuristic.
+    """Count tokens in *text* with the shared :func:`count_tokens`.
 
-    This is intentionally dependency-free.  Supply a real tokenizer's
-    ``encode`` length via :class:`CompactionConfig.token_counter` when exact
-    accounting matters.
+    Exact ``cl100k_base`` counts when ``tiktoken`` is installed, otherwise a
+    dependency-free chars/4 estimate. Supply a model-specific tokenizer via
+    :class:`CompactionConfig.token_counter` to override.
     """
-    if not text:
-        return 0
-    return max(1, len(text) // _CHARS_PER_TOKEN)
+    return count_tokens(text)
 
 
 def _message_tokens(message: Message, counter: Callable[[str], int]) -> int:

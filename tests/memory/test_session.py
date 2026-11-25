@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from openjarvis.context.tokens import count_tokens
 from openjarvis.memory.session import SessionMemory
 
 
@@ -47,11 +48,12 @@ def test_metadata_is_stored():
 
 
 def test_trims_oldest_when_over_budget():
-    # "wordN" tokens: 1 token each side → each turn is 2 tokens.
-    memory = SessionMemory(max_tokens=4)
-    memory.store("word1", "word1")  # 2 tokens
-    memory.store("word2", "word2")  # +2 = 4 tokens, still fits
-    memory.store("word3", "word3")  # would be 6 tokens → oldest evicted
+    # Budget holds exactly two turns, whichever token counter is active.
+    per_turn = count_tokens("word1") * 2
+    memory = SessionMemory(max_tokens=per_turn * 2)
+    memory.store("word1", "word1")
+    memory.store("word2", "word2")  # exactly at budget, still fits
+    memory.store("word3", "word3")  # over budget → oldest evicted
 
     assert len(memory.items) == 2
     assert [i.query for i in memory.items] == ["word2", "word3"]
@@ -59,7 +61,7 @@ def test_trims_oldest_when_over_budget():
 
 def test_single_oversized_turn_can_empty_session():
     memory = SessionMemory(max_tokens=2)
-    memory.store("one two three", "four five six")  # 6 tokens > budget
+    memory.store("one two three", "four five six")  # well over 2 tokens
     assert memory.items == []
 
 

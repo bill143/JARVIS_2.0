@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List, Optional
 
+from openjarvis.context.tokens import count_tokens
 from openjarvis.core.events import EventBus, EventType
 from openjarvis.core.types import Message, Role
 from openjarvis.memory.episodic import EpisodicMemory
@@ -126,15 +127,16 @@ def test_inject_context_filters_low_score():
 
 
 def test_inject_context_respects_max_tokens():
-    # Each result has ~100 tokens, max is 150 → only 1 should be included
+    # Budget fits one result but not two, whichever token counter is active.
     content = " ".join(f"word{i}" for i in range(100))
+    per_result = count_tokens(content)
     results = [
         RetrievalResult(content=content, score=1.0, source="a.md"),
         RetrievalResult(content=content, score=0.9, source="b.md"),
     ]
     backend = _FakeMemory(results)
     messages = [Message(role=Role.USER, content="test")]
-    cfg = ContextConfig(max_context_tokens=150)
+    cfg = ContextConfig(max_context_tokens=per_result + per_result // 2)
     augmented = inject_context(
         "query",
         messages,
