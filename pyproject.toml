@@ -56,6 +56,7 @@ memory-colbert = [
     "torch>=2.0",
 ]
 memory-bge = ["FlagEmbedding>=1.2.0"]
+context-tiktoken = ["tiktoken>=0.7"]
 memory-pdf = ["pdfplumber>=0.10"]
 memory-bm25 = ["rank-bm25>=0.2.2"]
 server = [

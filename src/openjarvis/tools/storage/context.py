@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
+from openjarvis.context.tokens import count_tokens
 from openjarvis.core.events import EventType, get_event_bus
 from openjarvis.core.types import Message, Role
 from openjarvis.memory.episodic import EpisodicFact, EpisodicMemory
@@ -23,8 +24,8 @@ class ContextConfig:
 
 
 def _count_tokens(text: str) -> int:
-    """Approximate token count via whitespace split."""
-    return len(text.split())
+    """Count tokens with the shared counter used by every context budget."""
+    return count_tokens(text)
 
 
 def format_context(results: List[RetrievalResult]) -> str:
